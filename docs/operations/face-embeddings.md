@@ -28,8 +28,11 @@ by themselves: a manager confirms each grouping.
   risk on 2026-10-23; revisit it before distributing the model.
 - A crop that cannot be embedded is retried at most 5 times and fresh crops go first. Suggestions compare at most the 500 newest pending embeddings per request.
 - Measured on the host CPU: about 100 ms per crop with 2 intra-op threads.
-- The similarity threshold is `faces.DefaultSuggestionThreshold` (cosine 0.5). It is not calibrated on
-  consented crops yet; treat suggestions as hints.
+- The similarity threshold is `faces.DefaultSuggestionThreshold` (cosine 0.55). It was chosen by
+  reviewing 49 real suggestion pairs after the input fix: same-person pairs held from 0.55 up and
+  pairs below about 0.53 started mixing people. That sample covers only a few people, so it is not a
+  calibration on consented data; treat suggestions as hints. Crops that are not faces (black frames,
+  pavement) still match each other at any threshold; reject them from the Train tab.
 - Crops are resized to 112x112 without landmark alignment, which lowers accuracy for tilted faces.
 - Dismissing a suggestion in the UI lasts for the browser session only.
 - Crops and vectors are biometric data: logs carry IDs and counts only.
