@@ -396,6 +396,12 @@ type FaceErasedName struct {
 	ErasedAt    time.Time
 }
 
+type FaceIdentityGroup struct {
+	ID        uuid.UUID
+	TenantID  uuid.UUID
+	CreatedAt time.Time
+}
+
 type FacePerson struct {
 	ID           uuid.UUID
 	TenantID     uuid.UUID
@@ -475,6 +481,7 @@ type FaceSighting struct {
 	ReviewStatus    string
 	PersonID        *uuid.UUID
 	ReviewedAt      *time.Time
+	IdentityGroupID *uuid.UUID
 }
 
 type FaceWatchlist struct {

@@ -2026,6 +2026,45 @@ paths:
         "403": { $ref: "#/components/responses/Forbidden" }
         "404": { $ref: "#/components/responses/NotFound" }
         "409": { $ref: "#/components/responses/Conflict" }
+  /api/v1/faces/persons/tombstones:
+    parameters:
+      - { name: tenant_id, in: query, schema: { type: string, format: uuid } }
+    get:
+      tags: [faces]
+      operationId: listPendingFaceTombstones
+      summary: List deleted persons with owned faces pending remote cleanup (faces.manage)
+      description: Returns only the person's name and the count of live servers with pending cleanup.
+      responses:
+        "200":
+          description: Pending face tombstones
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [items]
+                properties:
+                  items:
+                    type: array
+                    items: { $ref: "#/components/schemas/FaceTombstone" }
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { $ref: "#/components/responses/NotFound" }
+  /api/v1/faces/persons/{personId}/force-purge:
+    parameters:
+      - { name: personId, in: path, required: true, schema: { type: string, format: uuid } }
+      - { name: tenant_id, in: query, schema: { type: string, format: uuid } }
+    post:
+      tags: [faces]
+      operationId: forcePurgeFaceTombstone
+      summary: Force-purge a deleted person and queue remaining remote cleanup (faces.manage)
+      description: Scrubs stored event labels and records cleanup obligations without contacting Frigate.
+      responses:
+        "204": { description: Tombstone purged; remote cleanup is queued where needed. }
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { $ref: "#/components/responses/NotFound" }
   /api/v1/faces/persons/{personId}:
     parameters:
       - { name: personId, in: path, required: true, schema: { type: string, format: uuid } }
@@ -2472,6 +2511,33 @@ paths:
         "401": { $ref: "#/components/responses/Unauthorized" }
         "403": { $ref: "#/components/responses/Forbidden" }
         "404": { $ref: "#/components/responses/NotFound" }
+  /api/v1/faces/review-inbox/groups:
+    post:
+      tags: [faces]
+      operationId: groupFaceReviewSightings
+      summary: Explicitly group pending face sightings as one identity (faces.manage)
+      description: |
+        Groups at least two pending sightings with retained crops. Existing groups are merged
+        atomically; the oldest group ID is kept so the identity ID remains stable. This action
+        records an audit entry and never uses automated similarity suggestions.
+      parameters:
+        - { name: tenant_id, in: query, schema: { type: string, format: uuid } }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/FaceReviewIdentityGroupCreate" }
+      responses:
+        "200":
+          description: Group created or merged
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/FaceReviewIdentityGroup" }
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { $ref: "#/components/responses/NotFound" }
+        "409": { $ref: "#/components/responses/Conflict" }
   /api/v1/faces/review-inbox/{sightingId}/image:
     get:
       tags: [faces]
@@ -6018,6 +6084,14 @@ components:
         first_image_id: { type: string, format: uuid, description: "Oldest enrollment image; present only in the person list, to render a card thumbnail without one request per person." }
         created_at: { type: string, format: date-time }
         updated_at: { type: string, format: date-time }
+    FaceTombstone:
+      type: object
+      required: [id, display_name, deleted_at, pending_server_count]
+      properties:
+        id: { type: string, format: uuid }
+        display_name: { type: string }
+        deleted_at: { type: string, format: date-time }
+        pending_server_count: { type: integer, minimum: 1 }
     FaceLastRecognition:
       type: object
       description: |
@@ -6222,9 +6296,11 @@ components:
         attempt_removed: { type: boolean, description: "Whether the attempt was also deleted from Frigate." }
     FaceReviewSighting:
       type: object
-      required: [id, server_id, server_name, site_id, first_seen_at, crop_available]
+      required: [id, identity_id, server_id, server_name, site_id, first_seen_at, crop_available]
       properties:
         id: { type: string, format: uuid, description: Stable opaque identity for this sighting. }
+        identity_id: { type: string, format: uuid, description: Group ID when grouped, otherwise this sighting ID. }
+        group_id: { type: string, format: uuid, nullable: true, description: Confirmed manager-created identity group, if any. }
         server_id: { type: string, format: uuid }
         server_name: { type: string }
         site_id: { type: string, format: uuid }
@@ -6239,6 +6315,22 @@ components:
       required: [items]
       properties:
         items: { type: array, items: { $ref: "#/components/schemas/FaceReviewSighting" } }
+    FaceReviewIdentityGroupCreate:
+      type: object
+      required: [sighting_ids]
+      properties:
+        sighting_ids:
+          type: array
+          minItems: 2
+          maxItems: 100
+          uniqueItems: true
+          items: { type: string, format: uuid }
+    FaceReviewIdentityGroup:
+      type: object
+      required: [group_id, member_count]
+      properties:
+        group_id: { type: string, format: uuid, description: Stable identity ID retained by the group. }
+        member_count: { type: integer, minimum: 2 }
     FaceReviewSightingAssign:
       type: object
       description: Exactly one of person_id and new_person_display_name.

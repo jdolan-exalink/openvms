@@ -605,6 +605,81 @@ func TestSyncTombstonePurgesWhenServerLostFaceCapabilityAndCleansUpLater(t *test
 	}
 }
 
+func TestForcePurgeTombstoneScrubsAndQueuesRemoteCleanup(t *testing.T) {
+	sf := newSyncFixture(t)
+	sf.setCapability(sf.h01ID, sf.h01, true)
+	sf.setCapability(sf.c01ID, sf.c01, true)
+	p := sf.person("Ana", 1)
+	sf.run()
+	if err := sf.svc.DeletePerson(context.Background(), sf.manager, sf.tenant, p.ID); err != nil {
+		t.Fatal(err)
+	}
+	// A failed delete on an enabled server and a disabled server both leave owned faces behind.
+	sf.setCapability(sf.c01ID, sf.c01, false)
+	sf.exec(`UPDATE face_server_sync SET status = 'failed', last_error = 'unreachable'
+	         WHERE person_id = $1 AND server_id IN ($2, $3)`, p.ID, sf.h01ID, sf.c01ID)
+	cam := sf.env.Cameras["frigate-h01/acceso_norte"]
+	sf.exec(`INSERT INTO events (tenant_id, site_id, server_id, camera_id, remote_id, severity, sub_labels, start_time)
+	         VALUES ($1, $2, $3, $4, 'force-purge', 'alert', $5, now())`, cam.TenantID, cam.SiteID, cam.ServerID, cam.ID, []string{p.FrigateName})
+	beforeH, beforeC := len(sf.h01.FaceCalls()), len(sf.c01.FaceCalls())
+
+	if err := sf.svc.ForcePurgeTombstone(context.Background(), sf.manager, sf.tenant, p.ID); err != nil {
+		t.Fatal(err)
+	}
+	if got := sf.scanInt(`SELECT count(*) FROM face_persons WHERE id = $1`, p.ID); got != 0 {
+		t.Fatalf("person rows after force purge = %d, want 0", got)
+	}
+	if got := sf.scanInt(`SELECT count(*) FROM events WHERE $1 = ANY(sub_labels)`, p.FrigateName); got != 0 {
+		t.Fatalf("events retaining the name after force purge = %d, want 0", got)
+	}
+	if got := sf.scanInt(`SELECT count(*) FROM face_remote_cleanup WHERE tenant_id = $1 AND frigate_name = $2`, sf.tenant, p.FrigateName); got != 2 {
+		t.Fatalf("remote cleanup obligations = %d, want both live owned servers", got)
+	}
+	if again := sf.person("Ana"); again.FrigateName == p.FrigateName {
+		t.Fatalf("new person reused Frigate name %q while cleanup is pending", p.FrigateName)
+	}
+	if got := sf.scanInt(`SELECT count(*) FROM audit_log WHERE tenant_id = $1 AND actor_id = $2 AND action = $3`, sf.tenant, sf.manager.UserID, faces.ActionPersonForcePurged); got != 1 {
+		t.Fatalf("operator force-purge audit rows = %d, want 1", got)
+	}
+	if len(sf.h01.FaceCalls()) != beforeH || len(sf.c01.FaceCalls()) != beforeC {
+		t.Fatal("force purge made a remote Frigate call")
+	}
+	if len(sf.h01.FaceLibrary()[p.FrigateName]) == 0 || len(sf.c01.FaceLibrary()[p.FrigateName]) == 0 {
+		t.Fatal("force purge deleted a remote face synchronously")
+	}
+
+	// The worker performs queued deletes only after capability returns; failures keep obligations.
+	sf.setCapability(sf.c01ID, sf.c01, true)
+	sf.run()
+	if _, ok := sf.h01.FaceLibrary()[p.FrigateName]; ok {
+		t.Fatal("enabled server cleanup did not delete the remote face")
+	}
+	if _, ok := sf.c01.FaceLibrary()[p.FrigateName]; ok {
+		t.Fatal("re-enabled server cleanup did not delete the remote face")
+	}
+	if got := sf.scanInt(`SELECT count(*) FROM face_remote_cleanup`); got != 0 {
+		t.Fatalf("remote cleanup obligations after worker pass = %d, want 0", got)
+	}
+}
+
+func TestForcePurgeTombstoneRejectsActiveAndMissingPeople(t *testing.T) {
+	sf := newSyncFixture(t)
+	active := sf.person("Active")
+	if err := sf.svc.ForcePurgeTombstone(context.Background(), sf.manager, sf.tenant, active.ID); !errors.Is(err, store.ErrNotFound) {
+		t.Fatalf("force purge active person = %v, want not found", err)
+	}
+	if err := sf.svc.ForcePurgeTombstone(context.Background(), sf.manager, sf.tenant, uuid.New()); !errors.Is(err, store.ErrNotFound) {
+		t.Fatalf("force purge missing person = %v, want not found", err)
+	}
+	viewer := sf.user(sf.tenant, "viewer", authz.FacesView)
+	if err := sf.svc.DeletePerson(context.Background(), sf.manager, sf.tenant, active.ID); err != nil {
+		t.Fatal(err)
+	}
+	if err := sf.svc.ForcePurgeTombstone(context.Background(), viewer, sf.tenant, active.ID); !errors.Is(err, access.ErrForbidden) {
+		t.Fatalf("force purge by faces.view-only actor = %v, want forbidden", err)
+	}
+}
+
 func TestSyncTombstoneWithFailedDeleteIsRetryable(t *testing.T) {
 	sf := newSyncFixture(t)
 	sf.setCapability(sf.h01ID, sf.h01, true)

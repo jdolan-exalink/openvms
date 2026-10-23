@@ -2,7 +2,8 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Plus, UserRound } from "lucide-react";
 import { type FormEvent, useState } from "react";
 import { api, type Schemas, unwrap } from "@/api/client";
-import { facePersonsQuery, faceImageUrl, meQuery } from "@/api/queries";
+import { facePersonsQuery, facePendingTombstonesQuery, faceImageUrl, meQuery } from "@/api/queries";
+import { ConfirmDialog } from "@/components/ConfirmDialog";
 import { PersonDetail } from "@/components/faces/PersonDetail";
 import { Button, Empty, ErrorNote, Field, LinkButton, TextInput, Textarea } from "@/components/ui";
 import { useT } from "@/i18n";
@@ -13,6 +14,7 @@ export function PersonsTab({ canManage }: { canManage: boolean }) {
   const t = useT();
   const qc = useQueryClient();
   const persons = useQuery(facePersonsQuery());
+  const tombstones = useQuery({ ...facePendingTombstonesQuery(), enabled: canManage });
   const me = useQuery(meQuery);
   const canPictures = can(me.data, "snapshots.view");
   const [selectedId, setSelectedId] = useState<string | null>(null);
@@ -20,6 +22,8 @@ export function PersonsTab({ canManage }: { canManage: boolean }) {
   const [creating, setCreating] = useState(false);
   const [name, setName] = useState("");
   const [notes, setNotes] = useState("");
+  const [confirmTombstone, setConfirmTombstone] = useState<Schemas["FaceTombstone"] | null>(null);
+  const [purgedTombstone, setPurgedTombstone] = useState<Schemas["FaceTombstone"] | null>(null);
 
   const create = useMutation({
     mutationFn: async (e: FormEvent) => {
@@ -32,6 +36,16 @@ export function PersonsTab({ canManage }: { canManage: boolean }) {
       setName("");
       setNotes("");
       setSelectedId(created.id);
+    },
+  });
+
+  const forcePurge = useMutation({
+    mutationFn: async (tombstone: Schemas["FaceTombstone"]) =>
+      unwrap(await api.POST("/api/v1/faces/persons/{personId}/force-purge", { params: { path: { personId: tombstone.id } } })),
+    onSuccess: async (_result, tombstone) => {
+      setPurgedTombstone(tombstone);
+      setConfirmTombstone(null);
+      await qc.invalidateQueries({ queryKey: ["faces"] });
     },
   });
 
@@ -51,6 +65,34 @@ export function PersonsTab({ canManage }: { canManage: boolean }) {
           <LinkButton to="/servers" variant="tonal">{t("faces.openServers")}</LinkButton>
         </div>
       )}
+      {canManage && purgedTombstone && (
+        <p role="status" className="rounded-m3-xl bg-ok/15 px-4 py-3 text-sm text-ok">
+          {t("faces.forcePurgeQueued")}
+        </p>
+      )}
+      {canManage && (tombstones.data?.length ?? 0) > 0 && (
+        <section aria-labelledby="faces-pending-cleanup-title" className="flex flex-col gap-3 rounded-m3-xl border border-warn/30 bg-warn/10 p-4">
+          <div>
+            <h2 id="faces-pending-cleanup-title" className="text-base font-bold">{t("faces.pendingCleanupTitle")}</h2>
+            <p className="text-sm text-on-surface-variant">{t("faces.pendingCleanupDescription")}</p>
+          </div>
+          <ErrorNote error={tombstones.error} />
+          <ul className="flex flex-col gap-2" aria-label={t("faces.pendingCleanupTitle")}>
+            {tombstones.data?.map((tombstone) => (
+              <li key={tombstone.id} className="flex flex-wrap items-center justify-between gap-3 rounded-m3-lg bg-surface-1 px-3 py-2">
+                <span className="flex flex-col">
+                  <span className="font-medium">{tombstone.display_name}</span>
+                  <span className="text-xs text-muted">{t("faces.pendingCleanupServers", { count: tombstone.pending_server_count })}</span>
+                </span>
+                <Button variant="danger" disabled={forcePurge.isPending} onClick={() => setConfirmTombstone(tombstone)}>
+                  {t("faces.forcePurge")}
+                </Button>
+              </li>
+            ))}
+          </ul>
+        </section>
+      )}
+      {canManage && tombstones.error && (tombstones.data?.length ?? 0) === 0 && <ErrorNote error={tombstones.error} />}
       <div className="flex flex-wrap items-end justify-between gap-3">
         <div className="w-full sm:max-w-sm">
           <Field label={t("faces.searchPeople")}>
@@ -104,6 +146,17 @@ export function PersonsTab({ canManage }: { canManage: boolean }) {
             </li>
           ))}
         </ul>
+      )}
+      {confirmTombstone && (
+        <ConfirmDialog
+          title={t("faces.forcePurgeTitle", { name: confirmTombstone.display_name })}
+          message={t("faces.forcePurgeMessage")}
+          confirmLabel={forcePurge.isPending ? t("faces.forcePurging") : t("faces.forcePurgeConfirm")}
+          pending={forcePurge.isPending}
+          error={forcePurge.error}
+          onConfirm={() => forcePurge.mutate(confirmTombstone)}
+          onCancel={() => setConfirmTombstone(null)}
+        />
       )}
     </div>
   );

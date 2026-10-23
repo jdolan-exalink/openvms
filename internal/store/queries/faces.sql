@@ -122,7 +122,11 @@ UPDATE face_sightings SET ingest_error = @ingest_error
 WHERE id = @id AND review_status = 'pending' AND crop_key IS NULL;
 
 -- name: ListFaceReviewSightings :many
-SELECT fs.*, s.name AS server_name, s.site_id,
+SELECT fs.id, fs.tenant_id, fs.server_id, fs.source_file, fs.source_seen_at, fs.source_label,
+       fs.source_score, fs.first_seen_at, fs.crop_key, fs.crop_content_type, fs.crop_size_bytes,
+       fs.crop_sha256, fs.ingest_error, fs.review_status, fs.person_id, fs.reviewed_at,
+       fs.identity_group_id, COALESCE(fs.identity_group_id, fs.id) AS identity_id,
+       s.name AS server_name, s.site_id,
        (fs.crop_key IS NOT NULL)::boolean AS crop_available
 FROM face_sightings fs
 JOIN frigate_servers s ON s.id = fs.server_id AND s.tenant_id = fs.tenant_id
@@ -131,6 +135,44 @@ WHERE fs.tenant_id = ANY(@tenant_ids::uuid[])
   AND (cardinality(@site_ids::uuid[]) = 0 OR s.site_id = ANY(@site_ids::uuid[]))
   AND (cardinality(@server_ids::uuid[]) = 0 OR fs.server_id = ANY(@server_ids::uuid[]))
 ORDER BY fs.source_seen_at DESC NULLS LAST, fs.first_seen_at DESC, fs.id DESC;
+
+-- name: LockFaceIdentityGroups :exec
+SELECT pg_advisory_xact_lock(hashtextextended(@tenant_id::text, 65065));
+
+-- name: GetFaceSightingsForGrouping :many
+SELECT id, review_status, crop_key, identity_group_id
+FROM face_sightings
+WHERE tenant_id = @tenant_id AND id = ANY(@sighting_ids::uuid[])
+ORDER BY id
+FOR UPDATE;
+
+-- name: GetFaceIdentityGroupsForMerge :many
+SELECT id, created_at
+FROM face_identity_groups
+WHERE tenant_id = @tenant_id AND id = ANY(@group_ids::uuid[])
+ORDER BY created_at, id
+FOR UPDATE;
+
+-- name: CreateFaceIdentityGroup :exec
+INSERT INTO face_identity_groups (id, tenant_id) VALUES (@id, @tenant_id);
+
+-- name: MoveFaceIdentityGroupMembers :exec
+UPDATE face_sightings
+SET identity_group_id = @survivor_id
+WHERE tenant_id = @tenant_id AND identity_group_id = ANY(@group_ids::uuid[]);
+
+-- name: SetFaceSightingsIdentityGroup :exec
+UPDATE face_sightings
+SET identity_group_id = @group_id
+WHERE tenant_id = @tenant_id AND id = ANY(@sighting_ids::uuid[]) AND identity_group_id IS NULL;
+
+-- name: DeleteFaceIdentityGroups :exec
+DELETE FROM face_identity_groups
+WHERE tenant_id = @tenant_id AND id = ANY(@group_ids::uuid[]);
+
+-- name: CountFaceIdentityGroupMembers :one
+SELECT count(*)::int FROM face_sightings
+WHERE tenant_id = @tenant_id AND identity_group_id = @group_id;
 
 -- name: GetFaceSighting :one
 SELECT * FROM face_sightings WHERE tenant_id = @tenant_id AND id = @id;

@@ -18,12 +18,15 @@ const (
 	ActionSightingRead     = "FACE_SIGHTING_READ"
 	ActionSightingAssigned = "FACE_SIGHTING_ASSIGNED"
 	ActionSightingRejected = "FACE_SIGHTING_REJECTED"
+	ActionIdentityGrouped  = "FACE_IDENTITY_GROUPED"
 )
 
 // ReviewSighting is one persisted, still-unclassified face attempt. Source filenames remain
 // private; ID is the stable reference used by APIs and the operator interface.
 type ReviewSighting struct {
 	ID            uuid.UUID
+	IdentityID    uuid.UUID
+	GroupID       *uuid.UUID
 	ServerID      uuid.UUID
 	ServerName    string
 	SiteID        uuid.UUID
@@ -33,6 +36,11 @@ type ReviewSighting struct {
 	FirstSeenAt   time.Time
 	CropAvailable bool
 	IngestError   string
+}
+
+type ReviewIdentityGroup struct {
+	ID          uuid.UUID
+	MemberCount int32
 }
 
 type ReviewSightingsPage struct {
@@ -72,7 +80,8 @@ func (s *Service) ListReviewSightings(ctx context.Context, actor authz.Actor, f 
 	}
 	for _, row := range rows {
 		out.Items = append(out.Items, ReviewSighting{
-			ID: row.ID, ServerID: row.ServerID, ServerName: row.ServerName, SiteID: row.SiteID,
+			ID: row.ID, IdentityID: row.IdentityID, GroupID: row.IdentityGroupID,
+			ServerID: row.ServerID, ServerName: row.ServerName, SiteID: row.SiteID,
 			SeenAt: row.SourceSeenAt, Label: row.SourceLabel, Score: row.SourceScore,
 			FirstSeenAt: row.FirstSeenAt, CropAvailable: row.CropAvailable, IngestError: row.IngestError,
 		})
@@ -88,6 +97,104 @@ func (s *Service) ListReviewSightings(ctx context.Context, actor authz.Actor, f 
 		return nil
 	})
 	return out, err
+}
+
+// GroupReviewSightings explicitly merges pending sightings into a tenant-scoped identity group.
+// Existing groups are merged into their oldest group ID, preserving that identity's stable ID.
+func (s *Service) GroupReviewSightings(ctx context.Context, actor authz.Actor, tenantID uuid.UUID, sightingIDs []uuid.UUID) (ReviewIdentityGroup, error) {
+	var result ReviewIdentityGroup
+	if len(sightingIDs) < 2 || len(sightingIDs) > 100 {
+		return result, invalid("select between 2 and 100 sightings")
+	}
+	seen := make(map[uuid.UUID]struct{}, len(sightingIDs))
+	for _, id := range sightingIDs {
+		if id == uuid.Nil {
+			return result, invalid("sighting IDs must be valid")
+		}
+		if _, ok := seen[id]; ok {
+			return result, invalid("duplicate sighting IDs are not allowed")
+		}
+		seen[id] = struct{}{}
+	}
+	err := s.tx(ctx, actor, tenantID, authz.FacesManage, func(q *db.Queries) error {
+		if err := q.LockFaceIdentityGroups(ctx, tenantID.String()); err != nil {
+			return err
+		}
+		rows, err := q.GetFaceSightingsForGrouping(ctx, db.GetFaceSightingsForGroupingParams{
+			TenantID: tenantID, SightingIds: sightingIDs,
+		})
+		if err != nil {
+			return err
+		}
+		if len(rows) != len(sightingIDs) {
+			return store.ErrNotFound
+		}
+		groupSet := make(map[uuid.UUID]struct{}, len(rows))
+		for _, row := range rows {
+			if row.ReviewStatus != "pending" {
+				return store.ErrConflict
+			}
+			if row.CropKey == nil || *row.CropKey == "" {
+				return store.ErrConflict
+			}
+			if row.IdentityGroupID != nil {
+				groupSet[*row.IdentityGroupID] = struct{}{}
+			}
+		}
+
+		var groupID uuid.UUID
+		var mergeIDs []uuid.UUID
+		if len(groupSet) == 0 {
+			groupID = uuid.New()
+			if err := q.CreateFaceIdentityGroup(ctx, db.CreateFaceIdentityGroupParams{ID: groupID, TenantID: tenantID}); err != nil {
+				return err
+			}
+		} else {
+			groupIDs := make([]uuid.UUID, 0, len(groupSet))
+			for id := range groupSet {
+				groupIDs = append(groupIDs, id)
+			}
+			groups, err := q.GetFaceIdentityGroupsForMerge(ctx, db.GetFaceIdentityGroupsForMergeParams{
+				TenantID: tenantID, GroupIds: groupIDs,
+			})
+			if err != nil {
+				return err
+			}
+			if len(groups) != len(groupIDs) {
+				return store.ErrConflict
+			}
+			groupID = groups[0].ID // Oldest group retains its stable ID during an explicit merge.
+			for _, group := range groups[1:] {
+				mergeIDs = append(mergeIDs, group.ID)
+			}
+			if len(mergeIDs) != 0 {
+				if err := q.MoveFaceIdentityGroupMembers(ctx, db.MoveFaceIdentityGroupMembersParams{
+					SurvivorID: &groupID, TenantID: tenantID, GroupIds: mergeIDs,
+				}); err != nil {
+					return err
+				}
+				if err := q.DeleteFaceIdentityGroups(ctx, db.DeleteFaceIdentityGroupsParams{TenantID: tenantID, GroupIds: mergeIDs}); err != nil {
+					return err
+				}
+			}
+		}
+
+		if err := q.SetFaceSightingsIdentityGroup(ctx, db.SetFaceSightingsIdentityGroupParams{
+			GroupID: &groupID, TenantID: tenantID, SightingIds: sightingIDs,
+		}); err != nil {
+			return err
+		}
+		count, err := q.CountFaceIdentityGroupMembers(ctx, db.CountFaceIdentityGroupMembersParams{TenantID: tenantID, GroupID: &groupID})
+		if err != nil {
+			return err
+		}
+		result = ReviewIdentityGroup{ID: groupID, MemberCount: count}
+		return s.audit(ctx, q, actor, tenantID, ActionIdentityGrouped, "face_identity_group", groupID, map[string]any{
+			"group_id": groupID, "sighting_ids": sightingIDs, "sighting_count": len(sightingIDs),
+			"member_count": count, "merged_group_ids": mergeIDs,
+		})
+	})
+	return result, err
 }
 
 // ReviewSightingImage serves a retained crop only while its sighting is pending review.

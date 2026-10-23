@@ -17,6 +17,7 @@ type Call = { method: string; path: string; search: URLSearchParams; body?: unkn
 type Backend = {
   permissions: string[];
   persons: Schemas["FacePerson"][];
+  tombstones: Schemas["FaceTombstone"][];
   images: Schemas["FaceImage"][];
   syncStatus: Schemas["FaceSyncStatus"][];
   reviewInbox: Schemas["FaceReviewInbox"];
@@ -33,7 +34,7 @@ type Backend = {
 
 function install(over: Partial<Backend> = {}) {
   const b: Backend = {
-    permissions: ["faces.view", "faces.manage"], persons: [], images: [], syncStatus: [], reviewInbox: { items: [] }, recognitions: [[]], cameras: [], fail: {}, tenantId: "t1",
+    permissions: ["faces.view", "faces.manage"], persons: [], tombstones: [], images: [], syncStatus: [], reviewInbox: { items: [] }, recognitions: [[]], cameras: [], fail: {}, tenantId: "t1",
     sites: [{ id: "s1", name: "Sede" }, { id: "s2", name: "Anexo" }], servers: [{ id: "srv1", name: "h01", site_id: "s1" }, { id: "srv2", name: "c01", site_id: "s2" }], groups: [{ id: "g1", name: "Accesos" }],
     ...over,
   };
@@ -60,6 +61,7 @@ function install(over: Partial<Backend> = {}) {
       if (p === "/api/v1/sites") return json({ items: b.sites });
       if (p === "/api/v1/servers") return json({ items: b.servers });
       if (p === "/api/v1/camera-groups") return json({ items: b.groups });
+      if (p === "/api/v1/faces/persons/tombstones" && input.method === "GET") return json({ items: b.tombstones });
       if (p === "/api/v1/faces/persons" && input.method === "GET") return json({ items: b.persons });
       if (p === "/api/v1/faces/persons" && input.method === "POST") return json(person("new", (call.body as { display_name: string }).display_name), 201);
       if (/\/images$/.test(p) && input.method === "GET") return json({ items: b.images });
@@ -70,6 +72,11 @@ function install(over: Partial<Backend> = {}) {
       if (/\/images\/[^/]+$/.test(p) && input.method === "DELETE") return new Response(null, { status: 204 });
       if (/\/sync$/.test(p)) return json({ items: b.syncStatus });
       if (/\/sync\/retry$/.test(p)) return json({ requeued: 1 });
+      if (/\/force-purge$/.test(p) && input.method === "POST") {
+        const id = p.split("/").at(-2);
+        b.tombstones = b.tombstones.filter((tombstone) => tombstone.id !== id);
+        return new Response(null, { status: 204 });
+      }
       if (/^\/api\/v1\/faces\/persons\/[^/]+$/.test(p) && input.method === "DELETE") return new Response(null, { status: 204 });
       if (/^\/api\/v1\/faces\/persons\/[^/]+$/.test(p) && input.method === "PATCH" && b.fail.patch) return json({ code: "conflict", message: "name already in use" }, b.fail.patch);
       if (/^\/api\/v1\/faces\/persons\/[^/]+$/.test(p) && input.method === "PATCH") return json({ ...b.persons[0], ...(call.body as object) });
@@ -92,6 +99,10 @@ function install(over: Partial<Backend> = {}) {
 const rec = (id: string, who: string, cam: string, personId = "p1"): Schemas["FaceRecognition"] => ({
   event_id: id, person_id: personId, person_name: who, camera_id: `cam-${cam}`, camera_name: cam, site_id: "s1", site_name: "Sitio", server_name: "h01",
   start_time: "2026-10-17T12:00:00Z", has_thumbnail: true, has_snapshot: false,
+});
+
+const tombstone = (over: Partial<Schemas["FaceTombstone"]> = {}): Schemas["FaceTombstone"] => ({
+  id: "deleted-1", display_name: "Ana", deleted_at: "2026-10-21T10:00:00Z", pending_server_count: 1, ...over,
 });
 
 describe("Faces page as a platform administrator", () => {
@@ -149,6 +160,31 @@ describe("Faces page", () => {
     renderPage(Faces);
     expect(await screen.findByText("No tienes permiso para ver el reconocimiento facial.")).toBeInTheDocument();
     expect(calls.some((c) => c.path.startsWith("/api/v1/faces"))).toBe(false);
+  });
+
+  it("lets managers discover and confirm cleanup of a pending face tombstone", async () => {
+    const { calls } = install({ tombstones: [tombstone()] });
+    renderPage(Faces);
+    expect(await screen.findByText("Limpieza de rostros pendiente")).toBeInTheDocument();
+    expect(screen.getByText("Ana")).toBeInTheDocument();
+    expect(screen.getByText("Servidores con limpieza pendiente: 1")).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "Forzar purga" }));
+    expect(await screen.findByRole("heading", { name: "¿Forzar purga de Ana?" })).toBeInTheDocument();
+    expect(calls.some((call) => call.method === "POST" && call.path.endsWith("/force-purge"))).toBe(false);
+    fireEvent.click(within(screen.getByRole("dialog")).getByRole("button", { name: "Confirmar purga" }));
+    await waitFor(() => expect(calls.some((call) => call.method === "POST" && call.path === "/api/v1/faces/persons/deleted-1/force-purge")).toBe(true));
+    expect(await screen.findByRole("status")).toHaveTextContent("Se borraron las etiquetas de los eventos. La limpieza quedó en cola hasta que los servidores vuelvan a estar disponibles.");
+    await waitFor(() => expect(calls.filter((call) => call.method === "GET" && call.path === "/api/v1/faces/persons/tombstones").length).toBeGreaterThanOrEqual(2));
+    await waitFor(() => expect(screen.queryByRole("button", { name: "Forzar purga" })).not.toBeInTheDocument());
+  });
+
+  it("does not request or show pending tombstones to a faces.view-only user", async () => {
+    const { calls } = install({ permissions: ["faces.view"], tombstones: [tombstone()] });
+    renderPage(Faces);
+    await screen.findByRole("tab", { name: "Personas" });
+    expect(screen.queryByText("Limpieza de rostros pendiente")).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Forzar purga" })).not.toBeInTheDocument();
+    expect(calls.some((call) => call.path === "/api/v1/faces/persons/tombstones")).toBe(false);
   });
 
   it("lists people, filters by search, and offers no write controls to a viewer", async () => {

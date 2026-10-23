@@ -1616,6 +1616,52 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/faces/persons/tombstones": {
+        parameters: {
+            query?: {
+                tenant_id?: string;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * List deleted persons with owned faces pending remote cleanup (faces.manage)
+         * @description Returns only the person's name and the count of live servers with pending cleanup.
+         */
+        get: operations["listPendingFaceTombstones"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/faces/persons/{personId}/force-purge": {
+        parameters: {
+            query?: {
+                tenant_id?: string;
+            };
+            header?: never;
+            path: {
+                personId: string;
+            };
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Force-purge a deleted person and queue remaining remote cleanup (faces.manage)
+         * @description Scrubs stored event labels and records cleanup obligations without contacting Frigate.
+         */
+        post: operations["forcePurgeFaceTombstone"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/faces/persons/{personId}": {
         parameters: {
             query?: {
@@ -1941,6 +1987,28 @@ export interface paths {
         get: operations["listFaceReviewInbox"];
         put?: never;
         post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/faces/review-inbox/groups": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Explicitly group pending face sightings as one identity (faces.manage)
+         * @description Groups at least two pending sightings with retained crops. Existing groups are merged
+         *     atomically; the oldest group ID is kept so the identity ID remains stable. This action
+         *     records an audit entry and never uses automated similarity suggestions.
+         */
+        post: operations["groupFaceReviewSightings"];
         delete?: never;
         options?: never;
         head?: never;
@@ -4733,6 +4801,14 @@ export interface components {
             /** Format: date-time */
             updated_at: string;
         };
+        FaceTombstone: {
+            /** Format: uuid */
+            id: string;
+            display_name: string;
+            /** Format: date-time */
+            deleted_at: string;
+            pending_server_count: number;
+        };
         /**
          * @description The person's newest sighting on a camera the caller holds events.view on. Present only in
          *     the person list, and absent when the person was never recognized there. Use the event
@@ -4946,6 +5022,16 @@ export interface components {
              * @description Stable opaque identity for this sighting.
              */
             id: string;
+            /**
+             * Format: uuid
+             * @description Group ID when grouped
+             */
+            identity_id: string;
+            /**
+             * Format: uuid
+             * @description Confirmed manager-created identity group
+             */
+            group_id?: string | null;
             /** Format: uuid */
             server_id: string;
             server_name: string;
@@ -4968,6 +5054,17 @@ export interface components {
         };
         FaceReviewInbox: {
             items: components["schemas"]["FaceReviewSighting"][];
+        };
+        FaceReviewIdentityGroupCreate: {
+            sighting_ids: string[];
+        };
+        FaceReviewIdentityGroup: {
+            /**
+             * Format: uuid
+             * @description Stable identity ID retained by the group.
+             */
+            group_id: string;
+            member_count: number;
         };
         /** @description Exactly one of person_id and new_person_display_name. */
         FaceReviewSightingAssign: {
@@ -9041,6 +9138,60 @@ export interface operations {
             409: components["responses"]["Conflict"];
         };
     };
+    listPendingFaceTombstones: {
+        parameters: {
+            query?: {
+                tenant_id?: string;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Pending face tombstones */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        items: components["schemas"]["FaceTombstone"][];
+                    };
+                };
+            };
+            400: components["responses"]["BadRequest"];
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+        };
+    };
+    forcePurgeFaceTombstone: {
+        parameters: {
+            query?: {
+                tenant_id?: string;
+            };
+            header?: never;
+            path: {
+                personId: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Tombstone purged; remote cleanup is queued where needed. */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            400: components["responses"]["BadRequest"];
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+        };
+    };
     getFacePerson: {
         parameters: {
             query?: {
@@ -9670,6 +9821,37 @@ export interface operations {
             401: components["responses"]["Unauthorized"];
             403: components["responses"]["Forbidden"];
             404: components["responses"]["NotFound"];
+        };
+    };
+    groupFaceReviewSightings: {
+        parameters: {
+            query?: {
+                tenant_id?: string;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["FaceReviewIdentityGroupCreate"];
+            };
+        };
+        responses: {
+            /** @description Group created or merged */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["FaceReviewIdentityGroup"];
+                };
+            };
+            400: components["responses"]["BadRequest"];
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+            409: components["responses"]["Conflict"];
         };
     };
     getFaceReviewSightingImage: {
