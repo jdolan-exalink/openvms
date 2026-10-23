@@ -147,10 +147,10 @@ Checked against GitHub PR state and `origin/main`; no remote host, device or dep
 8. Faces review inbox: #190 (persistence), #191 (inbox actions), #194 (runtime policy), #195 (CPU runtime), #196 (Hailo provider), #197 (Hailo Compose), #198 (HailoRT image).
 9. Closeout and trackers: #199 (outbox integration tests), #200 (faces and ONVIF reconciliation).
 
-### Still in review at the time of writing
-- #201 re-delivers identity grouping (FACE-07.3a manual grouping and its UI). The earlier #192 was closed and #193 merged into a non-`main` base, so grouping had not reached `main`.
-- #202 delivers CL-01 forced purge. Native Review approved it (lineage `review-9457fa385c4d73bb`); the queued cleanups are drained by the existing `Syncer.RunRemoteCleanups`.
-Both merge in that order: #201 then #202 (they touch the same OpenAPI and generated files).
+### Merged at the end of the closure (2026-10-23)
+- #201 re-delivered identity grouping (FACE-07.3a manual grouping and its UI). The earlier #192 was closed and #193 merged into a non-`main` base, so grouping had not reached `main` until this PR.
+- #202 delivered CL-01 forced purge. Native Review approved it (lineage `review-9457fa385c4d73bb`); the queued cleanups are drained by the existing `Syncer.RunRemoteCleanups`. `odd/tasks/closeout-2026-10.md` now marks CL-01 complete.
+Merge order was #201, then #202, because both touch the same OpenAPI and generated files.
 
 ### Moved to backlog by decision (not part of this closure)
 - ONVIF #169 (imaging options and verified writes) and #170 (snapshot retrieval through the edge agent) were closed unmerged; their work remains on `feat/onvif-imaging-options-readback` and `feat/onvif-04-snapshot-download`. Open new PRs against `main` if they are wanted.
