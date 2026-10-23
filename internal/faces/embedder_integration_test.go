@@ -47,15 +47,21 @@ func TestEmbedderStoresVectorsOnceAndRecomputesOnModelChange(t *testing.T) {
 	if n, err := emb.RunOnce(ctx, 10); err != nil || n != 0 || rt.calls != 2 {
 		t.Fatalf("second pass embedded %d (calls %d), %v; want 0 and no new inference", n, rt.calls, err)
 	}
-	if got := sf.scanInt(`SELECT count(*) FROM face_sightings WHERE tenant_id = $1 AND embedding_profile = 'cpu' AND embedding_model = 'arcface-r100-v1' AND cardinality(embedding) = 512`, sf.tenant); got != 2 {
+	if got := sf.scanInt(`SELECT count(*) FROM face_sightings WHERE tenant_id = $1 AND embedding_profile = 'cpu' AND embedding_model = 'arcface-r100-v1+in2' AND cardinality(embedding) = 512`, sf.tenant); got != 2 {
 		t.Fatalf("stored embeddings = %d, want 2", got)
+	}
+
+	// A vector stored under the bare model id predates the versioned input and must be recomputed.
+	sf.exec(`UPDATE face_sightings SET embedding_model = 'arcface-r100-v1' WHERE tenant_id = $1`, sf.tenant)
+	if n, err := emb.RunOnce(ctx, 10); err != nil || n != 2 {
+		t.Fatalf("pass over legacy model ids embedded %d, %v; want 2", n, err)
 	}
 
 	emb.ModelID = "arcface-r100-v2"
 	if n, err := emb.RunOnce(ctx, 10); err != nil || n != 2 {
 		t.Fatalf("pass after model change embedded %d, %v; want 2", n, err)
 	}
-	if got := sf.scanInt(`SELECT count(*) FROM face_sightings WHERE tenant_id = $1 AND embedding_model = 'arcface-r100-v2'`, sf.tenant); got != 2 {
+	if got := sf.scanInt(`SELECT count(*) FROM face_sightings WHERE tenant_id = $1 AND embedding_model = 'arcface-r100-v2+in2'`, sf.tenant); got != 2 {
 		t.Fatalf("recomputed embeddings = %d, want 2", got)
 	}
 }

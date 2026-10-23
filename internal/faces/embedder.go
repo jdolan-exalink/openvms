@@ -29,6 +29,13 @@ type Embedder struct {
 	Log     *slog.Logger
 }
 
+// embeddingInputVersion names the preprocessing applied before inference. It is part of the stored
+// model id, so changing how crops are fed to the model recomputes every vector instead of mixing
+// vectors that are not comparable. in2 is raw 0-255 RGB; in1 (never released as correct) fed [-1, 1].
+const embeddingInputVersion = "in2"
+
+func (e *Embedder) storedModel() string { return e.ModelID + "+" + embeddingInputVersion }
+
 // RunOnce embeds up to limit pending sightings and returns how many were stored. A crop that
 // cannot be read or embedded is skipped and reported through the returned error after the pass.
 func (e *Embedder) RunOnce(ctx context.Context, limit int) (int, error) {
@@ -46,7 +53,7 @@ func (e *Embedder) RunOnce(ctx context.Context, limit int) (int, error) {
 	if err := e.Store.Tx(ctx, store.AllTenants, func(q *db.Queries) error {
 		var err error
 		rows, err = q.ListFaceSightingsToEmbed(ctx, db.ListFaceSightingsToEmbedParams{
-			Profile: profile, Model: e.ModelID, MaxFailures: maxEmbedFailures, RowLimit: int32(limit), //nolint:gosec // bounded above.
+			Profile: profile, Model: e.storedModel(), MaxFailures: maxEmbedFailures, RowLimit: int32(limit), //nolint:gosec // bounded above.
 		})
 		return err
 	}); err != nil {
@@ -73,7 +80,7 @@ func (e *Embedder) RunOnce(ctx context.Context, limit int) (int, error) {
 		if err := e.Store.Tx(ctx, store.AllTenants, func(q *db.Queries) error {
 			var err error
 			stored, err = q.SetFaceSightingEmbedding(ctx, db.SetFaceSightingEmbeddingParams{
-				ID: row.ID, Embedding: vector, Profile: profile, Model: e.ModelID,
+				ID: row.ID, Embedding: vector, Profile: profile, Model: e.storedModel(),
 			})
 			return err
 		}); err != nil {

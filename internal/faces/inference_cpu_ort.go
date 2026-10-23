@@ -152,8 +152,10 @@ func (r *cpuEmbeddingRuntime) Close() error {
 }
 
 // preprocessArcFace112 stretches the already detected face crop to 112x112,
-// converts RGB to NCHW, and normalizes bytes to [-1, 1]. It does not align eyes;
-// callers must only use this path after the model/crop protocol is validated.
+// converts RGB to NCHW and keeps raw 0-255 byte values: the OMZ ArcFace graph subtracts the mean and
+// scales by itself, so a [-1, 1] input is normalized twice and collapses every crop onto nearly the
+// same vector. It does not align eyes; callers must only use this path after the model/crop
+// protocol is validated.
 func preprocessArcFace112(src image.Image) ([]float32, error) {
 	if src == nil || src.Bounds().Empty() {
 		return nil, errors.New("face crop is empty")
@@ -167,9 +169,9 @@ func preprocessArcFace112(src image.Image) ([]float32, error) {
 			sx := bounds.Min.X + x*bounds.Dx()/faceModelInputSize
 			r, g, b, _ := src.At(sx, sy).RGBA()
 			i := y*faceModelInputSize + x
-			out[i] = float32(r>>8)/127.5 - 1
-			out[plane+i] = float32(g>>8)/127.5 - 1
-			out[2*plane+i] = float32(b>>8)/127.5 - 1
+			out[i] = float32(r >> 8)
+			out[plane+i] = float32(g >> 8)
+			out[2*plane+i] = float32(b >> 8)
 		}
 	}
 	return out, nil
