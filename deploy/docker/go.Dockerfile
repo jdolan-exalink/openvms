@@ -81,6 +81,25 @@ RUN VERSION="${VERSION}"; \
     -o /out/app ./apps/worker \
  && CGO_ENABLED=0 go build -trimpath -ldflags "-s -w" -o /out/vmsctl ./apps/vmsctl
 
+# Optional Hailo worker variant. Compose supplies the host HailoRT SDK as the
+# named `hailo-sdk` build context; the ordinary worker target stays SDK-free.
+FROM build-worker AS build-worker-hailo
+ARG VERSION=
+ARG COMMIT=unknown
+ARG BUILD_TIME=unknown
+ARG HAILORT_LIB_SUBDIR=lib/x86_64-linux-gnu
+COPY --from=hailo-sdk /include/hailo /usr/include/hailo
+COPY --from=hailo-sdk /${HAILORT_LIB_SUBDIR}/libhailort.so* /usr/lib/
+RUN VERSION="${VERSION}"; \
+    if [ -z "$VERSION" ] || [ "$VERSION" = "dev" ]; then VERSION=$(tr -d '[:space:]' < VERSION); fi; \
+    CGO_ENABLED=1 go build -tags hailo -trimpath \
+    -ldflags "-s -w \
+      -X github.com/jdolan-exalink/openvms/internal/platform/buildinfo.Version=${VERSION} \
+      -X github.com/jdolan-exalink/openvms/internal/platform/buildinfo.Commit=${COMMIT} \
+      -X github.com/jdolan-exalink/openvms/internal/platform/buildinfo.BuildTime=${BUILD_TIME}" \
+    -o /out/app ./apps/worker \
+ && CGO_ENABLED=0 go build -trimpath -ldflags "-s -w" -o /out/vmsctl ./apps/vmsctl
+
 FROM debian:bookworm-slim AS runtime-ffmpeg
 RUN apt-get update \
  && apt-get install -y --no-install-recommends ffmpeg ca-certificates libstdc++6 \
@@ -89,6 +108,19 @@ RUN apt-get update \
 COPY --from=build-worker /out/app /app
 COPY --from=build-worker /out/vmsctl /vmsctl
 COPY --from=build-worker /opt/openvms /opt/openvms
+USER appuser
+ENTRYPOINT ["/app"]
+
+FROM debian:trixie-slim AS runtime-hailo
+RUN apt-get update \
+ && apt-get install -y --no-install-recommends ffmpeg ca-certificates libstdc++6 libusb-1.0-0 \
+ && rm -rf /var/lib/apt/lists/* \
+ && useradd --system --no-create-home --uid 10001 --shell /usr/sbin/nologin appuser
+COPY --from=build-worker-hailo /out/app /app
+COPY --from=build-worker-hailo /out/vmsctl /vmsctl
+COPY --from=build-worker-hailo /opt/openvms /opt/openvms
+COPY --from=build-worker-hailo /usr/lib/libhailort.so* /usr/lib/
+ENV LD_LIBRARY_PATH=/usr/lib
 USER appuser
 ENTRYPOINT ["/app"]
 
