@@ -33,7 +33,7 @@ The list is an initial inventory; reconcile each tracker and current code before
 
 - [x] BC-01 — Verify current mTLS/provisioning branch; capture baseline checks. Acceptance: outcomes recorded. Evidence: current branch verification at 5893d2e is recorded below; the initial baseline remains historical evidence.
 - [x] BC-02 — Reconcile stale backlog trackers and SSH provisioning/install/update checks. Local evidence and tracker reconciliation are complete; current T2 deployment and a real-host update-ssh run remain manual acceptance.
-  Status (2026-10-22): local Go build, web typecheck, T2 tests, and generated-output convergence are recorded PASS (CI-01/CI-03 evidence). The demo SSH install on `10.1.1.144` is recorded PASS in `servers-ssh-provisioning.md`; stale pending notes there are corrected. Deployment of the current T2 UI/control-plane build and a real-host `update-ssh` run remain unverified. No remote action is included in this closure; keep those acceptance checks open until the destination, operation, and credentials are explicitly authorized.
+  Status (2026-10-22): local Go build, web typecheck, T2 tests, and generated-output convergence are recorded PASS (CI-01/CI-03 evidence). The demo SSH install on `10.1.1.144` is recorded PASS in `servers-ssh-provisioning.md`; stale pending notes there are corrected. Update (2026-10-23): `main` at `bfed389` (version 0.4.0, including the T2 UI/control plane) was deployed locally on the OpenVMS host and `/health/ready` reports `ok`; UI behavior was not exercised with a real user, so UI acceptance stays open. A real-host `update-ssh` run remains unverified. No remote action is included in this closure; keep those acceptance checks open until the destination, operation, and credentials are explicitly authorized.
 - [x] BC-03 — Maps acceptance and performance. Acceptance: resolve M-W27 performance and stale M-W20/alarm S2-3b–d states against current implementation and tests; record any remaining manual/browser acceptance separately.
   Status (2026-10-22): reconciled. M-W27's earlier synthetic readings (54/57/74 ms against 50 ms) remain historical; the dedicated Maps Playwright performance job passed on candidate `b0a0997728111aa17c605ec05a6719a761b7f473` in CI run [39823706672](https://github.com/jdolan-exalink/openvms/actions/runs/39823706672/job/119987924259). `odd/tasks/maps.md` now records that evidence. M-W20's 26-camera layout versus the 16-camera scope and real-account browser/media/deployment acceptance remain explicit manual checks.
 - [ ] BC-04 — ONVIF camera management, work units 02–19. Acceptance: derive cohesive independent PR slices from `odd/tasks/onvif-camera-management.md`, preserve its requirements and per-unit verification; do not assume readiness from roadmap checkboxes.
@@ -158,7 +158,7 @@ Merge order was #201, then #202, because both touch the same OpenAPI and generat
 - Faces: automatic similarity suggestions (rest of FACE-07.3/07.4), model evaluation on consented crops (FACE-07.2), Hailo-8 inference on a real host (FACE-07.2c), the OpenVINO placement decision (FACE-07.2e) and identity-to-sighting validation for maps (FACE-07.5).
 
 ### External acceptance that stays open (needs an authorized destination, operation and credentials)
-- Deploy of the current T2 UI and control plane, and a real-host `update-ssh` run.
+- Manual UI acceptance of the current T2 build and a real-host `update-ssh` run. The build itself was deployed locally on 2026-10-23 (see "Local deploy" below).
 - Live `casa01` install or reinstall with enrollment, authenticated health and registration evidence.
 - iOS and Android standalone PWA checklist.
 - Frigate 0.17 and 0.18 acceptance for FC-5 (`odd/tasks/frigate-config-editor.md`).
@@ -167,3 +167,10 @@ Merge order was #201, then #202, because both touch the same OpenAPI and generat
 
 ### Waiting on the user
 - CL-05: the exported live-presentation JSON, to promote those views to `DEFAULT_PRESENTATIONS`.
+
+### Local deploy (2026-10-23)
+- Deployed `main` at `bfed389` (version 0.4.0) on the OpenVMS host, local only, no remote host. `/health/ready` reported `ok` for postgres, valkey, nats and object storage; `api`, `worker`, `relay` and `web` ran with 0 restarts.
+- The host was at migration 63. Migrations 00064–00068 applied in one go: rule evaluation jobs, realtime publication outbox and its aggregate order, face sightings, and face identity groups. This was the first deploy of the durable alarms and realtime outbox chain (#175–#189).
+- `make deploy` failed three times at `docker compose up`: (1) a local, gitignored `docker-compose.override.yml` bind-mounted the API CA from `web-tls/current/tls.crt`, a path that never exists because the web container uses its own certificate (`OPENVMS_WEB_TLS_CERT_FILE`); the mount duplicated `local-tls/api-ca` (same certificate fingerprint) and was removed, with the original saved outside the repo; (2)–(3) Docker Compose 2.26.1 left temp-named containers and hit name conflicts while recreating `api` and `relay` together.
+- Completed by recreating `api`, `worker`, `relay` and `web` one at a time with `docker compose up -d --no-build --no-deps --wait <service>`, then the same readiness probe as `deploy/deploy.sh`. Rollback tag `20261023T094356Z` and a Postgres dump in `.atl/deploy/20261023T094356Z/` exist.
+- Not verified: Faces grouping, forced purge and alarms behavior in the UI with a real account. `make deploy` may fail again on this Compose version until the recreate conflict is addressed.
