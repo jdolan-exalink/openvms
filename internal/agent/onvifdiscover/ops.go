@@ -304,12 +304,12 @@ func (h *OpsHandler) HandleVideoConfig(w http.ResponseWriter, r *http.Request) {
 }
 
 type ImagingRequest struct {
-	Endpoint         string                 `json:"endpoint"`
-	Username         string                 `json:"username"`
-	Password         string                 `json:"password"`
-	VideoSourceToken string                 `json:"video_source_token"`
-	Action           string                 `json:"action"` // get, set
-	Settings         *onvif.ImagingSettings `json:"settings,omitempty"`
+	Endpoint         string                       `json:"endpoint"`
+	Username         string                       `json:"username"`
+	Password         string                       `json:"password"`
+	VideoSourceToken string                       `json:"video_source_token"`
+	Action           string                       `json:"action"` // get, options, set
+	Settings         *onvif.ImagingSettingsUpdate `json:"settings,omitempty"`
 }
 
 func (h *OpsHandler) HandleImaging(w http.ResponseWriter, r *http.Request) {
@@ -354,6 +354,15 @@ func (h *OpsHandler) HandleImaging(w http.ResponseWriter, r *http.Request) {
 		}
 		w.Header().Set("Content-Type", "application/json")
 		_ = json.NewEncoder(w).Encode(map[string]any{"success": true, "settings": s})
+
+	case "options":
+		options, err := imaging.GetImagingOptions(r.Context(), req.VideoSourceToken)
+		if err != nil {
+			http.Error(w, "failed to get imaging options", http.StatusBadGateway)
+			return
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(map[string]any{"success": true, "options": options})
 
 	case "set":
 		if req.Settings == nil {

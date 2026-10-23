@@ -128,3 +128,28 @@ func TestHandleSnapshotReturnsOnlyJPEGBytes(t *testing.T) {
 		t.Fatalf("snapshot URI leaked or unexpected call counts: soap=%d snapshot=%d body=%q", soapCalls, snapshotCalls, rec.Body.String())
 	}
 }
+
+func TestHandleImagingReturnsAdvertisedOptions(t *testing.T) {
+	camera := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		body := `<s:Envelope xmlns:s="http://www.w3.org/2003/05/soap-envelope" xmlns:timg="http://www.onvif.org/ver20/imaging/wsdl" xmlns:tt="http://www.onvif.org/ver10/schema"><s:Body><timg:GetOptionsResponse><timg:ImagingOptions><tt:Brightness><tt:Min>5</tt:Min><tt:Max>95</tt:Max></tt:Brightness></timg:ImagingOptions></timg:GetOptionsResponse></s:Body></s:Envelope>`
+		w.Header().Set("Content-Type", "application/soap+xml")
+		_, _ = w.Write([]byte(body))
+	}))
+	defer camera.Close()
+
+	handler, err := NewOpsHandler("secret-agent-token", Config{AllowedCIDRs: []string{"127.0.0.0/8"}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	requestBody := `{"endpoint":"` + camera.URL + `","video_source_token":"source-1","action":"options"}`
+	req := httptest.NewRequest(http.MethodPost, "/v1/onvif/imaging", strings.NewReader(requestBody))
+	req.Header.Set("Authorization", "Bearer secret-agent-token")
+	recorder := httptest.NewRecorder()
+	handler.HandleImaging(recorder, req)
+	if recorder.Code != http.StatusOK {
+		t.Fatalf("status = %d, body=%s", recorder.Code, recorder.Body.String())
+	}
+	if !strings.Contains(recorder.Body.String(), `"brightness":{"min":5,"max":95}`) {
+		t.Errorf("response omitted advertised options: %s", recorder.Body.String())
+	}
+}
