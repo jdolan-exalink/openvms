@@ -202,8 +202,13 @@ services:
     environment:
       <<: *go-env
       HTTP_ADDR: ":8081"
+      # Central face embeddings (FACE-07.2). No weights ship in the image: drop the ONNX model in
+      # ${OPENVMS_DATA_DIR}/models/faces. The worker stays idle when the file is missing.
+      FACE_EMBEDDING_MODEL_PATH: ${FACE_EMBEDDING_MODEL_PATH:-/opt/openvms/face-models/arcfaceresnet100-8-spatial1.onnx}
+      FACE_EMBEDDING_MODEL_ID: ${FACE_EMBEDDING_MODEL_ID:-omz-arcfaceresnet100-8-spatial1}
     volumes:
       - ${OPENVMS_DATA_DIR:-/mnt/cctv/openvms}/exports:/mnt/openvms/exports
+      - ${OPENVMS_DATA_DIR:-/mnt/cctv/openvms}/models/faces:/opt/openvms/face-models:ro
     depends_on:
       api: { condition: service_started }
     restart: unless-stopped

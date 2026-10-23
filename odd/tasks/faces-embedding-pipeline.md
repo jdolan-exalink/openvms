@@ -15,8 +15,9 @@ Branch: feat/faces-embedding-pipeline. Delivery: ask-on-risk, stacked-to-main. R
 - [x] E1 — S2,S3,S5: migration + queries + `Embedder` + worker loop + config. inline
 - [x] E2 — S3,S4,S6: similarity suggestion service + API (openapi, regenerate). inline
 - [x] E3 — S4,S6: Train tab shows suggestions with confirm (reuses grouping) / dismiss. inline
-- [ ] E4 — S7: compose env, docs, deploy check with real model if available. inline
+- [x] E4 — S7: compose env, docs, deploy check with real model if available. inline
 
 ## Log
 - L1 (2026-10-23): "continuemoms con faces tenemos que dejar terminada la feacture completamente y detectando caras"
 - L2 (2026-10-23): user chose option 1: use ArcFace OMZ and assume the licence risk; model path is deployment config.
+- L3 (2026-10-23): evidence. Real OMZ ArcFace failed on ONNX Runtime 1.29 and Python ORT 1.31 ("Invalid input scale: NumDimensions() != 3", BatchNormalization spatial=0, opset 8). Patching 154 BN nodes to spatial=1 (deploy/faces/prepare-arcface-model.sh) gives 512-value vectors, deterministic (cosine 1.0), about 100 ms/crop on host CPU (TestCPUEmbeddingRealModel, skipped without env). Patched model sha384 9f2f6178e929...a952b. TDD note: E1/E2 tests were written together with the code, so RED was not observed for them; E3 RED was observed. Dismissing a suggestion is session-local (no persistence). Not done: threshold calibration on consented crops, landmark alignment, Hailo real inference, deployment.
