@@ -31,15 +31,21 @@ function AttemptCard({ attempt, persons, canManage, selected, onSelect, suggesti
   const [dismissed, setDismissed] = useState<Set<string>>(() => new Set());
   const visibleSuggestions = suggestions.filter((sug) => !dismissed.has(sug.identityId));
   const dismiss = useMutation({
-    mutationFn: ({ verdict }: { identityId: string; verdict: Verdict }) => recordVerdict("different", verdict),
+    mutationFn: (verdict: Verdict) => recordVerdict("different", verdict),
     onSuccess: () => qc.invalidateQueries({ queryKey: ["faces", "review-inbox"] }),
-    // A verdict that was not stored must not leave the suggestion hidden as if it had been.
-    onError: (_err, { identityId }) => setDismissed((current) => {
-      const next = new Set(current);
-      next.delete(identityId);
-      return next;
-    }),
   });
+  // Hiding and its rollback live together: a verdict that was not stored must not leave the
+  // suggestion hidden as if it had been, and the error stays on the card until the next attempt.
+  const dismissSuggestion = (identityId: string, verdict: Verdict) => {
+    setDismissed((current) => new Set(current).add(identityId));
+    dismiss.mutate(verdict, {
+      onError: () => setDismissed((current) => {
+        const next = new Set(current);
+        next.delete(identityId);
+        return next;
+      }),
+    });
+  };
   const assign = useMutation({
     mutationFn: async () => {
       const body = target === NEW_PERSON ? { new_person_display_name: newName.trim() } : { person_id: target };
@@ -98,10 +104,7 @@ function AttemptCard({ attempt, persons, canManage, selected, onSelect, suggesti
                 <Button variant="tonal" disabled={groupingSuggestion} onClick={() => onGroupSuggestion([attempt.id, ...sug.sightingIds], verdict)}>
                   {t("faces.groupSuggestion")}
                 </Button>
-                <Button variant="text" onClick={() => {
-                  setDismissed((current) => new Set(current).add(sug.identityId));
-                  dismiss.mutate({ identityId: sug.identityId, verdict });
-                }}>
+                <Button variant="text" onClick={() => dismissSuggestion(sug.identityId, verdict)}>
                   {t("faces.dismissSuggestion")}
                 </Button>
               </div>
