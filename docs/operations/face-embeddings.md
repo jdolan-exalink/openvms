@@ -28,7 +28,7 @@ by themselves: a manager confirms each grouping.
 
 - Licence: the Apache-2.0 model card does not settle the training-data rights. The operator accepted that
   risk on 2026-10-23; revisit it before distributing the model.
-- A crop that cannot be embedded is retried at most 5 times and fresh crops go first. Suggestions compare at most the 500 newest pending embeddings per request.
+- A crop that cannot be embedded is retried at most 5 times and fresh crops go first. Suggestions compare at most the 500 newest pending embeddings per request, and a card shows at most 5 candidates, best first.
 - Measured on the host CPU: about 100 ms per crop with 2 intra-op threads.
 - The similarity threshold is `faces.DefaultSuggestionThreshold` (cosine 0.50). It was chosen on
   aligned embeddings by looking at the crops of the 28 pairs between 0.40 and 0.56: same-person

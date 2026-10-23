@@ -102,3 +102,24 @@ func TestSuggestIdentitiesSkipsRuledOutPairsBeforeTheCap(t *testing.T) {
 		t.Fatalf("suggestions for b = %+v, want c", got[b])
 	}
 }
+
+// A card shows up to five candidates: three hid lower-scoring same-person matches when one person
+// had several close shots, and more would bury the card in suggestion blocks.
+func TestDefaultSuggestionCapPerIdentityIsFive(t *testing.T) {
+	base := uuid.New()
+	items := []embeddedSighting{{ID: base, IdentityID: base, Profile: "cpu", Model: "m1", Vector: vec(1, 0)}}
+	for i := 0; i < 7; i++ {
+		id := uuid.New()
+		cos := 0.95 - 0.02*float64(i) // 0.95, 0.93, ... 0.83
+		items = append(items, embeddedSighting{ID: id, IdentityID: id, Profile: "cpu", Model: "m1", Vector: vec(float32(cos), float32(math.Sqrt(1-cos*cos)))})
+	}
+	got := suggestIdentities(items, DefaultSuggestionThreshold, maxSuggestionPerIdentity, nil)
+	if len(got[base]) != 5 {
+		t.Fatalf("suggestions for base = %d, want 5 of the 7 matches", len(got[base]))
+	}
+	for i := 1; i < len(got[base]); i++ {
+		if got[base][i].Similarity > got[base][i-1].Similarity {
+			t.Fatalf("suggestions are not best-first: %+v", got[base])
+		}
+	}
+}
