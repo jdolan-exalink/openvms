@@ -31,6 +31,23 @@ func TestServerProvisionProjectsProgressWithoutCredentialFields(t *testing.T) {
 	}
 }
 
+func TestOnvifProbeResultProjectsProfileIdentityAndCapabilityMetadata(t *testing.T) {
+	got := onvifProbeResult(provision.OnvifProbeResult{
+		Profiles: []provision.OnvifProbeProfile{{ // #nosec G101 -- profile tokens identify stream profiles; they are not authentication credentials.
+			Token: "main", Name: "Main", Fixed: true, MediaVersion: "2.0", SourceConfigurationToken: "source-main", EncoderConfigurationToken: "encoder-main", PTZConfigurationToken: "ptz-main",
+			Encoding: "H265", Width: 2560, Height: 1440, FPS: 25, FrameRate: 25.5, Bitrate: 6144,
+			StreamURI: "rtsp://192.0.2.8/live",
+		}},
+	})
+	if got.Profiles == nil || len(*got.Profiles) != 1 {
+		t.Fatalf("profiles = %#v", got.Profiles)
+	}
+	profile := (*got.Profiles)[0]
+	if profile.Token != "main" || !profile.Fixed || profile.MediaVersion != gen.OnvifProbeProfileMediaVersion("2.0") || profile.SourceConfigurationToken != "source-main" || profile.EncoderConfigurationToken != "encoder-main" || profile.PtzConfigurationToken != "ptz-main" || profile.Encoding != "H265" || profile.Width != 2560 || profile.Height != 1440 || profile.FrameRate != 25.5 || profile.StreamUri != "rtsp://192.0.2.8/live" {
+		t.Fatalf("profile metadata = %#v", profile)
+	}
+}
+
 func TestServerAgentProjectsMetricsAndVersion(t *testing.T) {
 	outdated := true
 	view := provision.AgentView{

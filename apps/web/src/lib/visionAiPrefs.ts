@@ -9,7 +9,12 @@ export interface VisionPrefs {
   activeObjects: Record<string, boolean>;
   /** Seconds without a detection before a camera leaves the grid (birdseye-style). */
   inactivitySeconds: VisionInactivity;
+  /** Servers left unchecked; storing exclusions keeps new servers visible by default. */
+  excludedServerIds: string[];
 }
+
+/** Far more than any deployment has; it only bounds a corrupted value. */
+const MAX_EXCLUDED_SERVERS = 100;
 
 const STORAGE_PREFIX = "openvms.visionai.view.v1";
 
@@ -24,6 +29,7 @@ export const DEFAULT_VISION_PREFS: VisionPrefs = {
   layoutCount: 4,
   activeObjects: { person: true, car: true, motorcycle: true, truck: true, license_plate: true, face: true },
   inactivitySeconds: 30,
+  excludedServerIds: [],
 };
 
 export function visionPrefsKey(tenantId: string | null, userId: string): string {
@@ -33,7 +39,7 @@ export function visionPrefsKey(tenantId: string | null, userId: string): string 
 /** Validates each field on its own, so one stale value never discards the rest of the saved view. */
 export function parseVisionPrefs(raw: string | null): VisionPrefs {
   const defaults = DEFAULT_VISION_PREFS;
-  if (!raw) return { ...defaults, activeObjects: { ...defaults.activeObjects } };
+  if (!raw) return { ...defaults, activeObjects: { ...defaults.activeObjects }, excludedServerIds: [] };
   let parsed: unknown;
   try {
     parsed = JSON.parse(raw);
@@ -47,12 +53,16 @@ export function parseVisionPrefs(raw: string | null): VisionPrefs {
       if (Object.hasOwn(defaults.activeObjects, name) && typeof value === "boolean") activeObjects[name] = value;
     }
   }
+  const excluded = Array.isArray(rec.excludedServerIds)
+    ? [...new Set(rec.excludedServerIds.filter((id): id is string => typeof id === "string" && id !== ""))].slice(0, MAX_EXCLUDED_SERVERS)
+    : [];
   return {
     mode: MODES.find((m) => m === rec.mode) ?? defaults.mode,
     presetSource: SOURCES.find((s) => s === rec.presetSource) ?? defaults.presetSource,
     layoutCount: VISION_LAYOUT_COUNTS.find((n) => n === rec.layoutCount) ?? defaults.layoutCount,
     activeObjects,
     inactivitySeconds: VISION_INACTIVITY_OPTIONS.find((n) => n === rec.inactivitySeconds) ?? defaults.inactivitySeconds,
+    excludedServerIds: excluded,
   };
 }
 

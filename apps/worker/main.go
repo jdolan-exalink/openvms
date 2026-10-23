@@ -48,6 +48,7 @@ import (
 	"github.com/jdolan-exalink/openvms/internal/platform/objectstore"
 	"github.com/jdolan-exalink/openvms/internal/platform/postgres"
 	"github.com/jdolan-exalink/openvms/internal/platform/telemetry"
+	"github.com/jdolan-exalink/openvms/internal/realtime/outbox"
 	"github.com/jdolan-exalink/openvms/internal/rules"
 	"github.com/jdolan-exalink/openvms/internal/secrets"
 	"github.com/jdolan-exalink/openvms/internal/store"
@@ -114,40 +115,35 @@ func run() error {
 	}
 
 	st := &store.Store{Pool: pool}
+	dispatcher := &outbox.Dispatcher{
+		Repository: outbox.StoreRepository{Store: st},
+		Publisher:  outbox.JetStreamPublisher{JS: js},
+		Config:     outbox.Config{PollInterval: time.Second, Lease: 30 * time.Second, RetryBase: time.Second, RetryMax: time.Minute, MaxAttempts: 8, BatchSize: 32},
+		Log:        log,
+	}
+	dispatcherDone := make(chan struct{})
+	go func() {
+		defer close(dispatcherDone)
+		dispatcher.Run(ctx)
+	}()
 	inv := inventory.New(st, sealer, log)
 	adapters := inventory.NewAdapters(inv)
 	go runCameraZoneSync(ctx, inv, log)
 	go runFaceSync(ctx, &faces.Syncer{Store: st, Blobs: objects, Adapters: adapters, Log: log},
 		&faces.Service{Store: st, Blobs: objects, Log: log}, log)
+	go runFaceReviewIngestion(ctx, &faces.ReviewIngestor{Store: st, Blobs: objects, Adapters: adapters, Log: log}, log)
 
 	rulesSvc := rules.NewService(st, &jetstreamPublisher{js: js}, log)
 	rulesSvc.ZoneResolver = rules.NewStoreZoneResolver(st)
+	ruleEvaluationWorker := events.NewRuleEvaluationWorker(st, rulesSvc, log)
+	ruleEvaluationDone := make(chan struct{})
+	go func() {
+		defer close(ruleEvaluationDone)
+		ruleEvaluationWorker.Run(ctx)
+	}()
 	syncer := &events.Syncer{
 		Store: st, Adapters: adapters, Blobs: objects, Log: log,
-		Rules:    rulesSvc,
 		Interval: cfg.EventSyncInterval, Backfill: cfg.EventBackfill, Concurrency: 8,
-		OnNew: func(ctx context.Context, e events.NewEvent) {
-			data, _ := json.Marshal(e)
-			if _, err := js.Publish(ctx, "frigate.event.new."+e.TenantID.String(), data); err != nil {
-				log.WarnContext(ctx, "publish new event", "error", err)
-			}
-		},
-		OnAlarm: func(ctx context.Context, opened []events.OpenedAlarm) {
-			for _, a := range opened {
-				data, _ := json.Marshal(a)
-				if _, err := js.Publish(ctx, "alarm.opened."+a.TenantID.String(), data); err != nil {
-					log.WarnContext(ctx, "publish opened alarm", "error", err, "alarm_id", a.ID)
-				}
-			}
-		},
-		OnAlarmUpdated: func(ctx context.Context, updated []events.OpenedAlarm) {
-			for _, a := range updated {
-				data, _ := json.Marshal(a)
-				if _, err := js.Publish(ctx, "alarm.updated."+a.TenantID.String(), data); err != nil {
-					log.WarnContext(ctx, "publish updated alarm", "error", err, "alarm_id", a.ID)
-				}
-			}
-		},
 	}
 	go syncer.Run(ctx)
 
@@ -279,7 +275,19 @@ func run() error {
 	log.Info("shutting down")
 	sctx, cancel := context.WithTimeout(context.Background(), cfg.ShutdownTimeout)
 	defer cancel()
-	return srv.Shutdown(sctx)
+	shutdownErr := srv.Shutdown(sctx)
+	waitFor := func(name string, done <-chan struct{}) error {
+		select {
+		case <-done:
+			return nil
+		case <-sctx.Done():
+			return fmt.Errorf("wait for %s: %w", name, sctx.Err())
+		}
+	}
+	return errors.Join(shutdownErr,
+		waitFor("realtime outbox dispatcher", dispatcherDone),
+		waitFor("rule evaluation worker", ruleEvaluationDone),
+	)
 }
 
 func runCameraZoneSync(ctx context.Context, svc *inventory.Service, log *slog.Logger) {
@@ -313,6 +321,28 @@ func runFaceSync(ctx context.Context, syncer *faces.Syncer, svc *faces.Service, 
 			if err := svc.PurgeBlobs(ctx, 100); err != nil && ctx.Err() == nil {
 				log.WarnContext(ctx, "purge face image blobs", "error", err)
 			}
+		}
+	}
+}
+
+// runFaceReviewIngestion retains unclassified face attempts before Frigate's train retention removes them.
+func runFaceReviewIngestion(ctx context.Context, ingestor *faces.ReviewIngestor, log *slog.Logger) {
+	ticker := time.NewTicker(30 * time.Second)
+	defer ticker.Stop()
+	run := func() {
+		passCtx, cancel := context.WithTimeout(ctx, 2*time.Minute)
+		defer cancel()
+		if err := ingestor.RunOnce(passCtx, 250); err != nil && ctx.Err() == nil {
+			log.WarnContext(ctx, "ingest face review sightings", "error", err)
+		}
+	}
+	run()
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-ticker.C:
+			run()
 		}
 	}
 }

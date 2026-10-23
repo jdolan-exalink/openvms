@@ -84,16 +84,15 @@ func TestRuleAlarmsCorrelateAndStaySeparateFromEventAlarms(t *testing.T) {
 	f := newAlarmFixture(t)
 	svc := rules.NewService(f.env.Store, nopPublisher{}, pgtest.Discard())
 	svc.Debounce = time.Millisecond // let every event through the rule's firing debounce
-	f.syncer.Rules = svc
 	f.enableAt(time.Now().Add(-time.Hour))
 	f.addRule(map[string]any{"labels": []string{"zebra"}}, map[string]any{"create_alarm": true})
 
 	now := time.Now()
 	f.putLabelled("corr-rule-1", "zebra", now.Add(-3*time.Minute))
-	f.sync()
+	syncAndEvaluateRuleJobs(f, svc)
 	time.Sleep(10 * time.Millisecond)
 	f.putLabelled("corr-rule-2", "zebra", now.Add(-2*time.Minute))
-	f.sync()
+	syncAndEvaluateRuleJobs(f, svc)
 
 	if a, count, linked := f.alarmStats("rule", "zebra"); a != 1 || count != 2 || linked != 2 {
 		t.Fatalf("rule alarms=%d event_count=%d alarm_events=%d, want 1, 2, 2", a, count, linked)
@@ -143,7 +142,6 @@ func TestSyncerHonorsServerEventAlarmModeRulesOnly(t *testing.T) {
 	ctx := context.Background()
 	svc := rules.NewService(f.env.Store, nopPublisher{}, pgtest.Discard())
 	svc.Debounce = time.Millisecond
-	f.syncer.Rules = svc
 	f.enableAt(time.Now().Add(-time.Hour))
 	f.addRule(map[string]any{"labels": []string{"zebra"}}, map[string]any{"create_alarm": true})
 
@@ -158,7 +156,7 @@ func TestSyncerHonorsServerEventAlarmModeRulesOnly(t *testing.T) {
 	now := time.Now()
 	f.putLabelled("mode-ro-1", "zebra", now.Add(-2*time.Minute))
 	f.putLabelled("mode-ro-2", "giraffe", now.Add(-time.Minute))
-	f.sync()
+	syncAndEvaluateRuleJobs(f, svc)
 
 	if a, _, _ := f.alarmStats("event", "zebra"); a != 0 {
 		t.Fatalf("event alarms for zebra in rules_only mode = %d, want 0", a)

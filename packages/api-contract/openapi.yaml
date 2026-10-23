@@ -1841,6 +1841,7 @@ paths:
       parameters:
         - { name: source, in: query, schema: { $ref: "#/components/schemas/VisionAISource" } }
         - { name: layout, in: query, schema: { $ref: "#/components/schemas/VisionAILayout" } }
+        - { name: server_id, in: query, style: form, explode: true, schema: { type: array, items: { type: string, format: uuid } }, description: "Only events of these servers fill the slots; omitted or empty means every server. Each selection keeps its own allocation state." }
         - name: inactivity
           in: query
           description: Inactivity timeout in seconds; 0 keeps a camera until its maximum display time.
@@ -2491,6 +2492,80 @@ paths:
         "404": { $ref: "#/components/responses/NotFound" }
         "409": { $ref: "#/components/responses/Conflict" }
         "502": { $ref: "#/components/responses/FrigateUnreachable" }
+  /api/v1/faces/review-inbox:
+    get:
+      tags: [faces]
+      operationId: listFaceReviewInbox
+      summary: List durable unclassified face sightings (faces.view)
+      description: Returns every persisted pending sighting in scope, including items whose crop is waiting for retry.
+      parameters:
+        - { name: tenant_id, in: query, schema: { type: string, format: uuid } }
+        - { name: site_id, in: query, style: form, explode: true, schema: { type: array, items: { type: string, format: uuid } } }
+        - { name: server_id, in: query, style: form, explode: true, schema: { type: array, items: { type: string, format: uuid } } }
+      responses:
+        "200":
+          description: Pending sightings newest first
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/FaceReviewInbox" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { $ref: "#/components/responses/NotFound" }
+  /api/v1/faces/review-inbox/{sightingId}/image:
+    get:
+      tags: [faces]
+      operationId: getFaceReviewSightingImage
+      summary: Read a retained sighting crop (faces.view)
+      description: "Sensitive biometric data. Authenticated, audited, and never cached by shared clients."
+      parameters:
+        - { name: sightingId, in: path, required: true, schema: { type: string, format: uuid } }
+        - { name: tenant_id, in: query, schema: { type: string, format: uuid } }
+      responses:
+        "200":
+          description: The retained image
+          content:
+            image/*: { schema: { type: string, format: binary } }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { $ref: "#/components/responses/NotFound" }
+  /api/v1/faces/review-inbox/{sightingId}/assign:
+    post:
+      tags: [faces]
+      operationId: assignFaceReviewSighting
+      summary: Assign a sighting to a registered or new person (faces.manage)
+      parameters:
+        - { name: sightingId, in: path, required: true, schema: { type: string, format: uuid } }
+        - { name: tenant_id, in: query, schema: { type: string, format: uuid } }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/FaceReviewSightingAssign" }
+      responses:
+        "201":
+          description: Sighting assigned and its crop transferred to the person's face library
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/FaceReviewSightingAssignResult" }
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { $ref: "#/components/responses/NotFound" }
+        "409": { $ref: "#/components/responses/Conflict" }
+  /api/v1/faces/review-inbox/{sightingId}:
+    delete:
+      tags: [faces]
+      operationId: rejectFaceReviewSighting
+      summary: Reject a sighting and queue its crop for deletion (faces.manage)
+      parameters:
+        - { name: sightingId, in: path, required: true, schema: { type: string, format: uuid } }
+        - { name: tenant_id, in: query, schema: { type: string, format: uuid } }
+      responses:
+        "204": { description: Sighting rejected and crop deletion queued }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { $ref: "#/components/responses/NotFound" }
+        "409": { $ref: "#/components/responses/Conflict" }
   /api/v1/lpr/reads:
     get:
       tags: [lpr]
@@ -5276,6 +5351,26 @@ components:
         device_information: { $ref: "#/components/schemas/OnvifProbeDeviceInformation" }
         services: { type: array, maxItems: 32, items: { $ref: "#/components/schemas/OnvifProbeService" } }
         system_time: { $ref: "#/components/schemas/OnvifProbeClock" }
+        profiles: { type: array, maxItems: 32, items: { $ref: "#/components/schemas/OnvifProbeProfile" } }
+    OnvifProbeProfile:
+      type: object
+      additionalProperties: false
+      required: [token, name, fixed, media_version, source_configuration_token, encoder_configuration_token, ptz_configuration_token, encoding, width, height, fps, frame_rate, bitrate, stream_uri]
+      properties:
+        token: { type: string, maxLength: 256, description: Camera-assigned stable identity for this stream profile. }
+        name: { type: string, maxLength: 256 }
+        fixed: { type: boolean, description: Whether the device marks this profile as fixed. }
+        media_version: { type: string, enum: ["1.0", "2.0"] }
+        source_configuration_token: { type: string, maxLength: 256 }
+        encoder_configuration_token: { type: string, maxLength: 256 }
+        ptz_configuration_token: { type: string, maxLength: 256 }
+        encoding: { type: string, maxLength: 256 }
+        width: { type: integer, minimum: 0, maximum: 100000 }
+        height: { type: integer, minimum: 0, maximum: 100000 }
+        fps: { type: integer, minimum: 0, maximum: 10000, description: Integer compatibility view of the advertised frame rate. }
+        frame_rate: { type: number, minimum: 0, maximum: 10000 }
+        bitrate: { type: integer, minimum: 0, maximum: 100000000 }
+        stream_uri: { type: string, maxLength: 2048, description: RTSP URI with user information and query parameters removed. }
     OnvifProbeDeviceInformation:
       type: object
       additionalProperties: false
@@ -6172,6 +6267,38 @@ components:
         person: { $ref: "#/components/schemas/FacePerson" }
         image: { $ref: "#/components/schemas/FaceImage" }
         attempt_removed: { type: boolean, description: "Whether the attempt was also deleted from Frigate." }
+    FaceReviewSighting:
+      type: object
+      required: [id, server_id, server_name, site_id, first_seen_at, crop_available]
+      properties:
+        id: { type: string, format: uuid, description: Stable opaque identity for this sighting. }
+        server_id: { type: string, format: uuid }
+        server_name: { type: string }
+        site_id: { type: string, format: uuid }
+        first_seen_at: { type: string, format: date-time }
+        seen_at: { type: string, format: date-time, description: Best-effort time parsed from Frigate's source file name. }
+        label: { type: string, description: Best-effort label parsed from Frigate's source file name. }
+        score: { type: number, format: double }
+        crop_available: { type: boolean }
+        ingest_error: { type: string, description: Sanitized retry reason; never contains source URLs or image data. }
+    FaceReviewInbox:
+      type: object
+      required: [items]
+      properties:
+        items: { type: array, items: { $ref: "#/components/schemas/FaceReviewSighting" } }
+    FaceReviewSightingAssign:
+      type: object
+      description: Exactly one of person_id and new_person_display_name.
+      properties:
+        person_id: { type: string, format: uuid }
+        new_person_display_name: { type: string, maxLength: 120 }
+    FaceReviewSightingAssignResult:
+      type: object
+      required: [person, image, attempt_removed]
+      properties:
+        person: { $ref: "#/components/schemas/FacePerson" }
+        image: { $ref: "#/components/schemas/FaceImage" }
+        attempt_removed: { type: boolean, description: Whether Frigate's source attempt was also removed. }
     VisionAISource:
       type: string
       enum: [general, personas, vehiculos, lpr, perimetro, alarmas]

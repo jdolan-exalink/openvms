@@ -479,6 +479,13 @@ export const faceTrainQuery = (filter: FaceTrainFilter = {}) =>
     staleTime: 15_000,
   });
 
+export const faceReviewInboxQuery = (filter: FaceTrainFilter = {}) =>
+  queryOptions({
+    queryKey: ["faces", "review-inbox", filter],
+    queryFn: async () => unwrap(await api.GET("/api/v1/faces/review-inbox", { params: { query: filter } })),
+    refetchInterval: 10_000,
+  });
+
 export type FaceRecognitionFilter = {
   person_id?: string[];
   site_id?: string[];
@@ -510,3 +517,4 @@ export const faceConfigQuery = (filter: FaceConfigFilter = {}) =>
 /** Enrollment photos are served only to authorized sessions and never as public URLs. */
 export const faceImageUrl = (personId: string, imageId: string) => `/api/v1/faces/persons/${personId}/images/${imageId}`;
 export const faceTrainImageUrl = (serverId: string, file: string) => `/api/v1/faces/train/${serverId}/image?file=${encodeURIComponent(file)}`;
+export const faceReviewSightingImageUrl = (sightingId: string) => `/api/v1/faces/review-inbox/${sightingId}/image`;

@@ -61,6 +61,10 @@ let platesVisible: boolean;
 let eventsBody: unknown[];
 let platesBody: unknown[];
 let eventRequests: URL[];
+let plateRequests: URL[];
+let serversBody: unknown[];
+let sitesBody: unknown[];
+let camerasBody: unknown[];
 
 beforeEach(() => {
   localStorage.clear();
@@ -72,6 +76,10 @@ beforeEach(() => {
   eventsBody = [];
   platesBody = [];
   eventRequests = [];
+  plateRequests = [];
+  serversBody = [];
+  sitesBody = [];
+  camerasBody = [];
   serverAheadMs = 0;
   slotsBody = { slots: [slot(0, "cam-1"), slot(1, "cam-2", { object: "car", plate: "AB123CD" }), slot(2, null), slot(3, null)] };
 });
@@ -82,6 +90,9 @@ describe("VisionAI Page", () => {
       "/api/v1/me": () => json(meResponse),
       "/api/v1/events": () => json({ items: eventsBody }),
       "/api/v1/lpr/reads": () => json({ items: platesBody }),
+      "/api/v1/servers": () => json({ items: serversBody }),
+      "/api/v1/sites": () => json({ items: sitesBody }),
+      "/api/v1/cameras": () => json({ items: camerasBody }),
       "/api/v1/vision-ai/slots": () =>
         slotsStatus === 200
           ? json({ source: "general", layout: "4", generated_at: new Date(Date.now() + serverAheadMs).toISOString(), plates_visible: platesVisible, ...slotsBody })
@@ -93,6 +104,7 @@ describe("VisionAI Page", () => {
         const url = new URL(input.url);
         if (url.pathname === "/api/v1/vision-ai/slots") slotRequests.push(url);
         if (url.pathname === "/api/v1/events") eventRequests.push(url);
+        if (url.pathname === "/api/v1/lpr/reads") plateRequests.push(url);
         if (url.pathname === "/api/v1/me" && meGate) await meGate;
         return routes(input);
       }),
@@ -715,6 +727,100 @@ describe("VisionAI Page", () => {
     const overlay = await screen.findByTestId("detection-overlay");
     expect(overlay).toHaveAttribute("data-kind", "faces");
     expect(overlay).toHaveTextContent("Ana Pérez");
+  });
+
+  describe("server selector", () => {
+    const twoServers = () => {
+      sitesBody = [{ id: "site-1", tenant_id: "t1", name: "Campus" }];
+      serversBody = [
+        { id: "srv-a", tenant_id: "t1", site_id: "site-1", name: "Alfa", status: "online" },
+        { id: "srv-b", tenant_id: "t1", site_id: "site-1", name: "Beta", status: "online" },
+      ];
+      camerasBody = [
+        { id: "cam-a1", server_id: "srv-a", site_id: "site-1", display_name: "A1", enabled: true, sort_order: 0, folder_id: null },
+        { id: "cam-b1", server_id: "srv-b", site_id: "site-1", display_name: "B1", enabled: true, sort_order: 0, folder_id: null },
+        { id: "cam-b2", server_id: "srv-b", site_id: "site-1", display_name: "B2", enabled: true, sort_order: 1, folder_id: null },
+      ];
+    };
+    const openSelector = async () => {
+      fireEvent.click(await screen.findByRole("button", { name: /^Servidores/ }));
+      return screen.getByRole("group", { name: /Servidores seleccionados/i });
+    };
+
+    it("is not offered with a single server", async () => {
+      sitesBody = [{ id: "site-1", tenant_id: "t1", name: "Campus" }];
+      serversBody = [{ id: "srv-a", tenant_id: "t1", site_id: "site-1", name: "Alfa", status: "online" }];
+      camerasBody = [{ id: "cam-a1", server_id: "srv-a", site_id: "site-1", display_name: "A1", enabled: true, sort_order: 0, folder_id: null }];
+      setup();
+      await screen.findByText(/VISION AI/i);
+      expect(screen.queryByRole("button", { name: /^Servidores/ })).not.toBeInTheDocument();
+    });
+
+    it("starts with every server selected and asks for no filter", async () => {
+      twoServers();
+      setup();
+      const list = await openSelector();
+      expect(within(list).getAllByRole("checkbox").every((box) => (box as HTMLInputElement).checked)).toBe(true);
+      expect(screen.getByRole("button", { name: /^Servidores/ })).toHaveTextContent("2/2");
+      await waitFor(() => expect(slotRequests.length).toBeGreaterThan(0));
+      expect(slotRequests.every((u) => !u.searchParams.has("server_id"))).toBe(true);
+    });
+
+    it("unchecking a server limits the grid and the event lists to the others", async () => {
+      mePermissions = [...mePermissions, "lpr.view"];
+      twoServers();
+      setup();
+      const list = await openSelector();
+      fireEvent.click(within(list).getByRole("checkbox", { name: /Beta/ }));
+      await waitFor(() => expect(lastQuery()?.getAll("server_id")).toEqual(["srv-a"]));
+      expect(screen.getByRole("button", { name: /^Servidores/ })).toHaveTextContent("1/2");
+
+      fireEvent.keyDown(document, { key: "Escape" });
+      fireEvent.click(await screen.findByRole("button", { name: /^Eventos/i }));
+      const sidebar = within(await screen.findByTestId("vision-events-sidebar"));
+      fireEvent.click(sidebar.getByRole("tab", { name: "Históricos" }));
+      await waitFor(() => expect(eventRequests.some((u) => u.searchParams.getAll("server_id").join() === "srv-a")).toBe(true));
+      fireEvent.click(sidebar.getByRole("tab", { name: "LPR" }));
+      await waitFor(() => expect(plateRequests.some((u) => u.searchParams.getAll("camera_id").join() === "cam-a1")).toBe(true));
+    });
+
+    it("remembers the selection", async () => {
+      twoServers();
+      const first = setup();
+      let list = await openSelector();
+      fireEvent.click(within(list).getByRole("checkbox", { name: /Beta/ }));
+      await waitFor(() => expect(lastQuery()?.getAll("server_id")).toEqual(["srv-a"]));
+      await waitFor(() => expect(loadVisionPrefs(visionPrefsKey("t1", "u1")).excludedServerIds).toEqual(["srv-b"]));
+      first.unmount();
+      slotRequests = [];
+
+      setup();
+      list = await openSelector();
+      expect(within(list).getByRole("checkbox", { name: /Alfa/ })).toBeChecked();
+      expect(within(list).getByRole("checkbox", { name: /Beta/ })).not.toBeChecked();
+      await waitFor(() => expect(lastQuery()?.getAll("server_id")).toEqual(["srv-a"]));
+    });
+
+    it("keeps at least one server selected", async () => {
+      twoServers();
+      setup();
+      let list = await openSelector();
+      fireEvent.click(within(list).getByRole("checkbox", { name: /Beta/ }));
+      list = screen.getByRole("group", { name: /Servidores seleccionados/i });
+      expect(within(list).getByRole("checkbox", { name: /Alfa/ })).toBeDisabled();
+    });
+
+    it("shows a server added later without anyone checking it", async () => {
+      twoServers();
+      saveVisionPrefs(visionPrefsKey("t1", "u1"), { ...DEFAULT_VISION_PREFS, excludedServerIds: ["srv-b"] });
+      serversBody = [...serversBody, { id: "srv-c", tenant_id: "t1", site_id: "site-1", name: "Gama", status: "online" }];
+      camerasBody = [...camerasBody, { id: "cam-c1", server_id: "srv-c", site_id: "site-1", display_name: "C1", enabled: true, sort_order: 0, folder_id: null }];
+      setup();
+      const list = await openSelector();
+      expect(within(list).getByRole("checkbox", { name: /Gama/ })).toBeChecked();
+      expect(within(list).getByRole("checkbox", { name: /Beta/ })).not.toBeChecked();
+      await waitFor(() => expect(lastQuery()?.getAll("server_id").sort()).toEqual(["srv-a", "srv-c"]));
+    });
   });
 
   describe("events bar on the left", () => {

@@ -81,46 +81,62 @@ export function plateToView(read: Schemas["PlateRead"], canSnapshots: boolean): 
   };
 }
 
-const historyQuery = queryOptions({
-  queryKey: ["events", "vision-panel", "history", TAB_LIMIT],
-  queryFn: async () => unwrap(await api.GET("/api/v1/events", { params: { query: { limit: TAB_LIMIT } } })).items,
-  refetchInterval: TAB_REFETCH_MS,
-});
+/**
+ * Which servers a list is limited to. `serverIds` filters event lists; plate reads can only be
+ * filtered by camera, so the caller sends cameras of the selected servers. Undefined means all.
+ */
+export type ListScope = { serverIds?: readonly string[]; cameraIds?: readonly string[] };
 
-const facesQuery = queryOptions({
-  queryKey: ["events", "vision-panel", "faces", TAB_LIMIT],
-  queryFn: async () => unwrap(await api.GET("/api/v1/events", { params: { query: { label: ["face"], limit: TAB_LIMIT } } })).items,
-  refetchInterval: TAB_REFETCH_MS,
-});
+const scopeKey = (ids?: readonly string[]) => (ids && ids.length > 0 ? [...ids].sort() : null);
+const nonEmpty = <T,>(ids?: readonly T[]) => (ids && ids.length > 0 ? [...ids] : undefined);
 
-const platesQuery = queryOptions({
-  // Under ["plates"] so the realtime event.created invalidation refreshes it at once.
-  queryKey: ["plates", "vision-panel", TAB_LIMIT],
-  queryFn: async () => unwrap(await api.GET("/api/v1/lpr/reads", { params: { query: { limit: TAB_LIMIT } } })).items,
-  refetchInterval: TAB_REFETCH_MS,
-});
+const historyQuery = (scope: ListScope) =>
+  queryOptions({
+    queryKey: ["events", "vision-panel", "history", TAB_LIMIT, scopeKey(scope.serverIds)],
+    queryFn: async () => unwrap(await api.GET("/api/v1/events", { params: { query: { limit: TAB_LIMIT, server_id: nonEmpty(scope.serverIds) } } })).items,
+    refetchInterval: TAB_REFETCH_MS,
+  });
+
+const facesQuery = (scope: ListScope) =>
+  queryOptions({
+    queryKey: ["events", "vision-panel", "faces", TAB_LIMIT, scopeKey(scope.serverIds)],
+    queryFn: async () =>
+      unwrap(await api.GET("/api/v1/events", { params: { query: { label: ["face"], limit: TAB_LIMIT, server_id: nonEmpty(scope.serverIds) } } })).items,
+    refetchInterval: TAB_REFETCH_MS,
+  });
+
+const platesQuery = (scope: ListScope) =>
+  queryOptions({
+    // Under ["plates"] so the realtime event.created invalidation refreshes it at once.
+    queryKey: ["plates", "vision-panel", TAB_LIMIT, scopeKey(scope.cameraIds)],
+    queryFn: async () =>
+      unwrap(await api.GET("/api/v1/lpr/reads", { params: { query: { limit: TAB_LIMIT, camera_id: nonEmpty(scope.cameraIds) } } })).items,
+    refetchInterval: TAB_REFETCH_MS,
+  });
 
 /** How many plate reads the LPR mode lists. */
 export const LPR_MODE_LIMIT = 100;
 
-const lprModeQuery = queryOptions({
-  // Under ["plates"] so the realtime event.created invalidation refreshes it at once.
-  queryKey: ["plates", "vision-lpr", LPR_MODE_LIMIT],
-  queryFn: async () => unwrap(await api.GET("/api/v1/lpr/reads", { params: { query: { limit: LPR_MODE_LIMIT } } })).items,
-  refetchInterval: TAB_REFETCH_MS,
-});
+const lprModeQuery = (scope: ListScope) =>
+  queryOptions({
+    // Under ["plates"] so the realtime event.created invalidation refreshes it at once.
+    queryKey: ["plates", "vision-lpr", LPR_MODE_LIMIT, scopeKey(scope.cameraIds)],
+    queryFn: async () =>
+      unwrap(await api.GET("/api/v1/lpr/reads", { params: { query: { limit: LPR_MODE_LIMIT, camera_id: nonEmpty(scope.cameraIds) } } })).items,
+    refetchInterval: TAB_REFETCH_MS,
+  });
 
 /** The plate reads the LPR mode lists, newest first, as event views. Nothing is fetched while disabled. */
-export function usePlateReads(canSnapshots: boolean, enabled: boolean) {
-  const q = useQuery({ ...lprModeQuery, enabled });
+export function usePlateReads(canSnapshots: boolean, enabled: boolean, scope: ListScope = {}) {
+  const q = useQuery({ ...lprModeQuery(scope), enabled });
   return { views: (q.data ?? []).map((r) => plateToView(r, canSnapshots)), loading: enabled && q.isPending, error: q.isError };
 }
 
 /** Rows of a tab other than "active"; nothing is fetched until the tab is open. */
-export function useTabEvents(tab: EventsTab, canSnapshots: boolean) {
-  const history = useQuery({ ...historyQuery, enabled: tab === "history" });
-  const faces = useQuery({ ...facesQuery, enabled: tab === "faces" });
-  const plates = useQuery({ ...platesQuery, enabled: tab === "lpr" });
+export function useTabEvents(tab: EventsTab, canSnapshots: boolean, scope: ListScope = {}) {
+  const history = useQuery({ ...historyQuery(scope), enabled: tab === "history" });
+  const faces = useQuery({ ...facesQuery(scope), enabled: tab === "faces" });
+  const plates = useQuery({ ...platesQuery(scope), enabled: tab === "lpr" });
   if (tab === "history") return { views: (history.data ?? []).map((e) => eventToView(e, canSnapshots)), loading: history.isPending, error: history.isError };
   if (tab === "faces") return { views: (faces.data ?? []).map((e) => eventToView(e, canSnapshots)), loading: faces.isPending, error: faces.isError };
   if (tab === "lpr") return { views: (plates.data ?? []).map((r) => plateToView(r, canSnapshots)), loading: plates.isPending, error: plates.isError };

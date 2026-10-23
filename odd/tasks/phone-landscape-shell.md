@@ -18,8 +18,8 @@ Strict TDD (user global config); runner `cd apps/web && pnpm exec vitest run <fi
 ## Tasks
 - [x] PLS-01 — Swipe pointer leak fix. Commit `8a62920`; rollback boundary: revert that commit. Route: delegated direct.
 - [x] PLS-02 — Phone shell stays mobile in landscape. Commit `f7b2b20`; rollback boundary: revert that commit. Route: delegated direct.
-- [ ] PLS-03 — Review, PR, CI, merge, deploy web.
-  Status (2026-10-21): review, PR, CI and merge are done: PR #74 merged 2026-10-17 as `092a343`, all checks SUCCESS. Left unchecked because the web deploy step has no evidence in this tracker and needs explicit user authorization.
+- [x] PLS-03 — Review, PR, CI, merge. PR #74 merged 2026-10-17 as `092a343252dc11421eef969f998884fb9436a100`.
+  Status (2026-10-22): PR #74 is closed and merged; review, CI, and merge are complete. Web deployment remains pending separate user authorization.
 
 ## Progress
 - 2026-10-17: branch `fix/phone-landscape-shell` from `origin/main` (`a578c6b`).

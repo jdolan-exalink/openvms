@@ -70,6 +70,45 @@ type VideoEncoder2Options struct {
 	Quality           FloatRange
 }
 
+// Media2Profile preserves a stream profile's identity and supported configuration metadata.
+type Media2Profile struct {
+	Token                     string                      `xml:"token,attr"`
+	Fixed                     bool                        `xml:"fixed,attr"`
+	Name                      string                      `xml:"http://www.onvif.org/ver10/schema Name"`
+	VideoSourceConfiguration  *VideoSourceConfiguration   `xml:"http://www.onvif.org/ver10/schema VideoSourceConfiguration"`
+	VideoEncoderConfiguration *VideoEncoder2Configuration `xml:"http://www.onvif.org/ver10/schema VideoEncoderConfiguration"`
+	PTZConfiguration          *PTZConfiguration           `xml:"http://www.onvif.org/ver10/schema PTZConfiguration"`
+}
+
+func (m *Media2Client) GetProfiles(ctx context.Context) ([]Media2Profile, error) {
+	data, err := m.call(ctx, "GetProfiles", "", ReadOnly)
+	if err != nil {
+		return nil, err
+	}
+	var response struct {
+		Profiles []Media2Profile `xml:"http://www.onvif.org/ver20/media/wsdl Profiles"`
+	}
+	if err := decodeNamespacedOperation(data, media2Namespace, "GetProfilesResponse", &response); err != nil {
+		return nil, &CallError{Status: StatusFailed, Code: "invalid_profiles"}
+	}
+	return response.Profiles, nil
+}
+
+func (m *Media2Client) GetStreamURI(ctx context.Context, profileToken string) (string, error) {
+	content := `<tr2:Protocol>RTSP</tr2:Protocol><tr2:ProfileToken>` + escapeXML(profileToken) + `</tr2:ProfileToken>`
+	data, err := m.call(ctx, "GetStreamUri", content, ReadOnly)
+	if err != nil {
+		return "", err
+	}
+	var response struct {
+		URI string `xml:"http://www.onvif.org/ver20/media/wsdl Uri"`
+	}
+	if err := decodeNamespacedOperation(data, media2Namespace, "GetStreamUriResponse", &response); err != nil {
+		return "", &CallError{Status: StatusFailed, Code: "invalid_stream_uri"}
+	}
+	return response.URI, nil
+}
+
 func (m *Media2Client) GetVideoEncoderConfigurations(ctx context.Context) ([]VideoEncoder2Configuration, error) {
 	data, err := m.call(ctx, "GetVideoEncoderConfigurations", "", ReadOnly)
 	if err != nil {

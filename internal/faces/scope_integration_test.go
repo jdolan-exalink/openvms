@@ -24,6 +24,19 @@ type foreignWorld struct {
 	event                               uuid.UUID
 }
 
+func auditDetailInt(sf *syncFixture, action string, tenantID uuid.UUID, afterID int, key string) int {
+	return sf.scanInt(`SELECT COALESCE((
+		SELECT (details ->> $4)::int FROM audit_log
+		WHERE id > $3 AND action = $1 AND tenant_id = $2
+		ORDER BY id DESC LIMIT 1
+	), -1)`, action, tenantID, afterID, key)
+}
+
+func auditRowsAfter(sf *syncFixture, action string, tenantID uuid.UUID, afterID int) int {
+	return sf.scanInt(`SELECT count(*) FROM audit_log WHERE id > $1 AND action = $2 AND tenant_id = $3`,
+		afterID, action, tenantID)
+}
+
 func (sf *syncFixture) foreignWorld(personName string) foreignWorld {
 	sf.t.Helper()
 	w := foreignWorld{tenant: sf.otherTenant(), site: uuid.New(), server: uuid.New(), camera: uuid.New(), group: uuid.New()}
@@ -56,6 +69,7 @@ func TestRecognitionsWithoutTenantAreScopedBySiteServerGroupAndCamera(t *testing
 	w := sf.foreignWorld("Bea")
 
 	// A platform administrator needs no tenant and sees every tenant it may see.
+	readAuditStart := sf.scanInt(`SELECT COALESCE(max(id), 0) FROM audit_log WHERE action = $1`, faces.ActionRecognitionsRead)
 	all, err := sf.svc.ListRecognitions(ctx, sf.env.Admin, faces.RecognitionFilter{})
 	if err != nil || len(all.Items) != 2 {
 		t.Fatalf("admin without tenant = %+v, %v; want both tenants", all.Items, err)
@@ -63,6 +77,29 @@ func TestRecognitionsWithoutTenantAreScopedBySiteServerGroupAndCamera(t *testing
 	names := map[string]bool{all.Items[0].PersonName: true, all.Items[1].PersonName: true}
 	if !names["Ana"] || !names["Bea"] {
 		t.Fatalf("admin sees names %v", names)
+	}
+	for tenantID, want := range map[uuid.UUID]int{sf.tenant: 1, w.tenant: 1} {
+		if rows := auditRowsAfter(sf, faces.ActionRecognitionsRead, tenantID, readAuditStart); rows != 1 {
+			t.Errorf("recognition audit rows for tenant %s = %d, want one", tenantID, rows)
+		}
+		if count := auditDetailInt(sf, faces.ActionRecognitionsRead, tenantID, readAuditStart, "count"); count != want {
+			t.Errorf("recognition audit count for tenant %s = %d, want %d", tenantID, count, want)
+		}
+	}
+
+	// A filtered multi-tenant search still audits the tenant with no matching rows.
+	readAuditStart = sf.scanInt(`SELECT COALESCE(max(id), 0) FROM audit_log WHERE action = $1`, faces.ActionRecognitionsRead)
+	filtered, err := sf.svc.ListRecognitions(ctx, sf.env.Admin, faces.RecognitionFilter{SiteIDs: []uuid.UUID{w.site}})
+	if err != nil || len(filtered.Items) != 1 || filtered.Items[0].EventID != w.event {
+		t.Fatalf("filtered multi-tenant recognitions = %+v, %v", filtered.Items, err)
+	}
+	for tenantID, want := range map[uuid.UUID]int{sf.tenant: 0, w.tenant: 1} {
+		if rows := auditRowsAfter(sf, faces.ActionRecognitionsRead, tenantID, readAuditStart); rows != 1 {
+			t.Errorf("filtered recognition audit rows for tenant %s = %d, want one", tenantID, rows)
+		}
+		if count := auditDetailInt(sf, faces.ActionRecognitionsRead, tenantID, readAuditStart, "count"); count != want {
+			t.Errorf("filtered recognition audit count for tenant %s = %d, want %d", tenantID, count, want)
+		}
 	}
 
 	cases := map[string]struct {
@@ -108,13 +145,39 @@ func TestTrainAttemptsListEveryVisibleServerAndFilterBySiteAndServer(t *testing.
 	sf.setCapability(sf.h01ID, sf.h01, true)
 	sf.h01.AddFaceTrainImage(trainFile, pngOf(t, 9))
 
+	readAuditStart := sf.scanInt(`SELECT COALESCE(max(id), 0) FROM audit_log WHERE action = $1`, faces.ActionTrainRead)
 	all, err := sf.svc.ListTrainAttempts(ctx, sf.env.Admin, faces.TrainFilter{})
 	if err != nil || len(all.Servers) != 2 || len(all.Attempts) != 1 {
 		t.Fatalf("admin train list = %+v, %v; want both tenants' servers", all, err)
 	}
+	for tenantID, want := range map[uuid.UUID][2]int{sf.tenant: {1, 1}, w.tenant: {1, 0}} {
+		if rows := auditRowsAfter(sf, faces.ActionTrainRead, tenantID, readAuditStart); rows != 1 {
+			t.Errorf("train audit rows for tenant %s = %d, want one", tenantID, rows)
+		}
+		if servers := auditDetailInt(sf, faces.ActionTrainRead, tenantID, readAuditStart, "servers"); servers != want[0] {
+			t.Errorf("train audit server count for tenant %s = %d, want %d", tenantID, servers, want[0])
+		}
+		if attempts := auditDetailInt(sf, faces.ActionTrainRead, tenantID, readAuditStart, "attempts"); attempts != want[1] {
+			t.Errorf("train audit attempt count for tenant %s = %d, want %d", tenantID, attempts, want[1])
+		}
+	}
+
+	// A server filter may leave an authorized tenant with no matching server; it still gets a zero audit.
+	readAuditStart = sf.scanInt(`SELECT COALESCE(max(id), 0) FROM audit_log WHERE action = $1`, faces.ActionTrainRead)
 	bySite, err := sf.svc.ListTrainAttempts(ctx, sf.env.Admin, faces.TrainFilter{SiteIDs: []uuid.UUID{w.site}})
 	if err != nil || len(bySite.Servers) != 1 || bySite.Servers[0].ServerID != w.server {
 		t.Fatalf("site filter = %+v, %v", bySite.Servers, err)
+	}
+	for tenantID, want := range map[uuid.UUID][2]int{sf.tenant: {0, 0}, w.tenant: {1, 0}} {
+		if rows := auditRowsAfter(sf, faces.ActionTrainRead, tenantID, readAuditStart); rows != 1 {
+			t.Errorf("filtered train audit rows for tenant %s = %d, want one", tenantID, rows)
+		}
+		if servers := auditDetailInt(sf, faces.ActionTrainRead, tenantID, readAuditStart, "servers"); servers != want[0] {
+			t.Errorf("filtered train server count for tenant %s = %d, want %d", tenantID, servers, want[0])
+		}
+		if attempts := auditDetailInt(sf, faces.ActionTrainRead, tenantID, readAuditStart, "attempts"); attempts != want[1] {
+			t.Errorf("filtered train attempt count for tenant %s = %d, want %d", tenantID, attempts, want[1])
+		}
 	}
 	byServer, err := sf.svc.ListTrainAttempts(ctx, sf.env.Admin, faces.TrainFilter{ServerIDs: []uuid.UUID{sf.h01ID}})
 	if err != nil || len(byServer.Servers) != 1 || len(byServer.Attempts) != 1 {

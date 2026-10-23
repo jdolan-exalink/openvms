@@ -17,7 +17,7 @@ Deliver capability-driven ONVIF agent/API management, safe Frigate sync and audi
 - **Outcome:** capability-driven ONVIF discovery/configuration and safe Frigate lifecycle across media, imaging, time/network, PTZ/audio and events.
 - **Scope:** agent/API/UI with fakes; SSH/physical operations need separate destination, operation and credential authorization.
 - **Safety:** stable IDs/tombstones; encrypted write-only secrets; bounded audited/read-back mutations; preserve recordings, confirm discard, no factory reset.
-- **Delivery/TDD:** `ask-on-risk`, approved `stacked-to-main`; no push/PR/merge. Conventional commits include tests/docs. Strict RED/GREEN/REFACTOR must be observed; 400 lines advisory only.
+- **Delivery/TDD:** `auto-chain`, `stacked-to-main`. The user authorized local backlog implementation and PR delivery through the configured GitHub session for this closeout; remote device/host operations remain separately gated. Conventional commits include tests/docs. Strict RED/GREEN/REFACTOR must be observed; 400 lines advisory only.
 
 ## Baseline and current state
 
@@ -34,16 +34,21 @@ Implement in dependency order. Each delegated work unit closes with checks, Conv
 - [x] **ONVIF-01 — Mocked ONVIF foundation and bounded transport.** Establish protocol/client abstractions, device endpoint discovery inputs, bounded connection/read/write timeouts and retries, structured errors, and deterministic mocks. No physical camera access. RED/GREEN/REFACTOR evidence required. Rollback: remove the isolated foundation and its tests.
 - [ ] **ONVIF-02 — Core discovery and device information.** Discover devices/services and read device information through the agent; expose API results without leaking credentials; map discovered devices to stable VMS identity.
   - [x] Credential-free Cameras-route discovery UI slice: managed-server and explicit-interface selection, API relay request, safe endpoint list, pending/empty/error states; devices are clearly not yet added. Focused UI and full web-suite proof recorded below. This does not complete ONVIF-02.
-- [ ] **ONVIF-03 — Media2 with Media1 fallback and profiles.** Discover Media2 first where supported, fall back to Media1, enumerate streams/profiles and preserve profile identity/capability metadata.
+  - [x] Stable identity guard: auto-match only an exact known ONVIF endpoint scoped to the selected server; host/name resemblance no longer binds a discovered endpoint. Explicit camera UUID selection remains available. Focused regression tests pass; physical camera acceptance remains open.
+- [x] **ONVIF-03 — Media2 with Media1 fallback and profiles.** Core implementation (`c28715b`, credential-path fix `8d92cdb`) and API relay/schema slice (`43b3cca`) are delivered through PRs #163/#164 (both merged: `e82ac06`, `6ba0782`). Media2 is preferred, unsupported operations fall back to Media1, profile metadata is retained, and credential-bearing URIs including percent-encoded path credentials are omitted. Physical-camera interoperability remains open.
 - [ ] **ONVIF-04 — Snapshot and stream source management.** Retrieve snapshots and represent stream URIs/options safely; redact credential-bearing URIs and avoid persisting derived secrets in logs or browser state.
+  - [x] Media1 snapshot-URI lookup primitive for a selected profile delivered in #167 (`9bb1f27`). Authenticated image retrieval, transport policy, and stream-source handling remain open.
+  - [x] Authenticated snapshot image retrieval through the edge agent is implemented in #170 (`b871ae4`); CI is green. PR merge is waiting on the explicitly requested size exception. Stream-source handling and physical-camera acceptance remain open.
 - [ ] **ONVIF-05 — Add, edit, delete, manifest, and health.** Implement camera manifest/state reconciliation and CRUD through API/agent; synchronize Frigate additions/edits/removals; retain stable IDs and deletion tombstones to prevent reimport. Health/readiness surfaces device and protocol state. Delete preserves recordings by default; discard requires explicit confirmation and must fail closed if the disposition is missing/invalid. Never factory-reset a device.
 
 ### Phase 2 — Physical imaging, video, time, network, and audit
 
 - [ ] **ONVIF-06 — Capability-driven imaging/video reads and writes.** Enumerate operations/options per device, expose only supported settings, validate ranges, and read back every write before reporting success.
+  - [x] Imaging options, range validation, and matching readback are implemented in #169 (`43f965f`); CI is green. PR merge is waiting on the explicitly requested size exception. Broader video configuration and physical-camera acceptance remain open.
 - [ ] **ONVIF-07 — Time configuration and verification.** Read/set supported time/NTP/timezone settings through explicit operations; verify by readback and audit before/after state without storing secrets.
 - [ ] **ONVIF-08 — Network configuration and safety.** Enumerate supported network controls, validate operation-specific input, require bounded confirmation where connectivity may be disrupted, and never assume the device remains reachable.
 - [ ] **ONVIF-09 — Mutation audit and failure recovery.** Persist actor, target stable ID, operation, redacted request/result, readback, timestamps, and outcome; retry only within bounded policy and avoid blind replay of non-idempotent operations.
+  - [x] Current time sync, PTZ, video configuration/encoding, and imaging writes record an append-only intent and correlated terminal event with camera/server IDs, operation ID, timestamp, status, and sanitized unknown-outcome category. No automatic retry; callers are directed to manual reconciliation. Store layer (#171, merge `9913115`) and API wiring (#172, merge `d7f7c8c`) are merged; all CI checks passed after the remote-error redaction fix. See `odd/tasks/onvif-mutation-audit.md`. Broader request/result/readback evidence and physical-device acceptance remain open.
 
 ### Phase 3 — PTZ, presets, tours, focus, and fisheye/dewarp
 
@@ -78,7 +83,7 @@ Implement in dependency order. Each delegated work unit closes with checks, Conv
 ## Delivery and progress record
 
 - Delivery is `ask-on-risk` / user-approved `stacked-to-main`; no push/PR/merge authorized.
-- ONVIF-02 remains partial: device reads/WSSE/discovery, TLS, probe relay/UI exist; persistence, stable VMS identity and live validation remain. Parent commits `712b56d`, `daafa0d`; planning `134a319`; review boundary `19315be`; later candidates declined.
+- ONVIF-02 remains partial: device reads/WSSE/discovery, TLS, probe relay/UI exist; persistence and physical camera acceptance remain. Discovery identity now uses only an exact known endpoint or explicit camera UUID selection. Parent commits `712b56d`, `daafa0d`; planning `134a319`; review boundary `19315be`; later candidates declined.
 - Per unit record RED/GREEN/REFACTOR, checks/harness, rollback, commit/lines and review boundary; no behavior/tests omitted to hit advisory 400 lines.
 - Next: register agent with an authenticated actor; probe is not persistence.
 
@@ -199,6 +204,7 @@ Historical work-unit snapshots; current readiness is above. Exact Go runner: `GO
 | Unit/status | Observed RED → GREEN | Scope/rollback/commit |
 |---|---|---|
 | ONVIF-01 foundation — complete | RED missing parser/client/config APIs; protocol tests caught SOAP action and HTTP 500 fault handling. Focused/race/full Go PASS. | `internal/onvif/client.go`; remove files/tests. Commit `19cbca2`, 375 lines; medium, under budget, no approval claimed. |
+| ONVIF-04 Media1 snapshot URI primitive — partial | RED: `GOCACHE=/tmp/openvms-go-build-cache go test -count=1 ./internal/onvif -run '^TestMediaClientGetSnapshotURI$'` failed to compile because `GetSnapshotURI` was absent. GREEN: `GOCACHE=/tmp/openvms-go-build-cache go test -count=1 ./internal/onvif` PASS; `git diff --check` PASS. Fake SOAP verifies Media1 action, XML-escaped profile token, existing `MediaURI` decoding, and malformed-operation rejection. | `internal/onvif/media.go` + `media_test.go`; code commit `6a5f239`. Rollback removes `GetSnapshotURI` and its test. Runtime harness N/A: this is a read-only SOAP primitive exercised with injected fake transport; returned device URI is not followed, persisted, or exposed. No camera/network access. ONVIF-04 snapshot retrieval, Media2, source management/UI, and physical acceptance remain open. |
 | ONVIF-02 device protocol — partial | RED missing device client/service; fixed namespace-wrapper decoding. Focused/race/full Go PASS. | `device.go`/tests + wrapper change; revert these only. XAddrs are validated, never automatically followed. |
 | ONVIF-02b WSSE — partial | RED absent credential/nonce/time injection. GREEN tests digest order/vector, XML escaping, no plaintext, mustUnderstand, retry nonce, RNG failure/no request, redaction; focused/race/full PASS. | Revert auth-only change; preserve `19315be`. SHA-1 is protocol-required, not storage/confidentiality. |
 | Transport reliability — partial | Focused/race/full PASS after gofmt; transient 5xx and read-only retry policy. | Revert isolated transport/tests; ONVIF-02 incomplete. |

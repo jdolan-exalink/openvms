@@ -4,7 +4,7 @@ import type { ReactNode } from "react";
 import { LabelPicker } from "@/components/frigate/LabelPicker";
 import type { FormCtx } from "@/components/frigate/SchemaForm";
 import { Button, Checkbox, Select, Switch as UiSwitch, TextInput } from "@/components/ui";
-import { getIn, type JSchema, resolve, schemaAt, setIn } from "@/lib/frigateSchema";
+import { getIn, humanizeKey, isSecretPath, kindOf, type JSchema, resolve, schemaAt, setIn } from "@/lib/frigateSchema";
 import { labelDisplay } from "@/lib/labelEmoji";
 
 type Path = (string | number)[];
@@ -350,8 +350,59 @@ function Zones({ onEditZones, readOnly }: { onEditZones?: () => void; readOnly: 
   );
 }
 
+const schemaPanelTitles: Record<string, string> = {
+  autotracking: "Seguimiento automático",
+  face_recognition: "Reconocimiento facial",
+  genai: "IA generativa",
+};
+
+/** Show this section's schema-defined scalar settings; complex fields stay in the advanced form. */
+function SchemaSettings({ ed, section }: { ed: Ed; section: string }) {
+  const schema = ed.meta([]);
+  const properties = resolve(schema ?? {}, ed.ctx.root).node.properties ?? {};
+  const fields = Object.entries(properties).flatMap(([key, rawNode]) => {
+    const node = resolve(rawNode, ed.ctx.root).node;
+    const kind = kindOf(node, ed.ctx.root);
+    if (isSecretPath([section, key]) || /(?:password|secret|token|api[_-]?key|credential)/i.test(key)) return [];
+    if (kind === "enum" && node.enum?.some((option) => typeof option !== "string")) return [];
+    if (kind !== "boolean" && kind !== "integer" && kind !== "number" && kind !== "string" && kind !== "enum") return [];
+    return [{ key, node, kind, label: node.title || humanizeKey(key) }];
+  });
+
+  return (
+    <Group title={schemaPanelTitles[section] ?? humanizeKey(section)}>
+      {fields.length > 0 ? (
+        <Row>
+          {fields.map(({ key, node, kind, label }) => {
+            const path = [key];
+            const value = ed.get(path);
+            const hint = node.description;
+            if (kind === "boolean") return <Switch key={key} ed={ed} path={path} label={label} hint={hint} />;
+            if (kind === "integer" || kind === "number") return <Num key={key} ed={ed} path={path} label={label} hint={hint} />;
+            if (kind === "enum") return <Pick key={key} ed={ed} path={path} label={label} />;
+            return (
+              <label key={key} className="flex flex-col gap-1 text-sm">
+                <span className="font-medium">{label}</span>
+                <TextInput
+                  disabled={ed.ctx.readOnly}
+                  placeholder={typeof node.default === "string" ? node.default : undefined}
+                  value={typeof value === "string" ? value : ""}
+                  onChange={(event) => ed.set(path, event.target.value)}
+                />
+                {hint && <span className="text-xs text-muted">{hint}</span>}
+              </label>
+            );
+          })}
+        </Row>
+      ) : (
+        <p className="text-xs text-muted">Esta versión de Frigate no expone ajustes simples para esta sección.</p>
+      )}
+    </Group>
+  );
+}
+
 /** hasCurated lists the sections that get a friendlier panel above the generic form. */
-export const CURATED = new Set(["ffmpeg", "detect", "record", "snapshots", "objects", "motion", "review", "zones"]);
+export const CURATED = new Set(["ffmpeg", "detect", "record", "snapshots", "objects", "motion", "review", "zones", "autotracking", "face_recognition", "genai"]);
 
 export function CuratedPanel({
   section, schema, value, onChange, ctx, zones, onEditZones,
@@ -375,6 +426,9 @@ export function CuratedPanel({
     case "motion": return <Motion ed={ed} />;
     case "review": return <Review ed={ed} zones={zones} />;
     case "zones": return <Zones onEditZones={onEditZones} readOnly={ctx.readOnly} />;
+    case "autotracking":
+    case "face_recognition":
+    case "genai": return <SchemaSettings ed={ed} section={section} />;
     default: return null;
   }
 }

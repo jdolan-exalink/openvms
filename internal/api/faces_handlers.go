@@ -63,6 +63,12 @@ func (r getFaceTrainImageResponse) VisitGetFaceTrainImageResponse(w http.Respons
 	return r.write(w)
 }
 
+type getFaceReviewSightingImageResponse struct{ faceImageResponse }
+
+func (r getFaceReviewSightingImageResponse) VisitGetFaceReviewSightingImageResponse(w http.ResponseWriter) error {
+	return r.write(w)
+}
+
 func (h *Handlers) ListFacePersons(ctx context.Context, r gen.ListFacePersonsRequestObject) (gen.ListFacePersonsResponseObject, error) {
 	a, tenant, err := h.faceCaller(ctx, r.Params.TenantId)
 	if err != nil {
@@ -387,6 +393,84 @@ func (h *Handlers) AssignFaceTrainAttempt(ctx context.Context, r gen.AssignFaceT
 	return gen.AssignFaceTrainAttempt201JSONResponse{
 		Person: toFacePerson(res.Person), Image: toFaceImage(res.Image), AttemptRemoved: res.AttemptRemoved,
 	}, nil
+}
+
+func (h *Handlers) ListFaceReviewInbox(ctx context.Context, r gen.ListFaceReviewInboxRequestObject) (gen.ListFaceReviewInboxResponseObject, error) {
+	a, err := actor(ctx)
+	if err != nil {
+		return nil, err
+	}
+	page, err := h.Faces.ListReviewSightings(ctx, a, faces.TrainFilter{
+		TenantID: r.Params.TenantId, SiteIDs: uuids(r.Params.SiteId), ServerIDs: uuids(r.Params.ServerId),
+	})
+	if err != nil {
+		return nil, err
+	}
+	out := gen.ListFaceReviewInbox200JSONResponse{Items: make([]gen.FaceReviewSighting, 0, len(page.Items))}
+	for _, sighting := range page.Items {
+		item := gen.FaceReviewSighting{
+			Id: sighting.ID, ServerId: sighting.ServerID, ServerName: sighting.ServerName, SiteId: sighting.SiteID,
+			FirstSeenAt: sighting.FirstSeenAt, SeenAt: sighting.SeenAt, Score: sighting.Score, CropAvailable: sighting.CropAvailable,
+		}
+		if sighting.Label != "" {
+			label := sighting.Label
+			item.Label = &label
+		}
+		if sighting.IngestError != "" {
+			reason := sighting.IngestError
+			item.IngestError = &reason
+		}
+		out.Items = append(out.Items, item)
+	}
+	return out, nil
+}
+
+func (h *Handlers) GetFaceReviewSightingImage(ctx context.Context, r gen.GetFaceReviewSightingImageRequestObject) (gen.GetFaceReviewSightingImageResponseObject, error) {
+	a, tenant, err := h.faceObjectCaller(ctx, r.Params.TenantId, func(ctx context.Context, a authz.Actor) (uuid.UUID, error) {
+		return h.Faces.ReviewSightingTenant(ctx, a, r.SightingId)
+	})
+	if err != nil {
+		return nil, err
+	}
+	data, ct, err := h.Faces.ReviewSightingImage(ctx, a, tenant, r.SightingId)
+	if err != nil {
+		return nil, err
+	}
+	return getFaceReviewSightingImageResponse{faceImageResponse{data: data, contentType: ct}}, nil
+}
+
+func (h *Handlers) AssignFaceReviewSighting(ctx context.Context, r gen.AssignFaceReviewSightingRequestObject) (gen.AssignFaceReviewSightingResponseObject, error) {
+	if r.Body == nil {
+		return nil, &faces.ValidationError{Msg: "a request body is required"}
+	}
+	a, tenant, err := h.faceObjectCaller(ctx, r.Params.TenantId, func(ctx context.Context, a authz.Actor) (uuid.UUID, error) {
+		return h.Faces.ReviewSightingTenant(ctx, a, r.SightingId)
+	})
+	if err != nil {
+		return nil, err
+	}
+	in := faces.ReviewAssignInput{PersonID: r.Body.PersonId}
+	if r.Body.NewPersonDisplayName != nil {
+		in.NewPersonName = *r.Body.NewPersonDisplayName
+	}
+	res, err := h.Faces.AssignReviewSighting(ctx, a, tenant, r.SightingId, in)
+	if err != nil {
+		return nil, err
+	}
+	return gen.AssignFaceReviewSighting201JSONResponse{Person: toFacePerson(res.Person), Image: toFaceImage(res.Image), AttemptRemoved: res.AttemptRemoved}, nil
+}
+
+func (h *Handlers) RejectFaceReviewSighting(ctx context.Context, r gen.RejectFaceReviewSightingRequestObject) (gen.RejectFaceReviewSightingResponseObject, error) {
+	a, tenant, err := h.faceObjectCaller(ctx, r.Params.TenantId, func(ctx context.Context, a authz.Actor) (uuid.UUID, error) {
+		return h.Faces.ReviewSightingTenant(ctx, a, r.SightingId)
+	})
+	if err != nil {
+		return nil, err
+	}
+	if err := h.Faces.RejectReviewSighting(ctx, a, tenant, r.SightingId); err != nil {
+		return nil, err
+	}
+	return gen.RejectFaceReviewSighting204Response{}, nil
 }
 
 // faceCaller resolves the actor and the tenant of a faces route that names no object (lists and

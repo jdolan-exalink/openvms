@@ -1,21 +1,23 @@
-import { startTransition, useEffect, useRef, useState } from "react";
+import { startTransition, useEffect, useMemo, useRef, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { useNavigate } from "@tanstack/react-router";
 import {
   Eye, Pin, PinOff, Maximize2, Minimize2, History, LayoutGrid, Sparkles,
   CarFront, Bell, Check, Bug, RefreshCw, Scan, LayoutDashboard,
 } from "lucide-react";
-import { meQuery } from "@/api/queries";
+import { camerasQuery, meQuery, serversQuery, sitesQuery } from "@/api/queries";
 import { MsePlayer } from "@/components/MsePlayer";
 import { DetectionListOverlay } from "@/components/live/DetectionListOverlay";
 import { Button, IconButton } from "@/components/ui";
 import { EventPopup } from "@/components/visionai/EventPopup";
 import { EventSnapshot } from "@/components/visionai/EventSnapshot";
 import { EventsSidebar } from "@/components/visionai/EventsSidebar";
+import { ServerSelector } from "@/components/visionai/ServerSelector";
 import { ObjectBadge } from "@/components/visionai/ObjectBadge";
-import { usePlateReads, type VisionEventView } from "@/lib/visionEvents";
+import { usePlateReads, type ListScope, type VisionEventView } from "@/lib/visionEvents";
 import { cn } from "@/lib/cn";
 import { can } from "@/lib/perm";
+import { cameraIdsOfServers, serverFilter, serverOptions, toggleServer } from "@/lib/serverSelector";
 import { useImmersive } from "@/lib/useImmersive";
 import { dynamicGridShape, priorityOrder } from "@/lib/visionAiGrid";
 import { ObjectIcon, PresetIcon } from "@/lib/visionAiIcons";
@@ -61,10 +63,29 @@ export function VisionAI() {
   const [popup, setPopup] = useState<VisionEventView | null>(null);
   const [focusHeroIndex, setFocusHeroIndex] = useState<number>(0);
 
+  const [excludedServerIds, setExcludedServerIds] = useState<string[]>(DEFAULT_VISION_PREFS.excludedServerIds);
+
   const source = sourceFor(mode, presetSource);
   const layout = layoutFor(mode, layoutCount);
-  const slotsQuery = useVisionSlots(source, layout, inactivitySeconds);
   const me = useQuery(meQuery);
+  // Servers the view can be limited to. The selection is remembered as the servers left unchecked.
+  const servers = useQuery(serversQuery);
+  const sites = useQuery(sitesQuery);
+  const cameraList = useQuery(camerasQuery());
+  const options = useMemo(
+    () => serverOptions(servers.data ?? [], sites.data ?? [], cameraList.data ?? [], excludedServerIds),
+    [servers.data, sites.data, cameraList.data, excludedServerIds],
+  );
+  const serverIds = serverFilter(options);
+  // Lists that can only filter by camera (plate reads) get the cameras of the selected servers.
+  const scope = useMemo(
+    () => ({ serverIds, cameraIds: serverIds ? cameraIdsOfServers(cameraList.data ?? [], serverIds) : undefined }),
+    [serverIds, cameraList.data],
+  );
+  // Once a remembered selection is known, the filtered grid waits for the server list it needs. The
+  // grid itself never waits for the user's preferences: events must show even when permissions load late.
+  const selectionKnown = excludedServerIds.length === 0 || (!servers.isPending && !cameraList.isPending);
+  const slotsQuery = useVisionSlots(source, layout, inactivitySeconds, serverIds, selectionKnown);
   // Browser-minus-server clock offset, so "hace Ns" is measured on the server clock.
   const generatedMs = slotsQuery.data ? Date.parse(slotsQuery.data.generated_at) : Number.NaN;
   const serverOffsetMs = Number.isNaN(generatedMs) ? 0 : slotsQuery.dataUpdatedAt - generatedMs;
@@ -88,7 +109,7 @@ export function VisionAI() {
     // On the first load, a change made while `me` was still loading wins over the saved view. When
     // the signed-in user or tenant changes later, always load that user's own view.
     const firstLoad = hydratedKey === null;
-    const untouched = JSON.stringify({ mode, presetSource, layoutCount, activeObjects, inactivitySeconds }) === JSON.stringify(DEFAULT_VISION_PREFS);
+    const untouched = JSON.stringify({ mode, presetSource, layoutCount, activeObjects, inactivitySeconds, excludedServerIds }) === JSON.stringify(DEFAULT_VISION_PREFS);
     if (!firstLoad || untouched) {
       const saved = loadVisionPrefs(prefsKey);
       setMode(saved.mode);
@@ -96,11 +117,12 @@ export function VisionAI() {
       setLayoutCount(saved.layoutCount);
       setActiveObjects(saved.activeObjects);
       setInactivitySeconds(saved.inactivitySeconds);
+      setExcludedServerIds(saved.excludedServerIds);
     }
   }
   useEffect(() => {
-    if (prefsKey && hydratedKey === prefsKey) saveVisionPrefs(prefsKey, { mode, presetSource, layoutCount, activeObjects, inactivitySeconds });
-  }, [prefsKey, hydratedKey, mode, presetSource, layoutCount, activeObjects, inactivitySeconds]);
+    if (prefsKey && hydratedKey === prefsKey) saveVisionPrefs(prefsKey, { mode, presetSource, layoutCount, activeObjects, inactivitySeconds, excludedServerIds });
+  }, [prefsKey, hydratedKey, mode, presetSource, layoutCount, activeObjects, inactivitySeconds, excludedServerIds]);
 
   // Presets
   const applyPreset = (preset: string) => {
@@ -369,6 +391,9 @@ export function VisionAI() {
             </select>
           </label>
 
+          {/* Which servers' events the view shows; remembered, all selected by default */}
+          <ServerSelector options={options} onToggle={(id, checked) => setExcludedServerIds((current) => toggleServer(current, options, id, checked))} />
+
           {/* Debug Score toggle */}
           <IconButton
             icon={Bug}
@@ -398,6 +423,7 @@ export function VisionAI() {
             canSnapshots={canViewSnapshots}
             canEvents={can(me.data, "events.view")}
             canLpr={can(me.data, "lpr.view")}
+            scope={scope}
             selectedKey={popup?.key}
             onSelect={setPopup}
             onClose={() => setSidebarOpen(false)}
@@ -478,6 +504,7 @@ export function VisionAI() {
             <LprReadingsList
               platesVisible={slotsQuery.data?.plates_visible ?? true}
               canSnapshots={canViewSnapshots}
+              scope={scope}
               selectedKey={popup?.key}
               onSelect={setPopup}
             />
@@ -621,13 +648,14 @@ function FaceReadingsList({ slots, snapshots }: { slots: VisionAISlot[]; snapsho
  * LPR mode: the plate reads themselves (the same ones as the LPR tab), not the ranked slots, so the
  * list is complete. Clicking a plate hands its read to the caller, which shows the vehicle photo.
  */
-function LprReadingsList({ platesVisible, canSnapshots, selectedKey, onSelect }: {
+function LprReadingsList({ platesVisible, canSnapshots, scope, selectedKey, onSelect }: {
   platesVisible: boolean;
   canSnapshots: boolean;
+  scope: ListScope;
   selectedKey?: string;
   onSelect: (view: VisionEventView) => void;
 }) {
-  const reads = usePlateReads(canSnapshots, platesVisible);
+  const reads = usePlateReads(canSnapshots, platesVisible, scope);
   const readings = reads.views;
 
   if (!platesVisible) {

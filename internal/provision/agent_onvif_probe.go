@@ -31,6 +31,7 @@ const (
 	maxOnvifProbePasswordBytes = 1024
 	maxOnvifProbeServices      = 32
 	maxOnvifProbeEndpoints     = 16
+	maxOnvifProbeProfiles      = 32
 	maxOnvifProbeTextRunes     = 256
 	onvifProbeTimeout          = 12 * time.Second
 )
@@ -47,14 +48,20 @@ type OnvifProbeRequest struct {
 }
 
 type OnvifProbeProfile struct {
-	Token     string `json:"token"`
-	Name      string `json:"name"`
-	Encoding  string `json:"encoding"`
-	Width     int    `json:"width"`
-	Height    int    `json:"height"`
-	FPS       int    `json:"fps"`
-	Bitrate   int    `json:"bitrate"`
-	StreamURI string `json:"stream_uri"`
+	Token                     string  `json:"token"`
+	Name                      string  `json:"name"`
+	Fixed                     bool    `json:"fixed"`
+	MediaVersion              string  `json:"media_version"`
+	SourceConfigurationToken  string  `json:"source_configuration_token"`
+	EncoderConfigurationToken string  `json:"encoder_configuration_token"`
+	PTZConfigurationToken     string  `json:"ptz_configuration_token"`
+	Encoding                  string  `json:"encoding"`
+	Width                     int     `json:"width"`
+	Height                    int     `json:"height"`
+	FPS                       int     `json:"fps"`
+	FrameRate                 float64 `json:"frame_rate"`
+	Bitrate                   int     `json:"bitrate"`
+	StreamURI                 string  `json:"stream_uri"`
 }
 
 type OnvifProbeStreams struct {
@@ -353,6 +360,28 @@ func validOnvifProbeJSONShape(data []byte) bool {
 	if !ok || !validOnvifProbeJSONDateTime(clock["utc"]) || !validOnvifProbeJSONDateTime(clock["local"]) {
 		return false
 	}
+	if rawProfiles, exists := root["profiles"]; exists {
+		profiles, ok := requiredJSONArray(rawProfiles)
+		if !ok || len(profiles) > maxOnvifProbeProfiles {
+			return false
+		}
+		for _, rawProfile := range profiles {
+			profile, ok := requiredJSONObject(rawProfile, "token", "name", "fixed", "media_version", "source_configuration_token", "encoder_configuration_token", "ptz_configuration_token", "encoding", "width", "height", "fps", "frame_rate", "bitrate", "stream_uri")
+			if !ok {
+				return false
+			}
+			for _, key := range []string{"token", "name", "media_version", "source_configuration_token", "encoder_configuration_token", "ptz_configuration_token", "encoding", "stream_uri"} {
+				var value string
+				if json.Unmarshal(profile[key], &value) != nil {
+					return false
+				}
+			}
+			var fixed bool
+			if json.Unmarshal(profile["fixed"], &fixed) != nil {
+				return false
+			}
+		}
+	}
 	return true
 }
 
@@ -407,7 +436,7 @@ func requiredJSONStringArray(data json.RawMessage) ([]string, bool) {
 }
 
 func validOnvifProbeResult(result OnvifProbeResult) bool {
-	if result.Services == nil || len(result.Services) > maxOnvifProbeServices {
+	if result.Services == nil || len(result.Services) > maxOnvifProbeServices || len(result.Profiles) > maxOnvifProbeProfiles {
 		return false
 	}
 	text := []string{result.Information.Manufacturer, result.Information.Model, result.Information.FirmwareVersion, result.Information.SerialNumber, result.Information.HardwareID, result.Clock.DateTimeType}
@@ -427,6 +456,25 @@ func validOnvifProbeResult(result OnvifProbeResult) bool {
 			}
 			ip, ipErr := netip.ParseAddr(u.Hostname())
 			if ipErr != nil || !ip.Is4() || !validEndpointPort(u.Port()) || (u.Scheme != "http" && u.Scheme != "https") || u.User != nil || u.RawQuery != "" || u.Fragment != "" || u.Path != "" {
+				return false
+			}
+		}
+	}
+	for _, profile := range result.Profiles {
+		for _, value := range []string{profile.Token, profile.Name, profile.MediaVersion, profile.SourceConfigurationToken, profile.EncoderConfigurationToken, profile.PTZConfigurationToken, profile.Encoding} {
+			if len([]rune(value)) > maxOnvifProbeTextRunes {
+				return false
+			}
+		}
+		if profile.Width < 0 || profile.Width > 100000 || profile.Height < 0 || profile.Height > 100000 || profile.FPS < 0 || profile.FPS > 10000 || profile.FrameRate < 0 || profile.FrameRate > 10000 || profile.Bitrate < 0 || profile.Bitrate > 100000000 {
+			return false
+		}
+		if profile.Token == "" || (profile.MediaVersion != "1.0" && profile.MediaVersion != "2.0") || len(profile.StreamURI) > 2048 {
+			return false
+		}
+		if profile.StreamURI != "" {
+			u, err := url.Parse(profile.StreamURI)
+			if err != nil || (u.Scheme != "rtsp" && u.Scheme != "rtsps") || u.Hostname() == "" {
 				return false
 			}
 		}
@@ -479,7 +527,37 @@ func sanitizeOnvifProbeResult(result OnvifProbeResult, secrets ...string) OnvifP
 			result.Services[i].XAddrs[j] = u.Scheme + "://" + u.Host
 		}
 	}
+	for i := range result.Profiles {
+		result.Profiles[i].Token = safe(result.Profiles[i].Token)
+		result.Profiles[i].Name = safe(result.Profiles[i].Name)
+		result.Profiles[i].MediaVersion = safe(result.Profiles[i].MediaVersion)
+		result.Profiles[i].SourceConfigurationToken = safe(result.Profiles[i].SourceConfigurationToken)
+		result.Profiles[i].EncoderConfigurationToken = safe(result.Profiles[i].EncoderConfigurationToken)
+		result.Profiles[i].PTZConfigurationToken = safe(result.Profiles[i].PTZConfigurationToken)
+		result.Profiles[i].Encoding = safe(result.Profiles[i].Encoding)
+		result.Profiles[i].StreamURI = sanitizeOnvifStreamURI(result.Profiles[i].StreamURI, secrets...)
+	}
+	result.Streams.MainURL = sanitizeOnvifStreamURI(result.Streams.MainURL, secrets...)
+	result.Streams.SubURL = sanitizeOnvifStreamURI(result.Streams.SubURL, secrets...)
 	return result
+}
+
+func sanitizeOnvifStreamURI(raw string, secrets ...string) string {
+	u, err := url.Parse(strings.TrimSpace(raw))
+	if err != nil || (u.Scheme != "rtsp" && u.Scheme != "rtsps") || u.Hostname() == "" {
+		return ""
+	}
+	u.User = nil
+	u.RawQuery = ""
+	u.ForceQuery = false
+	u.Fragment = ""
+	safe := u.String()
+	for _, secret := range secrets {
+		if secret != "" && strings.Contains(safe, secret) {
+			return ""
+		}
+	}
+	return safe
 }
 
 func (s *Service) loadProbeTLSAndAgent(ctx context.Context, actor authz.Actor, serverID uuid.UUID) (string, int32, string, AgentTLSConfig, error) {

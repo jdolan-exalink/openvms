@@ -18,26 +18,34 @@ import (
 )
 
 const (
-	maxProbeRequestBytes  = 4096
-	maxProbeResponseBytes = 64 << 10
-	maxProbeEndpointBytes = 2048
-	maxProbeUsernameBytes = 256
-	maxProbePasswordBytes = 1024
-	maxProbeFieldRunes    = 256
-	maxProbeServices      = 32
-	probeOperationTimeout = 4 * time.Second
-	probeOverallTimeout   = 10 * time.Second
+	maxProbeRequestBytes   = 4096
+	maxProbeResponseBytes  = 64 << 10
+	maxProbeEndpointBytes  = 2048
+	maxProbeUsernameBytes  = 256
+	maxProbePasswordBytes  = 1024
+	maxProbeFieldRunes     = 256
+	maxProbeServices       = 32
+	maxProbeProfiles       = 32
+	maxProbeStreamURIBytes = 2048
+	probeOperationTimeout  = 4 * time.Second
+	probeOverallTimeout    = 10 * time.Second
 )
 
 type ProbeProfile struct {
-	Token     string `json:"token"`
-	Name      string `json:"name"`
-	Encoding  string `json:"encoding"`
-	Width     int    `json:"width"`
-	Height    int    `json:"height"`
-	FPS       int    `json:"fps"`
-	Bitrate   int    `json:"bitrate"`
-	StreamURI string `json:"stream_uri"`
+	Token                     string  `json:"token"`
+	Name                      string  `json:"name"`
+	Fixed                     bool    `json:"fixed"`
+	MediaVersion              string  `json:"media_version"`
+	SourceConfigurationToken  string  `json:"source_configuration_token"`
+	EncoderConfigurationToken string  `json:"encoder_configuration_token"`
+	PTZConfigurationToken     string  `json:"ptz_configuration_token"`
+	Encoding                  string  `json:"encoding"`
+	Width                     int     `json:"width"`
+	Height                    int     `json:"height"`
+	FPS                       int     `json:"fps"`
+	FrameRate                 float64 `json:"frame_rate"`
+	Bitrate                   int     `json:"bitrate"`
+	StreamURI                 string  `json:"stream_uri"`
 }
 
 type ProbeStreams struct {
@@ -305,36 +313,9 @@ func NewDeviceProbe(transport http.RoundTripper) DeviceProber {
 			clock, _ = device.GetSystemDateAndTime(ctx)
 		}
 
-		// Query profiles & stream URIs if media service is present
-		var probeProfiles []ProbeProfile
+		// Prefer Media2 profiles and fall back to Media1 when Media2 is absent or unsupported.
+		probeProfiles := probeMediaProfiles(ctx, client, services)
 		var mainURL, subURL string
-		for _, s := range services {
-			if strings.Contains(s.Namespace, "/media") {
-				if mediaEp, epErr := s.ValidatedEndpoint(); epErr == nil {
-					mediaClient := onvif.NewMediaClient(client, mediaEp)
-					if onvifProfiles, profErr := mediaClient.GetProfiles(ctx); profErr == nil {
-						for _, prof := range onvifProfiles {
-							p := ProbeProfile{
-								Token: prof.Token,
-								Name:  prof.Name,
-							}
-							if prof.VideoEncoderConfiguration != nil {
-								p.Encoding = prof.VideoEncoderConfiguration.Encoding
-								p.Width = prof.VideoEncoderConfiguration.Resolution.Width
-								p.Height = prof.VideoEncoderConfiguration.Resolution.Height
-								p.FPS = prof.VideoEncoderConfiguration.RateControl.FrameRateLimit
-								p.Bitrate = prof.VideoEncoderConfiguration.RateControl.BitrateLimit
-							}
-							if uri, uriErr := mediaClient.GetStreamURI(ctx, prof.Token); uriErr == nil {
-								p.StreamURI = uri
-							}
-							probeProfiles = append(probeProfiles, p)
-						}
-					}
-				}
-				break
-			}
-		}
 
 		// Determine Main and Sub streams
 		for _, p := range probeProfiles {
@@ -403,6 +384,85 @@ func NewDeviceProbe(transport http.RoundTripper) DeviceProber {
 	}
 }
 
+func probeMediaProfiles(ctx context.Context, client *onvif.Client, services []onvif.Service) []ProbeProfile {
+	var media1, media2 *onvif.Service
+	for i := range services {
+		switch {
+		case strings.Contains(services[i].Namespace, "/ver20/media/") && media2 == nil:
+			media2 = &services[i]
+		case strings.Contains(services[i].Namespace, "/ver10/media/") && media1 == nil:
+			media1 = &services[i]
+		}
+	}
+	if media2 != nil {
+		if endpoint, err := media2.ValidatedEndpoint(); err == nil {
+			media := onvif.NewMedia2Client(client, endpoint)
+			profiles, err := media.GetProfiles(ctx)
+			if err != nil {
+				var callErr *onvif.CallError
+				if !errors.As(err, &callErr) || callErr.Status != onvif.StatusUnsupported {
+					return nil
+				}
+			}
+			if err == nil && len(profiles) > 0 {
+				out := make([]ProbeProfile, 0, min(len(profiles), maxProbeProfiles))
+				for _, profile := range profiles[:min(len(profiles), maxProbeProfiles)] {
+					p := ProbeProfile{Token: profile.Token, Name: profile.Name, Fixed: profile.Fixed, MediaVersion: "2.0"}
+					if cfg := profile.VideoSourceConfiguration; cfg != nil {
+						p.SourceConfigurationToken = cfg.Token
+					}
+					if cfg := profile.PTZConfiguration; cfg != nil {
+						p.PTZConfigurationToken = cfg.Token
+					}
+					if cfg := profile.VideoEncoderConfiguration; cfg != nil {
+						p.EncoderConfigurationToken = cfg.Token
+						p.Encoding, p.Width, p.Height = cfg.Encoding, cfg.Resolution.Width, cfg.Resolution.Height
+						p.FrameRate, p.Bitrate = cfg.RateControl.FrameRateLimit, cfg.RateControl.BitrateLimit
+						p.FPS = int(cfg.RateControl.FrameRateLimit)
+					}
+					if uri, uriErr := media.GetStreamURI(ctx, profile.Token); uriErr == nil {
+						p.StreamURI = uri
+					}
+					out = append(out, p)
+				}
+				return out
+			}
+		}
+	}
+	if media1 == nil {
+		return nil
+	}
+	endpoint, err := media1.ValidatedEndpoint()
+	if err != nil {
+		return nil
+	}
+	media := onvif.NewMediaClient(client, endpoint)
+	profiles, err := media.GetProfiles(ctx)
+	if err != nil {
+		return nil
+	}
+	out := make([]ProbeProfile, 0, min(len(profiles), maxProbeProfiles))
+	for _, profile := range profiles[:min(len(profiles), maxProbeProfiles)] {
+		p := ProbeProfile{Token: profile.Token, Name: profile.Name, Fixed: profile.Fixed, MediaVersion: "1.0"}
+		if cfg := profile.VideoSourceConfiguration; cfg != nil {
+			p.SourceConfigurationToken = cfg.Token
+		}
+		if cfg := profile.PTZConfiguration; cfg != nil {
+			p.PTZConfigurationToken = cfg.Token
+		}
+		if cfg := profile.VideoEncoderConfiguration; cfg != nil {
+			p.EncoderConfigurationToken = cfg.Token
+			p.Encoding, p.Width, p.Height = cfg.Encoding, cfg.Resolution.Width, cfg.Resolution.Height
+			p.FPS, p.FrameRate, p.Bitrate = cfg.RateControl.FrameRateLimit, float64(cfg.RateControl.FrameRateLimit), cfg.RateControl.BitrateLimit
+		}
+		if uri, uriErr := media.GetStreamURI(ctx, profile.Token); uriErr == nil {
+			p.StreamURI = uri
+		}
+		out = append(out, p)
+	}
+	return out
+}
+
 func projectProbeResult(result ProbeResult, networks []netip.Prefix, agentToken, username, password string) probeResponse {
 	out := probeResponse{
 		Information: probeDeviceInformation{
@@ -414,10 +474,21 @@ func projectProbeResult(result ProbeResult, networks []netip.Prefix, agentToken,
 		},
 		Services:  make([]probeService, 0, min(len(result.Services), maxProbeServices)),
 		Clock:     projectClock(result.Clock, agentToken, username, password),
-		Profiles:  result.Profiles,
-		Streams:   result.Streams,
+		Profiles:  make([]ProbeProfile, 0, min(len(result.Profiles), maxProbeProfiles)),
+		Streams:   ProbeStreams{MainURL: sanitizeStreamURI(result.Streams.MainURL, agentToken, username, password), SubURL: sanitizeStreamURI(result.Streams.SubURL, agentToken, username, password)},
 		Analytics: result.Analytics,
 		PTZ:       result.PTZ,
+	}
+	for _, profile := range result.Profiles[:min(len(result.Profiles), maxProbeProfiles)] {
+		profile.Token = sanitizeProbeText(profile.Token, agentToken, username, password)
+		profile.Name = sanitizeProbeText(profile.Name, agentToken, username, password)
+		profile.MediaVersion = sanitizeProbeText(profile.MediaVersion, agentToken, username, password)
+		profile.SourceConfigurationToken = sanitizeProbeText(profile.SourceConfigurationToken, agentToken, username, password)
+		profile.EncoderConfigurationToken = sanitizeProbeText(profile.EncoderConfigurationToken, agentToken, username, password)
+		profile.PTZConfigurationToken = sanitizeProbeText(profile.PTZConfigurationToken, agentToken, username, password)
+		profile.Encoding = sanitizeProbeText(profile.Encoding, agentToken, username, password)
+		profile.StreamURI = sanitizeStreamURI(profile.StreamURI, agentToken, username, password)
+		out.Profiles = append(out.Profiles, profile)
 	}
 	for _, service := range result.Services {
 		if len(out.Services) >= maxProbeServices {
@@ -439,6 +510,27 @@ func projectProbeResult(result ProbeResult, networks []netip.Prefix, agentToken,
 		}
 	}
 	return out
+}
+
+func sanitizeStreamURI(raw string, secrets ...string) string {
+	if len(raw) > maxProbeStreamURIBytes {
+		return ""
+	}
+	u, err := url.Parse(strings.TrimSpace(raw))
+	if err != nil || (u.Scheme != "rtsp" && u.Scheme != "rtsps") || u.Hostname() == "" {
+		return ""
+	}
+	u.User = nil
+	u.RawQuery = ""
+	u.ForceQuery = false
+	u.Fragment = ""
+	safe := u.String()
+	for _, secret := range secrets {
+		if secret != "" && (strings.Contains(safe, secret) || strings.Contains(u.Path, secret)) {
+			return ""
+		}
+	}
+	return safe
 }
 
 func projectServiceEndpoint(raw string, networks []netip.Prefix) (string, bool) {

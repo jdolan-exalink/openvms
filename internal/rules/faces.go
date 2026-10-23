@@ -44,6 +44,12 @@ type FaceResolver interface {
 	FaceNames(ctx context.Context, q *db.Queries, tenantID uuid.UUID, personIDs, watchlistIDs []uuid.UUID) (map[string]struct{}, error)
 }
 
+// cachedFaceResolver can resolve against a valid in-memory snapshot without querying PostgreSQL.
+// The caller can then avoid a savepoint, which is needed only to isolate a potentially failing read.
+type cachedFaceResolver interface {
+	faceNamesFromCache(tenantID uuid.UUID, personIDs, watchlistIDs []uuid.UUID) (map[string]struct{}, bool)
+}
+
 // faceIndex is the snapshot of one tenant: live persons by id and watchlist membership.
 type faceIndex struct {
 	loaded  time.Time
@@ -135,6 +141,22 @@ func (r *StoreFaceResolver) index(ctx context.Context, q *db.Queries, tenantID u
 	return idx, nil
 }
 
+// faceNamesFromCache resolves conditions only when a current tenant snapshot is already cached.
+// It returns hit=false when the caller must use the transaction-isolated database path.
+func (r *StoreFaceResolver) faceNamesFromCache(tenantID uuid.UUID, personIDs, watchlistIDs []uuid.UUID) (map[string]struct{}, bool) {
+	if r == nil || r.Store == nil {
+		return map[string]struct{}{}, true
+	}
+	now := r.now()
+	r.mu.Lock()
+	idx, ok := r.cache[tenantID]
+	r.mu.Unlock()
+	if !ok || now.Sub(idx.loaded) >= r.ttl() {
+		return nil, false
+	}
+	return faceNamesFromIndex(idx, personIDs, watchlistIDs), true
+}
+
 func (r *StoreFaceResolver) FaceNames(ctx context.Context, q *db.Queries, tenantID uuid.UUID, personIDs, watchlistIDs []uuid.UUID) (map[string]struct{}, error) {
 	out := map[string]struct{}{}
 	if r == nil || r.Store == nil {
@@ -144,6 +166,11 @@ func (r *StoreFaceResolver) FaceNames(ctx context.Context, q *db.Queries, tenant
 	if err != nil {
 		return nil, err
 	}
+	return faceNamesFromIndex(idx, personIDs, watchlistIDs), nil
+}
+
+func faceNamesFromIndex(idx faceIndex, personIDs, watchlistIDs []uuid.UUID) map[string]struct{} {
+	out := map[string]struct{}{}
 	add := func(id uuid.UUID) {
 		if name, ok := idx.names[id]; ok {
 			out[name] = struct{}{}
@@ -157,5 +184,5 @@ func (r *StoreFaceResolver) FaceNames(ctx context.Context, q *db.Queries, tenant
 			add(id)
 		}
 	}
-	return out, nil
+	return out
 }

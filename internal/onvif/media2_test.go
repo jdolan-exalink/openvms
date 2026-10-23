@@ -98,6 +98,34 @@ func TestMedia2GetVideoEncoderConfigurations(t *testing.T) {
 	}
 }
 
+func TestMedia2GetProfilesAndStreamURI(t *testing.T) {
+	rec := &media2Recorder{}
+	c := rec.client(t, map[string]string{
+		"GetProfiles":  `<tr2:GetProfilesResponse><tr2:Profiles token="main-profile" fixed="true"><tt:Name>Main</tt:Name><tt:VideoSourceConfiguration token="source-main"/><tt:VideoEncoderConfiguration token="encoder-main"><tt:Name>Main encoder</tt:Name><tt:Encoding>H265</tt:Encoding><tt:Resolution><tt:Width>2560</tt:Width><tt:Height>1440</tt:Height></tt:Resolution><tt:RateControl><tt:FrameRateLimit>25</tt:FrameRateLimit><tt:BitrateLimit>6144</tt:BitrateLimit></tt:RateControl></tt:VideoEncoderConfiguration><tt:PTZConfiguration token="ptz-main"/></tr2:Profiles></tr2:GetProfilesResponse>`,
+		"GetStreamUri": `<tr2:GetStreamUriResponse><tr2:Uri>rtsp://192.0.2.10/main</tr2:Uri></tr2:GetStreamUriResponse>`,
+	})
+	profiles, err := c.GetProfiles(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(profiles) != 1 || profiles[0].Token != "main-profile" || profiles[0].Name != "Main" || !profiles[0].Fixed {
+		t.Fatalf("profiles = %+v", profiles)
+	}
+	if profiles[0].VideoSourceConfiguration == nil || profiles[0].VideoSourceConfiguration.Token != "source-main" || profiles[0].PTZConfiguration == nil || profiles[0].PTZConfiguration.Token != "ptz-main" {
+		t.Fatalf("profile configuration tokens = %+v", profiles[0])
+	}
+	if cfg := profiles[0].VideoEncoderConfiguration; cfg == nil || cfg.Token != "encoder-main" || cfg.Encoding != "H265" || cfg.Resolution != (VideoResolution{Width: 2560, Height: 1440}) {
+		t.Fatalf("video encoder configuration = %+v", cfg)
+	}
+	uri, err := c.GetStreamURI(context.Background(), "main-profile")
+	if err != nil || uri != "rtsp://192.0.2.10/main" {
+		t.Fatalf("stream URI = %q, err = %v", uri, err)
+	}
+	if !strings.Contains(rec.actions[0], media2Namespace+"/GetProfiles") || !strings.Contains(rec.actions[1], media2Namespace+"/GetStreamUri") {
+		t.Fatalf("Media2 actions = %+v", rec.actions)
+	}
+}
+
 func TestMedia2GetVideoEncoderConfigurationOptions(t *testing.T) {
 	rec := &media2Recorder{}
 	c := rec.client(t, map[string]string{"GetVideoEncoderConfigurationOptions": media2OptionsXML})

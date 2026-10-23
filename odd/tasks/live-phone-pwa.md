@@ -24,8 +24,8 @@ Phone Live (`apps/web/src/components/LivePhone.tsx`) is a single-column stack of
 - [x] LP-02 — Landscape and fullscreen single-camera view. Route: delegated direct. Commit `a7cc79b`; rollback boundary: revert it (LivePhone, `lib/useImmersive.ts`, live i18n, LivePhone tests).
 - [x] LP-03 — Pinch-zoom/pan in the single-camera view. Route: delegated direct. Commit `744a5f4`; rollback boundary: revert it (DigitalZoom `touch`/`doubleTapZoom` props, LivePhone SingleCamera, tests).
 - [x] LP-04 — Multi-camera phone layout: snapshots + selector (user decision 2026-10-17). Route: delegated direct. Commit `28aba65`; rollback boundary: revert it (LivePhone split into PhoneGrid/PhoneFocus/PhoneLayoutToggle/PhoneSingleCamera, `lib/phoneLayoutPrefs|phoneSnapshot|useHorizontalSwipe|useVisibleSnapshot`, live i18n, tests).
-- [ ] LP-05 — Review, PR, CI, merge, deploy (deploy only with user confirmation).
-  Status (2026-10-21): review, PR, CI and merge are done: PR #73 merged 2026-10-17 as `a578c6b`, all checks SUCCESS. Left unchecked: deploy needs explicit user confirmation, and the manual device checklist below has not been run (needs real iOS/Android standalone PWAs).
+- [x] LP-05 — Review, PR, CI, merge. PR #73 merged 2026-10-17 as `a578c6b8c18fc162036fad3630ee37fcc6e094f9`.
+  Status (2026-10-22): PR #73 is closed and merged; review, CI, and merge are complete. Web deployment remains pending separate user authorization. The manual device checklist below remains unrun and requires real iOS and Android standalone PWAs.
 
 ## Acceptance
 - Standalone PWA on iOS/Android: no content under notch/status bar/home indicator in portrait or landscape.
@@ -57,4 +57,4 @@ Phone Live (`apps/web/src/components/LivePhone.tsx`) is a single-column stack of
 - [ ] Landscape GRABADO: the controls button reveals the timeline over the picture; LIVE landscape shows no such button.
 
 ## Next step
-LP-05: native review of the LP-04 commit, PR, CI, merge; deploy only with user confirmation.
+Run the manual device checklist below on real iOS and Android standalone PWAs and record device/OS plus observed outcomes. Web deployment remains pending separate user authorization.

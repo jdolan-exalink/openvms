@@ -3,13 +3,16 @@
 package faces_test
 
 import (
+	"bytes"
 	"context"
 	"errors"
+	"fmt"
 	"strings"
 	"testing"
 	"time"
 
 	"github.com/google/uuid"
+	"github.com/jackc/pgx/v5"
 
 	"github.com/jdolan-exalink/openvms/internal/access"
 	"github.com/jdolan-exalink/openvms/internal/authz"
@@ -260,6 +263,140 @@ func TestTrainAttemptsListImageAndAssign(t *testing.T) {
 	// Exactly one target is required.
 	if _, err := sf.svc.AssignTrainAttempt(ctx, sf.manager, sf.tenant, faces.AssignInput{ServerID: sf.h01ID, File: "bad.webp"}); err == nil {
 		t.Fatal("assign without a target accepted")
+	}
+}
+
+func TestReviewIngestorKeepsStableSightingAndCropAfterFrigateRemoval(t *testing.T) {
+	sf := newSyncFixture(t)
+	sf.setCapability(sf.h01ID, sf.h01, true)
+	sf.h01.AddFaceTrainImage(trainFile, pngOf(t, 42))
+	sf.svc.Adapters = inventory.NewAdapters(sf.env.Svc)
+	ingestor := &faces.ReviewIngestor{
+		Store: sf.env.Store, Blobs: sf.blobs, Adapters: inventory.NewAdapters(sf.env.Svc), Log: sf.svc.Log,
+	}
+	ctx := context.Background()
+
+	sf.blobs.failPut = true
+	if err := ingestor.RunOnce(ctx, 25); err == nil {
+		t.Fatal("first ingest succeeded while the object store was unavailable")
+	}
+	var firstID uuid.UUID
+	var cropKey string
+	sf.queryRow(`SELECT id FROM face_sightings WHERE tenant_id = $1 AND server_id = $2 AND source_file = $3`,
+		&firstID, sf.tenant, sf.h01ID, trainFile)
+	sf.queryRow(`SELECT COALESCE(crop_key, '') FROM face_sightings WHERE id = $1`, &cropKey, firstID)
+	if cropKey != "" {
+		t.Fatal("sighting references a crop that was not stored")
+	}
+	sf.blobs.failPut = false
+	if err := ingestor.RunOnce(ctx, 25); err != nil {
+		t.Fatalf("retry after object store recovery: %v", err)
+	}
+	sf.queryRow(`SELECT crop_key FROM face_sightings WHERE id = $1`, &cropKey, firstID)
+	if cropKey == "" {
+		t.Fatal("sighting has no retained crop key")
+	}
+	got, contentType, err := sf.blobs.Get(ctx, cropKey)
+	if err != nil || contentType != "image/png" || !bytes.Equal(got, pngOf(t, 42)) {
+		t.Fatalf("retained crop = %d bytes, %q, %v; want original PNG", len(got), contentType, err)
+	}
+
+	if err := ingestor.RunOnce(ctx, 25); err != nil {
+		t.Fatalf("second ingest: %v", err)
+	}
+	var secondID uuid.UUID
+	if n := sf.scanInt(`SELECT count(*) FROM face_sightings WHERE tenant_id = $1 AND server_id = $2 AND source_file = $3`, sf.tenant, sf.h01ID, trainFile); n != 1 {
+		t.Fatalf("sighting rows = %d, want 1 after repeated ingest", n)
+	}
+	sf.queryRow(`SELECT id FROM face_sightings WHERE tenant_id = $1 AND server_id = $2 AND source_file = $3`,
+		&secondID, sf.tenant, sf.h01ID, trainFile)
+	if secondID != firstID {
+		t.Fatalf("sighting ID changed from %s to %s after repeated ingest", firstID, secondID)
+	}
+
+	if _, err := sf.svc.AssignTrainAttempt(ctx, sf.manager, sf.tenant, faces.AssignInput{
+		ServerID: sf.h01ID, File: trainFile, NewPersonName: "Unknown 1",
+	}); err != nil {
+		t.Fatalf("assign and remove source attempt: %v", err)
+	}
+	if err := ingestor.RunOnce(ctx, 25); err != nil {
+		t.Fatalf("ingest after source removal: %v", err)
+	}
+	if n := sf.scanInt(`SELECT count(*) FROM face_sightings WHERE tenant_id = $1 AND id = $2`, sf.tenant, firstID); n != 1 {
+		t.Fatalf("durable sighting rows after Frigate removal = %d, want 1", n)
+	}
+	otherTenant := sf.otherTenant()
+	err = sf.env.Store.Tx(ctx, store.TenantScope{TenantID: otherTenant}, func(q *db.Queries) error {
+		_, err := q.GetFaceSightingBySource(ctx, db.GetFaceSightingBySourceParams{
+			TenantID: sf.tenant, ServerID: sf.h01ID, SourceFile: trainFile,
+		})
+		return err
+	})
+	if !errors.Is(err, pgx.ErrNoRows) {
+		t.Fatalf("sighting visible under another tenant's RLS scope: %v", err)
+	}
+}
+
+func TestReviewSightingsAssignAndRejectByStableID(t *testing.T) {
+	sf := newSyncFixture(t)
+	sf.setCapability(sf.h01ID, sf.h01, true)
+	sf.svc.Adapters = inventory.NewAdapters(sf.env.Svc)
+	firstFile := trainFile
+	secondFile := "1700000000.3-def456-1700000200-unknown-0.52.webp"
+	firstCrop, secondCrop := pngOf(t, 51), pngOf(t, 52)
+	sf.h01.AddFaceTrainImage(firstFile, firstCrop)
+	sf.h01.AddFaceTrainImage(secondFile, secondCrop)
+	ingestor := &faces.ReviewIngestor{
+		Store: sf.env.Store, Blobs: sf.blobs, Adapters: sf.svc.Adapters, Log: sf.svc.Log,
+	}
+	ctx := context.Background()
+	if err := ingestor.RunOnce(ctx, 25); err != nil {
+		t.Fatal(err)
+	}
+
+	page, err := sf.svc.ListReviewSightings(ctx, sf.manager, faces.TrainFilter{TenantID: &sf.tenant})
+	if err != nil || len(page.Items) != 2 {
+		t.Fatalf("pending sightings = %d, %v", len(page.Items), err)
+	}
+	first, second := page.Items[0], page.Items[1]
+	if first.Score != nil && *first.Score > 0.5 {
+		first, second = second, first
+	}
+	if first.ID == uuid.Nil || second.ID == uuid.Nil || first.ID == second.ID || !first.CropAvailable || !second.CropAvailable {
+		t.Fatalf("unstable IDs or unavailable crops: %+v", page.Items)
+	}
+	image, contentType, err := sf.svc.ReviewSightingImage(ctx, sf.manager, sf.tenant, first.ID)
+	if err != nil || contentType != "image/png" || !bytes.Equal(image, firstCrop) {
+		t.Fatalf("sighting image = %d bytes, %q, %v", len(image), contentType, err)
+	}
+
+	person := sf.person("Review target")
+	assigned, err := sf.svc.AssignReviewSighting(ctx, sf.manager, sf.tenant, first.ID, faces.ReviewAssignInput{PersonID: &person.ID})
+	if err != nil || assigned.Person.ID != person.ID {
+		t.Fatalf("assign sighting = %+v, %v", assigned, err)
+	}
+	if imgs, err := sf.svc.ListImages(ctx, sf.manager, sf.tenant, person.ID); err != nil || len(imgs) != 1 {
+		t.Fatalf("assigned person's images = %d, %v", len(imgs), err)
+	}
+	if rows := sf.scanInt(`SELECT count(*) FROM face_sightings WHERE id = $1 AND review_status = 'assigned' AND person_id = $2 AND crop_key IS NULL`, first.ID, person.ID); rows != 1 {
+		t.Fatalf("assigned sighting state rows = %d, want one linked to person and no longer owning crop", rows)
+	}
+
+	if err := sf.svc.RejectReviewSighting(ctx, sf.manager, sf.tenant, second.ID); err != nil {
+		t.Fatal(err)
+	}
+	if err := sf.svc.PurgeBlobs(ctx, 10); err != nil {
+		t.Fatal(err)
+	}
+	if _, _, err := sf.blobs.Get(ctx, fmt.Sprintf("tenant/%s/faces/review/%s", sf.tenant, second.ID)); !errors.Is(err, store.ErrNotFound) {
+		t.Fatalf("rejected crop remains stored: %v", err)
+	}
+	remaining, err := sf.svc.ListReviewSightings(ctx, sf.manager, faces.TrainFilter{TenantID: &sf.tenant})
+	if err != nil || len(remaining.Items) != 0 {
+		t.Fatalf("pending sightings after review = %d, %v", len(remaining.Items), err)
+	}
+	if n := sf.scanInt(`SELECT count(*) FROM audit_log WHERE action IN ($1, $2)`, faces.ActionSightingAssigned, faces.ActionSightingRejected); n != 2 {
+		t.Fatalf("sighting decision audit rows = %d, want 2", n)
 	}
 }
 

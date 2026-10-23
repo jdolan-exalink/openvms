@@ -38,18 +38,29 @@ const schema = {
   $defs: {
     CameraConfig: {
       type: "object",
-      properties: { detect: { $ref: "#/$defs/Detect" }, zones: { type: "object", additionalProperties: { type: "object" } }, onvif: { $ref: "#/$defs/Onvif" }, objects: { $ref: "#/$defs/Objects" } },
+      properties: {
+        detect: { $ref: "#/$defs/Detect" },
+        zones: { type: "object", additionalProperties: { type: "object" } },
+        onvif: { $ref: "#/$defs/Onvif" },
+        objects: { $ref: "#/$defs/Objects" },
+        autotracking: { $ref: "#/$defs/Autotracking" },
+        face_recognition: { $ref: "#/$defs/FaceRecognition" },
+        genai: { $ref: "#/$defs/GenAI" },
+      },
     },
     Detect: { type: "object", properties: { enabled: { type: "boolean", default: true }, fps: { type: "integer", minimum: 1, maximum: 30, description: "Frames por segundo" } } },
     Objects: { type: "object", properties: { track: { type: "array", items: { type: "string" } } } },
     Onvif: { type: "object", properties: { host: { type: "string" }, password: { type: "string" } } },
+    Autotracking: { type: "object", properties: { enabled: { type: "boolean", title: "Enabled" } } },
+    FaceRecognition: { type: "object", properties: { min_score: { type: "number", title: "Minimum score", minimum: 0, maximum: 1 } } },
+    GenAI: { type: "object", properties: { prompt: { type: "string", title: "Prompt" } } },
   },
 };
 
 function mount(doc: object, extra: Record<string, () => Response> = {}) {
   const routes = stubApi({
     "/api/v1/me": () => json({ id: "u", tenant_id: "t", grants: [{ permission: "servers.restart", effect: "allow" }] }),
-    "/api/v1/cameras/c1/frigate-config": () => json({ camera_id: "c1", camera_name: "acceso", server_id: "s1", frigate_version: "0.17.0", editable: true, secrets_visible: false, config: { detect: { enabled: true, fps: 5 }, onvif: { host: "10.0.0.2", password: "********" }, objects: { track: ["person"] } }, ...doc }),
+    "/api/v1/cameras/c1/frigate-config": () => json({ camera_id: "c1", camera_name: "acceso", server_id: "s1", frigate_version: "0.17.0", editable: true, secrets_visible: false, config: { detect: { enabled: true, fps: 5 }, onvif: { host: "10.0.0.2", password: "********" }, objects: { track: ["person"] } }, sections: [], ...doc }),
     "/api/v1/servers/s1/frigate-config/schema": () => json(schema),
     ...extra,
   });
@@ -70,7 +81,7 @@ function mount(doc: object, extra: Record<string, () => Response> = {}) {
 describe("FrigateCameraConfig", () => {
   it("edits a section, shows the diff and patches only the changed keys", async () => {
     const fetchMock = mount({}, {
-      "/api/v1/cameras/c1/frigate-config": () => json({ camera_id: "c1", camera_name: "acceso", server_id: "s1", frigate_version: "0.17.1", editable: true, secrets_visible: false, config: { detect: { enabled: true, fps: 5 }, onvif: { host: "h", password: "****" } } }),
+      "/api/v1/cameras/c1/frigate-config": () => json({ camera_id: "c1", camera_name: "acceso", server_id: "s1", frigate_version: "0.17.1", editable: true, secrets_visible: false, config: { detect: { enabled: true, fps: 5 }, onvif: { host: "h", password: "****" } }, sections: [] }),
     });
     const nav = await screen.findByRole("navigation", { name: "Secciones de configuración" });
     expect(within(nav).getByText("Detección")).toBeInTheDocument();
@@ -88,6 +99,57 @@ describe("FrigateCameraConfig", () => {
     });
     const patch = fetchMock.mock.calls.map(([r]) => r as Request).find((r) => r.method === "PATCH")!;
     expect(await patch.clone().json()).toEqual({ sections: { detect: { fps: 12 } } });
+  });
+
+  it("applies the reviewed camera sections to the selected cameras on the same server", async () => {
+    const fetchMock = mount({}, {
+      "/api/v1/cameras": () => json({ items: [
+        { id: "c1", display_name: "acceso", server_id: "s1" },
+        { id: "c2", display_name: "patio", server_id: "s1" },
+      ] }),
+      "/api/v1/cameras/c2/frigate-config": () => json({ camera_id: "c2", camera_name: "patio", server_id: "s1", frigate_version: "0.17.0", editable: true, config: { detect: { enabled: true, fps: 3 } }, sections: [] }),
+    });
+    fireEvent.change(await screen.findByLabelText("Fps"), { target: { value: "12" } });
+    fireEvent.click(screen.getByRole("button", { name: "Aplicar a varias cámaras" }));
+    const dialog = await screen.findByRole("dialog", { name: "Aplicar a varias cámaras" });
+    await waitFor(() => expect(fetchMock.mock.calls.some(([r]) => new URL((r as Request).url).searchParams.get("server_id") === "s1")).toBe(true));
+    expect(within(dialog).getByRole("checkbox", { name: "acceso (actual)" })).toBeChecked();
+    expect(within(dialog).getByRole("checkbox", { name: "acceso (actual)" })).toBeDisabled();
+    fireEvent.click(within(dialog).getByRole("checkbox", { name: "patio" }));
+    fireEvent.click(within(dialog).getByRole("button", { name: "Aplicar cambios" }));
+
+    await waitFor(() => {
+      const patches = fetchMock.mock.calls.map(([r]) => r as Request).filter((r) => r.method === "PATCH");
+      expect(patches.map((r) => new URL(r.url).pathname)).toEqual(expect.arrayContaining([
+        "/api/v1/cameras/c1/frigate-config",
+        "/api/v1/cameras/c2/frigate-config",
+      ]));
+    });
+    const patches = fetchMock.mock.calls.map(([r]) => r as Request).filter((r) => r.method === "PATCH");
+    expect(await Promise.all(patches.map((r) => r.clone().json()))).toEqual([
+      { sections: { detect: { fps: 12 } } },
+      { sections: { detect: { fps: 12 } } },
+    ]);
+  });
+
+  it("reports partial bulk failures without hiding successful camera updates", async () => {
+    const fetchMock = mount({}, {
+      "/api/v1/cameras": () => json({ items: [
+        { id: "c1", display_name: "acceso", server_id: "s1" },
+        { id: "c2", display_name: "patio", server_id: "s1" },
+      ] }),
+      "PATCH /api/v1/cameras/c2/frigate-config": () => json({ code: "forbidden", message: "permission denied" }, 403),
+    });
+    fireEvent.change(await screen.findByLabelText("Fps"), { target: { value: "12" } });
+    fireEvent.click(screen.getByRole("button", { name: "Aplicar a varias cámaras" }));
+    const dialog = await screen.findByRole("dialog", { name: "Aplicar a varias cámaras" });
+    fireEvent.click(within(dialog).getByRole("checkbox", { name: "patio" }));
+    fireEvent.click(within(dialog).getByRole("button", { name: "Aplicar cambios" }));
+
+    expect(await within(dialog).findByText("acceso: aplicada")).toBeInTheDocument();
+    expect(await within(dialog).findByText(/patio: no aplicada/)).toBeInTheDocument();
+    expect(screen.getByLabelText("Fps")).toHaveValue(12);
+    expect(fetchMock.mock.calls.map(([r]) => r as Request).filter((r) => r.method === "PATCH")).toHaveLength(2);
   });
 
   it("blocks review on invalid values and locks credentials without the secrets permission", async () => {
@@ -119,6 +181,60 @@ describe("FrigateCameraConfig", () => {
     await waitFor(() => expect(fetchMock.mock.calls.some(([r]) => (r as Request).method === "PATCH")).toBe(true));
     const patch = fetchMock.mock.calls.map(([r]) => r as Request).find((r) => r.method === "PATCH")!;
     expect(await patch.clone().json()).toEqual({ sections: { objects: { track: ["person", "dog"] } } });
+  });
+
+  it.each([
+    {
+      section: "autotracking",
+      navLabel: "Autotracking",
+      panelTitle: "Seguimiento automático",
+      initial: { enabled: false },
+      edit: async (panel: HTMLElement) => {
+        const field = within(panel).getByRole("switch", { name: "Enabled" });
+        fireEvent.click(field);
+        return { enabled: true };
+      },
+      expected: { autotracking: { enabled: true } },
+    },
+    {
+      section: "face_recognition",
+      navLabel: "Reconocimiento facial",
+      panelTitle: "Reconocimiento facial",
+      initial: { min_score: 0.6 },
+      edit: async (panel: HTMLElement) => {
+        fireEvent.change(within(panel).getByLabelText("Minimum score"), { target: { value: "0.8" } });
+        return { min_score: 0.8 };
+      },
+      expected: { face_recognition: { min_score: 0.8 } },
+    },
+    {
+      section: "genai",
+      navLabel: "IA generativa",
+      panelTitle: "IA generativa",
+      initial: { prompt: "Describe the scene" },
+      edit: async (panel: HTMLElement) => {
+        fireEvent.change(within(panel).getByLabelText("Prompt"), { target: { value: "Summarize the scene" } });
+        return { prompt: "Summarize the scene" };
+      },
+      expected: { genai: { prompt: "Summarize the scene" } },
+    },
+  ])("shows schema-backed $section settings and saves through the camera patch", async ({ section, navLabel, panelTitle, initial, edit, expected }) => {
+    const fetchMock = mount({ config: { [section]: initial } });
+    fireEvent.click(await screen.findByRole("button", { name: new RegExp(navLabel, "i") }));
+    const heading = await screen.findByRole("heading", { name: panelTitle });
+    expect(heading).toBeInTheDocument();
+    expect(await screen.findByText("Opciones avanzadas")).toBeInTheDocument();
+    await edit(heading.parentElement!);
+    fireEvent.click(screen.getByRole("button", { name: "Revisar cambios" }));
+    const dialog = await screen.findByRole("dialog", { name: "Revisar cambios" });
+    fireEvent.click(within(dialog).getByRole("button", { name: "Aplicar" }));
+
+    await waitFor(() => {
+      const patch = fetchMock.mock.calls.map(([r]) => r as Request).find((r) => r.method === "PATCH");
+      expect(patch).toBeDefined();
+    });
+    const patch = fetchMock.mock.calls.map(([r]) => r as Request).find((r) => r.method === "PATCH")!;
+    expect(await patch.clone().json()).toEqual({ sections: expected });
   });
 
   it("lists revisions and restores one after confirmation", async () => {
