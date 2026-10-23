@@ -175,7 +175,7 @@ describe("Faces page", () => {
     await waitFor(() => expect(calls.some((call) => call.method === "POST" && call.path === "/api/v1/faces/persons/deleted-1/force-purge")).toBe(true));
     expect(await screen.findByRole("status")).toHaveTextContent("Se borraron las etiquetas de los eventos. La limpieza quedó en cola hasta que los servidores vuelvan a estar disponibles.");
     await waitFor(() => expect(calls.filter((call) => call.method === "GET" && call.path === "/api/v1/faces/persons/tombstones").length).toBeGreaterThanOrEqual(2));
-    expect(screen.queryByRole("button", { name: "Force purge" })).not.toBeInTheDocument();
+    await waitFor(() => expect(screen.queryByRole("button", { name: "Forzar purga" })).not.toBeInTheDocument());
   });
 
   it("does not request or show pending tombstones to a faces.view-only user", async () => {
