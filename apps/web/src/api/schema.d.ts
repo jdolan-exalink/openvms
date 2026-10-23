@@ -2037,6 +2037,29 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/faces/review-inbox/suggestion-decisions": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Record whether two suggested identities are the same person (faces.manage)
+         * @description Stores the operator's verdict on a suggested pair of pending identities. A "different"
+         *     verdict hides the pair from future suggestions. Both verdicts keep the similarity the
+         *     operator saw so the suggestion threshold can be calibrated on real decisions. A later
+         *     verdict for the same pair replaces the earlier one. Grouping is a separate action.
+         */
+        post: operations["recordFaceSuggestionDecision"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/faces/review-inbox/{sightingId}/image": {
         parameters: {
             query?: never;
@@ -5111,6 +5134,15 @@ export interface components {
         };
         FaceReviewInbox: {
             items: components["schemas"]["FaceReviewSighting"][];
+        };
+        FaceSuggestionDecisionCreate: {
+            /** Format: uuid */
+            identity_id: string;
+            /** Format: uuid */
+            other_identity_id: string;
+            /** @enum {string} */
+            decision: "same" | "different";
+            similarity: number;
         };
         FaceReviewIdentityGroupCreate: {
             sighting_ids: string[];
@@ -9940,6 +9972,34 @@ export interface operations {
             403: components["responses"]["Forbidden"];
             404: components["responses"]["NotFound"];
             409: components["responses"]["Conflict"];
+        };
+    };
+    recordFaceSuggestionDecision: {
+        parameters: {
+            query?: {
+                tenant_id?: string;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["FaceSuggestionDecisionCreate"];
+            };
+        };
+        responses: {
+            /** @description Verdict recorded */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            400: components["responses"]["BadRequest"];
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
         };
     };
     getFaceReviewSightingImage: {

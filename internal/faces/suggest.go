@@ -1,6 +1,7 @@
 package faces
 
 import (
+	"bytes"
 	"math"
 	"sort"
 
@@ -31,9 +32,21 @@ type embeddedSighting struct {
 	Vector     []float32
 }
 
+// pairSet holds unordered pairs of identities, normalized with identityPair.
+type pairSet map[[2]uuid.UUID]struct{}
+
+// identityPair orders two identity IDs so (a, b) and (b, a) are the same key.
+func identityPair(a, b uuid.UUID) [2]uuid.UUID {
+	if bytes.Compare(a[:], b[:]) > 0 {
+		a, b = b, a
+	}
+	return [2]uuid.UUID{a, b}
+}
+
 // suggestIdentities returns, per identity, up to perIdentity other identities whose best member pair
-// reaches threshold. Vectors are only compared when profile and model id match.
-func suggestIdentities(items []embeddedSighting, threshold float64, perIdentity int) map[uuid.UUID][]Suggestion {
+// reaches threshold. Vectors are only compared when profile and model id match, and pairs the
+// operator already ruled out (excluded) are skipped before the per-identity cap applies.
+func suggestIdentities(items []embeddedSighting, threshold float64, perIdentity int, excluded pairSet) map[uuid.UUID][]Suggestion {
 	if len(items) > maxSuggestionCandidates {
 		items = items[:maxSuggestionCandidates]
 	}
@@ -62,6 +75,9 @@ func suggestIdentities(items []embeddedSighting, threshold float64, perIdentity 
 			a, b := items[i], items[j]
 			if norms[j] == 0 || a.IdentityID == b.IdentityID || a.Profile != b.Profile || a.Model != b.Model ||
 				len(a.Vector) != len(b.Vector) {
+				continue
+			}
+			if _, ruledOut := excluded[identityPair(a.IdentityID, b.IdentityID)]; ruledOut {
 				continue
 			}
 			var dot float64

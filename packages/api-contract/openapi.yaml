@@ -2562,6 +2562,29 @@ paths:
         "403": { $ref: "#/components/responses/Forbidden" }
         "404": { $ref: "#/components/responses/NotFound" }
         "409": { $ref: "#/components/responses/Conflict" }
+  /api/v1/faces/review-inbox/suggestion-decisions:
+    post:
+      tags: [faces]
+      operationId: recordFaceSuggestionDecision
+      summary: Record whether two suggested identities are the same person (faces.manage)
+      description: |
+        Stores the operator's verdict on a suggested pair of pending identities. A "different"
+        verdict hides the pair from future suggestions. Both verdicts keep the similarity the
+        operator saw so the suggestion threshold can be calibrated on real decisions. A later
+        verdict for the same pair replaces the earlier one. Grouping is a separate action.
+      parameters:
+        - { name: tenant_id, in: query, schema: { type: string, format: uuid } }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/FaceSuggestionDecisionCreate" }
+      responses:
+        "204": { description: Verdict recorded }
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { $ref: "#/components/responses/NotFound" }
   /api/v1/faces/review-inbox/{sightingId}/image:
     get:
       tags: [faces]
@@ -6380,6 +6403,14 @@ components:
       required: [items]
       properties:
         items: { type: array, items: { $ref: "#/components/schemas/FaceReviewSighting" } }
+    FaceSuggestionDecisionCreate:
+      type: object
+      required: [identity_id, other_identity_id, decision, similarity]
+      properties:
+        identity_id: { type: string, format: uuid }
+        other_identity_id: { type: string, format: uuid }
+        decision: { type: string, enum: [same, different] }
+        similarity: { type: number, minimum: 0, maximum: 1 }
     FaceReviewIdentityGroupCreate:
       type: object
       required: [sighting_ids]

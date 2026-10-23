@@ -2,6 +2,7 @@ package faces
 
 import (
 	"context"
+	"math"
 	"strings"
 	"time"
 
@@ -15,10 +16,11 @@ import (
 )
 
 const (
-	ActionSightingRead     = "FACE_SIGHTING_READ"
-	ActionSightingAssigned = "FACE_SIGHTING_ASSIGNED"
-	ActionSightingRejected = "FACE_SIGHTING_REJECTED"
-	ActionIdentityGrouped  = "FACE_IDENTITY_GROUPED"
+	ActionSightingRead      = "FACE_SIGHTING_READ"
+	ActionSightingAssigned  = "FACE_SIGHTING_ASSIGNED"
+	ActionSightingRejected  = "FACE_SIGHTING_REJECTED"
+	ActionIdentityGrouped   = "FACE_IDENTITY_GROUPED"
+	ActionSuggestionDecided = "FACE_SUGGESTION_DECIDED"
 )
 
 // ReviewSighting is one persisted, still-unclassified face attempt. Source filenames remain
@@ -61,6 +63,7 @@ func (s *Service) ListReviewSightings(ctx context.Context, actor authz.Actor, f 
 	var tenants []uuid.UUID
 	var rows []db.ListFaceReviewSightingsRow
 	var embeddings []db.ListFaceSightingEmbeddingsRow
+	var ruledOut pairSet
 	if err := s.Store.TxRaw(ctx, store.ScopeFor(actor), func(tx pgx.Tx) error {
 		q := db.New(tx)
 		c, err := access.Load(ctx, q, actor)
@@ -81,6 +84,18 @@ func (s *Service) ListReviewSightings(ctx context.Context, actor authz.Actor, f 
 			ids = append(ids, row.ID)
 		}
 		embeddings, err = q.ListFaceSightingEmbeddings(ctx, ids)
+		if err != nil {
+			return err
+		}
+		identityIDs := make([]uuid.UUID, 0, len(rows))
+		for _, row := range rows {
+			identityIDs = append(identityIDs, row.IdentityID)
+		}
+		pairs, err := q.ListFaceDifferentIdentityPairs(ctx, db.ListFaceDifferentIdentityPairsParams{TenantIds: nonNil(tenants), IdentityIds: identityIDs})
+		ruledOut = make(pairSet, len(pairs))
+		for _, p := range pairs {
+			ruledOut[identityPair(p.IdentityLo, p.IdentityHi)] = struct{}{}
+		}
 		return err
 	}); err != nil {
 		return ReviewSightingsPage{}, err
@@ -95,7 +110,7 @@ func (s *Service) ListReviewSightings(ctx context.Context, actor authz.Actor, f 
 			ID: e.ID, IdentityID: e.IdentityID, Profile: *e.EmbeddingProfile, Model: *e.EmbeddingModel, Vector: e.Embedding,
 		})
 	}
-	suggestions := suggestIdentities(candidates, DefaultSuggestionThreshold, maxSuggestionPerIdentity)
+	suggestions := suggestIdentities(candidates, DefaultSuggestionThreshold, maxSuggestionPerIdentity, ruledOut)
 	out := ReviewSightingsPage{Items: make([]ReviewSighting, 0, len(rows))}
 	counts := make(map[uuid.UUID]int, len(tenants))
 	for _, tenantID := range tenants {
@@ -219,6 +234,48 @@ func (s *Service) GroupReviewSightings(ctx context.Context, actor authz.Actor, t
 		})
 	})
 	return result, err
+}
+
+// Suggestion verdicts an operator can record for a pair of identities.
+const (
+	SuggestionSame      = "same"
+	SuggestionDifferent = "different"
+)
+
+// RecordSuggestionDecision stores an operator verdict on a suggested pair of identities, replacing an
+// earlier verdict for the same pair. A "different" verdict hides the pair from future suggestions;
+// the similarity the operator saw is kept so the threshold can be calibrated on real decisions.
+func (s *Service) RecordSuggestionDecision(ctx context.Context, actor authz.Actor, tenantID, identityID, otherID uuid.UUID, decision string, similarity float64) error {
+	if identityID == uuid.Nil || otherID == uuid.Nil || identityID == otherID {
+		return invalid("two different identity IDs are required")
+	}
+	if decision != SuggestionSame && decision != SuggestionDifferent {
+		return invalid("decision must be %q or %q", SuggestionSame, SuggestionDifferent)
+	}
+	if math.IsNaN(similarity) || similarity < 0 || similarity > 1 {
+		return invalid("similarity must be between 0 and 1")
+	}
+	pair := identityPair(identityID, otherID)
+	return s.tx(ctx, actor, tenantID, authz.FacesManage, func(q *db.Queries) error {
+		for _, id := range pair {
+			pending, err := q.FaceIdentityIsPending(ctx, db.FaceIdentityIsPendingParams{TenantID: tenantID, IdentityID: id})
+			if err != nil {
+				return err
+			}
+			if !pending {
+				return store.ErrNotFound
+			}
+		}
+		if err := q.UpsertFaceSuggestionDecision(ctx, db.UpsertFaceSuggestionDecisionParams{
+			TenantID: tenantID, IdentityLo: pair[0], IdentityHi: pair[1], Decision: decision,
+			Similarity: float32(similarity), DecidedBy: &actor.UserID,
+		}); err != nil {
+			return err
+		}
+		return s.audit(ctx, q, actor, tenantID, ActionSuggestionDecided, "face_identity", pair[0], map[string]any{
+			"identity_ids": []uuid.UUID{pair[0], pair[1]}, "decision": decision, "similarity": similarity,
+		})
+	})
 }
 
 // ReviewSightingImage serves a retained crop only while its sighting is pending review.
