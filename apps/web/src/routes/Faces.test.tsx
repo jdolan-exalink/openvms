@@ -122,7 +122,7 @@ describe("Faces page as a platform administrator", () => {
   });
 
   it("uses plain train thumbnail URLs and assigns without a tenant", async () => {
-    const reviewInbox = { items: [{ id: "sighting-1", server_id: "s1", server_name: "h01", site_id: "site1", first_seen_at: "2026-10-17T12:00:00Z", crop_available: true }] };
+    const reviewInbox = { items: [{ id: "sighting-1", identity_id: "identity-1", server_id: "s1", server_name: "h01", site_id: "site1", first_seen_at: "2026-10-17T12:00:00Z", crop_available: true }] };
     const { calls } = install({ tenantId: null, persons: [person("p1", "Ana")], reviewInbox });
     renderPage(Faces);
     fireEvent.click(await screen.findByRole("tab", { name: "Entrenar" }));
@@ -328,8 +328,8 @@ describe("Faces page", () => {
   describe("Entrenar", () => {
     const attempts = {
       items: [
-        { id: "sighting-a", server_id: "s1", server_name: "h01", site_id: "s1", first_seen_at: "2026-10-17T12:00:00Z", seen_at: "2026-10-17T12:00:00Z", score: 0.41, crop_available: true },
-        { id: "sighting-b", server_id: "s1", server_name: "h01", site_id: "s1", first_seen_at: "2026-10-17T12:01:00Z", crop_available: true },
+        { id: "sighting-a", identity_id: "identity-a", server_id: "s1", server_name: "h01", site_id: "s1", first_seen_at: "2026-10-17T12:00:00Z", seen_at: "2026-10-17T12:00:00Z", score: 0.41, crop_available: true },
+        { id: "sighting-b", identity_id: "identity-b", server_id: "s1", server_name: "h01", site_id: "s1", first_seen_at: "2026-10-17T12:01:00Z", crop_available: true },
       ],
     };
 
