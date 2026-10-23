@@ -21,7 +21,7 @@ by themselves: a manager confirms each grouping.
 |---|---|---|
 | `FACE_EMBEDDING_MODEL_PATH` | `/opt/openvms/face-models/arcfaceresnet100-8-spatial1.onnx` | CPU ONNX model |
 | `FACE_EMBEDDING_HEF_PATH` | empty | Hailo-8 HEF; preferred over CPU when it initializes and passes the smoke inference |
-| `FACE_DETECTOR_MODEL_PATH` | `/opt/openvms/face-models/face_detection_yunet_2023mar.onnx` | YuNet detector that runs before embedding. Set it empty to disable the gate. If it is set but the file cannot be loaded, embedding pauses (`face embedding paused` in the log) instead of embedding non-faces |
+| `FACE_DETECTOR_MODEL_PATH` | `/opt/openvms/face-models/face_detection_yunet_2023mar.onnx` | YuNet detector that runs before embedding. Set it empty to disable the gate. If the file does not exist yet (an upgrade that has not run the prepare script), the worker logs a warning, keeps embedding without the gate, and needs a restart once the file is there. If the file exists but cannot be loaded, embedding pauses (`face embedding paused` in the log) instead of embedding non-faces |
 | `FACE_EMBEDDING_MODEL_ID` | `omz-arcfaceresnet100-8-spatial1` | Stored with every vector, plus an input-preprocessing version (`+in2`). Change it with the model; vectors from other ids or preprocessing versions are recomputed and never compared |
 
 ## Notes

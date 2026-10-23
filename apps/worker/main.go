@@ -377,8 +377,13 @@ func runFaceEmbedding(ctx context.Context, st *store.Store, blobs faces.Blobs, l
 	}
 	defer func() { _ = selection.Runtime.Close() }()
 	var detector faces.FaceDetector
-	if detectorPath := os.Getenv("FACE_DETECTOR_MODEL_PATH"); detectorPath != "" {
-		// A configured detector that cannot start pauses embedding: running without it would quietly
+	if detectorPath := os.Getenv("FACE_DETECTOR_MODEL_PATH"); detectorPath == "" {
+		log.Info("face detector gate disabled: set FACE_DETECTOR_MODEL_PATH to keep crops that are not faces out of the suggestions")
+	} else if _, statErr := os.Stat(detectorPath); os.IsNotExist(statErr) { //nolint:gosec // operator-controlled deployment config, not request input.
+		// An upgrade that has not fetched the detector yet keeps embedding, without the gate.
+		log.Warn("face detector gate disabled: model file not found; run deploy/faces/prepare-arcface-model.sh and restart the worker", "path", detectorPath)
+	} else {
+		// A detector that exists but cannot start pauses embedding: running without it would quietly
 		// embed crops that are not faces again.
 		detector, err = faces.OpenYuNet(faces.YuNetConfig{ModelPath: detectorPath, LibraryPath: libraryPath})
 		if err != nil {
@@ -386,8 +391,6 @@ func runFaceEmbedding(ctx context.Context, st *store.Store, blobs faces.Blobs, l
 			return
 		}
 		defer func() { _ = detector.Close() }()
-	} else {
-		log.Info("face detector gate disabled: set FACE_DETECTOR_MODEL_PATH to keep crops that are not faces out of the suggestions")
 	}
 	log.Info("face embedding ready", "profile", selection.Profile, "model_id", modelID, "detector", detector != nil)
 	embedder := &faces.Embedder{Store: st, Blobs: blobs, Runtime: selection.Runtime, ModelID: modelID, Detector: detector, Log: log}

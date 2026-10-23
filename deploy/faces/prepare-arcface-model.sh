@@ -39,9 +39,19 @@ echo "Model ready: $target/arcfaceresnet100-8-spatial1.onnx"
 detector="face_detection_yunet_2023mar.onnx"
 detector_url="https://github.com/opencv/opencv_zoo/raw/main/models/face_detection_yunet/${detector}"
 detector_sha256="8f2383e4dd3cfbb4553ea8718107fc0423210dc964f9f4280604804ed2552fa4"
+# A file that is already there but fails the checksum (truncated, corrupted) is fetched again, and a
+# download only takes its final name after it passes the checksum.
+if [ -f "$target/$detector" ] && ! echo "$detector_sha256  $target/$detector" | sha256sum -c - >/dev/null 2>&1; then
+  echo "Existing $detector fails its checksum; downloading it again" >&2
+  rm -f "$target/$detector"
+fi
 if [ ! -f "$target/$detector" ]; then
   curl -fSL --retry 3 -o "$target/$detector.part" "$detector_url"
+  if ! echo "$detector_sha256  $target/$detector.part" | sha256sum -c - >/dev/null 2>&1; then
+    rm -f "$target/$detector.part"
+    echo "Downloaded $detector does not match the pinned checksum" >&2
+    exit 1
+  fi
   mv "$target/$detector.part" "$target/$detector"
 fi
-echo "$detector_sha256  $target/$detector" | sha256sum -c -
 echo "Detector ready: $target/$detector"

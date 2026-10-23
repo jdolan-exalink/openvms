@@ -71,58 +71,15 @@ func (e *Embedder) RunOnce(ctx context.Context, limit int) (int, error) {
 		if row.CropKey == nil {
 			continue
 		}
-		img, err := e.loadCrop(ctx, *row.CropKey)
-		if err != nil {
+		outcome, ok := e.processRow(ctx, row, profile)
+		switch {
+		case !ok:
 			failed++
-			e.warn(ctx, "embed face sighting", row, err)
-			e.recordFailure(ctx, row)
-			continue
+		case outcome == outcomeEmbedded:
+			done++
+		case outcome == outcomeRejected:
+			rejected++
 		}
-		var detected *bool
-		if e.Detector != nil && row.FaceDetected == nil {
-			has, err := e.Detector.HasFace(ctx, img)
-			if err != nil {
-				failed++
-				e.warn(ctx, "detect face in sighting", row, err)
-				e.recordFailure(ctx, row)
-				continue
-			}
-			if !has {
-				if e.mark(ctx, row, func(q *db.Queries) error { _, err := q.MarkFaceSightingNotFace(ctx, row.ID); return err }) {
-					rejected++
-				} else {
-					failed++
-				}
-				continue
-			}
-			detected = &has
-			if row.EmbeddedCurrent {
-				if !e.mark(ctx, row, func(q *db.Queries) error { _, err := q.MarkFaceSightingFace(ctx, row.ID); return err }) {
-					failed++
-				}
-				continue
-			}
-		}
-		vector, err := e.embed(ctx, img)
-		if err != nil {
-			failed++
-			e.warn(ctx, "embed face sighting", row, err)
-			e.recordFailure(ctx, row)
-			continue
-		}
-		var stored int64
-		if err := e.Store.Tx(ctx, store.AllTenants, func(q *db.Queries) error {
-			var err error
-			stored, err = q.SetFaceSightingEmbedding(ctx, db.SetFaceSightingEmbeddingParams{
-				ID: row.ID, Embedding: vector, Profile: profile, Model: e.storedModel(), FaceDetected: detected,
-			})
-			return err
-		}); err != nil {
-			failed++
-			e.warn(ctx, "store face embedding", row, err)
-			continue
-		}
-		done += int(stored)
 	}
 	if rejected > 0 && e.Log != nil {
 		e.Log.InfoContext(ctx, "face crops rejected as non-faces", "count", rejected)
@@ -131,6 +88,79 @@ func (e *Embedder) RunOnce(ctx context.Context, limit int) (int, error) {
 		return done, fmt.Errorf("%d of %d face sightings could not be processed", failed, len(rows))
 	}
 	return done, nil
+}
+
+type rowOutcome int
+
+const (
+	outcomeNone     rowOutcome = iota // already judged, nothing to store
+	outcomeEmbedded                   // a vector was stored
+	outcomeRejected                   // the detector said it is not a face
+)
+
+// processRow runs one pending sighting through the detector gate (when configured) and the
+// embedder. A false ok means a step failed; the failure is logged and, where retrying makes sense,
+// counted against the crop's retry budget.
+func (e *Embedder) processRow(ctx context.Context, row db.ListFaceSightingsToEmbedRow, profile string) (outcome rowOutcome, ok bool) {
+	img, err := e.loadCrop(ctx, *row.CropKey)
+	if err != nil {
+		e.fail(ctx, "embed face sighting", row, err)
+		return outcomeNone, false
+	}
+	var detected *bool
+	if e.Detector != nil && row.FaceDetected == nil {
+		has, err := e.Detector.HasFace(ctx, img)
+		if err != nil {
+			e.fail(ctx, "detect face in sighting", row, err)
+			return outcomeNone, false
+		}
+		if !has {
+			return outcomeRejected, e.store(ctx, "store face detection", row, func(q *db.Queries) error {
+				_, err := q.MarkFaceSightingNotFace(ctx, row.ID)
+				return err
+			})
+		}
+		if row.EmbeddedCurrent {
+			// The vector predates the gate but is current: only the verdict is new.
+			return outcomeNone, e.store(ctx, "store face detection", row, func(q *db.Queries) error {
+				_, err := q.MarkFaceSightingFace(ctx, row.ID)
+				return err
+			})
+		}
+		detected = &has
+	}
+	vector, err := e.embed(ctx, img)
+	if err != nil {
+		e.fail(ctx, "embed face sighting", row, err)
+		return outcomeNone, false
+	}
+	stored := false
+	ok = e.store(ctx, "store face embedding", row, func(q *db.Queries) error {
+		n, err := q.SetFaceSightingEmbedding(ctx, db.SetFaceSightingEmbeddingParams{
+			ID: row.ID, Embedding: vector, Profile: profile, Model: e.storedModel(), FaceDetected: detected,
+		})
+		stored = n > 0
+		return err
+	})
+	if ok && stored {
+		return outcomeEmbedded, true
+	}
+	return outcomeNone, ok
+}
+
+// fail logs a step that failed on the crop itself and spends one retry of its budget.
+func (e *Embedder) fail(ctx context.Context, message string, row db.ListFaceSightingsToEmbedRow, err error) {
+	e.warn(ctx, message, row, err)
+	e.recordFailure(ctx, row)
+}
+
+// store persists a result and reports whether the write succeeded.
+func (e *Embedder) store(ctx context.Context, message string, row db.ListFaceSightingsToEmbedRow, write func(*db.Queries) error) bool {
+	if err := e.Store.Tx(ctx, store.AllTenants, write); err != nil {
+		e.warn(ctx, message, row, err)
+		return false
+	}
+	return true
 }
 
 func (e *Embedder) loadCrop(ctx context.Context, key string) (image.Image, error) {
@@ -154,15 +184,6 @@ func (e *Embedder) embed(ctx context.Context, img image.Image) ([]float32, error
 		return nil, fmt.Errorf("embedding has %d values, want %d", len(vector), embeddingVectorSize)
 	}
 	return vector, nil
-}
-
-// mark stores a detector verdict that needs no new vector and reports whether it was persisted.
-func (e *Embedder) mark(ctx context.Context, row db.ListFaceSightingsToEmbedRow, write func(*db.Queries) error) bool {
-	if err := e.Store.Tx(ctx, store.AllTenants, func(q *db.Queries) error { return write(q) }); err != nil {
-		e.warn(ctx, "store face detection", row, err)
-		return false
-	}
-	return true
 }
 
 func (e *Embedder) recordFailure(ctx context.Context, row db.ListFaceSightingsToEmbedRow) {

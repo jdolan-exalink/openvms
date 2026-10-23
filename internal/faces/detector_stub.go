@@ -4,6 +4,7 @@ package faces
 
 import "errors"
 
+// YuNetConfig must mirror the fields of the cgo definition in detector_ort.go.
 type YuNetConfig struct {
 	ModelPath   string
 	LibraryPath string
