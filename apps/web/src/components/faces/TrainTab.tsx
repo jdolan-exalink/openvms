@@ -151,9 +151,20 @@ export function TrainTab({ canManage }: { canManage: boolean }) {
   const train = useQuery(faceReviewInboxQuery({ site_id: scope.site ? [scope.site] : undefined, server_id: scope.server ? [scope.server] : undefined }));
   const persons = useQuery(facePersonsQuery());
   const data = train.data;
+  const [confirmRejectSelected, setConfirmRejectSelected] = useState(false);
   const group = useMutation({
     mutationFn: async (ids: string[]) => unwrap(await api.POST("/api/v1/faces/review-inbox/groups", { body: { sighting_ids: ids } })),
     onSuccess: async () => {
+      setSelected(new Set());
+      await qc.invalidateQueries({ queryKey: ["faces", "review-inbox"] });
+    },
+  });
+  const rejectSelected = useMutation({
+    mutationFn: async (ids: string[]) => {
+      for (const id of ids) unwrap(await api.DELETE("/api/v1/faces/review-inbox/{sightingId}", { params: { path: { sightingId: id } } }));
+    },
+    onSettled: async () => {
+      setConfirmRejectSelected(false);
       setSelected(new Set());
       await qc.invalidateQueries({ queryKey: ["faces", "review-inbox"] });
     },
@@ -177,8 +188,23 @@ export function TrainTab({ canManage }: { canManage: boolean }) {
             <Button variant="tonal" disabled={selected.size < 2 || group.isPending} onClick={() => group.mutate(Array.from(selected))}>
               {group.isPending ? t("faces.grouping") : t("faces.groupSelected")}
             </Button>
+            <Button variant="text" disabled={selected.size < 1 || rejectSelected.isPending} onClick={() => setConfirmRejectSelected(true)}>
+              {t("faces.rejectSelected")}
+            </Button>
             <ErrorNote error={group.error} />
+            <ErrorNote error={rejectSelected.error} />
           </div>}
+          {confirmRejectSelected && (
+            <ConfirmDialog
+              title={t("faces.rejectSelectedTitle")}
+              message={t("faces.rejectSelectedMessage", { count: selected.size })}
+              confirmLabel={t("faces.rejectSelectedConfirm")}
+              pending={rejectSelected.isPending}
+              error={rejectSelected.error}
+              onConfirm={() => rejectSelected.mutate(Array.from(selected))}
+              onCancel={() => setConfirmRejectSelected(false)}
+            />
+          )}
           <ul className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4" aria-label={t("faces.trainList")}>
             {data.items.map((a) => (
               <AttemptCard

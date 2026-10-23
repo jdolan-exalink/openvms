@@ -93,6 +93,40 @@ describe("Faces review inbox", () => {
     }));
     expect(await screen.findAllByText(new RegExp(groupID))).toHaveLength(2);
   });
+  it("rejects every selected sighting only after the manager confirms", async () => {
+    const calls: { method: string; path: string }[] = [];
+    let remaining = [sighting, secondSighting];
+    vi.stubGlobal("fetch", vi.fn(async (raw: Request) => {
+      const url = new URL(raw.url);
+      if (raw.method === "DELETE") {
+        calls.push({ method: raw.method, path: url.pathname });
+        remaining = remaining.filter((s) => url.pathname !== `/api/v1/faces/review-inbox/${s.id}`);
+        return new Response(null, { status: 204 });
+      }
+      if (url.pathname === "/api/v1/me") return json({ id: "u1", username: "u1", display_name: "u1", mfa_enabled: false, must_change_password: false, auth_method: "session", tenant_id: "t1", grants: ["faces.view", "faces.manage"].map((permission) => ({ permission, effect: "allow", scope_type: "platform" })) });
+      if (url.pathname === "/api/v1/faces/persons") return json({ items: [] });
+      if (url.pathname === "/api/v1/faces/review-inbox") return json({ items: remaining });
+      if (url.pathname.startsWith("/api/v1/faces/review-inbox/")) return new Response(new Uint8Array(), { status: 200, headers: { "Content-Type": "image/png" } });
+      return json({ code: "not_found", message: "not found" }, 404);
+    }));
+
+    renderPage(Faces);
+    fireEvent.click(await screen.findByRole("tab", { name: "Entrenar" }));
+    const rejectSelected = await screen.findByRole("button", { name: "Rechazar seleccionados" });
+    expect(rejectSelected).toBeDisabled();
+    fireEvent.click(await screen.findByRole("checkbox", { name: new RegExp(sightingID) }));
+    fireEvent.click(screen.getByRole("checkbox", { name: new RegExp(sightingID2) }));
+    expect(rejectSelected).toBeEnabled();
+    fireEvent.click(rejectSelected);
+    const dialog = await screen.findByRole("dialog");
+    expect(calls).toEqual([]);
+    fireEvent.click(within(dialog).getByRole("button", { name: "Rechazar rostros" }));
+    await waitFor(() => expect(calls).toHaveLength(2));
+    expect(calls).toContainEqual({ method: "DELETE", path: `/api/v1/faces/review-inbox/${sightingID}` });
+    expect(calls).toContainEqual({ method: "DELETE", path: `/api/v1/faces/review-inbox/${sightingID2}` });
+    await waitFor(() => expect(screen.queryByRole("checkbox", { name: new RegExp(sightingID) })).toBeNull());
+  });
+
   it("offers a similarity suggestion that groups only when the manager accepts it", async () => {
     const calls: { method: string; path: string; body?: unknown }[] = [];
     vi.stubGlobal("fetch", vi.fn(async (raw: Request) => {
