@@ -1018,27 +1018,22 @@ func (q *Queries) ListFaceReviewSightings(ctx context.Context, arg ListFaceRevie
 }
 
 const listFaceSightingEmbeddings = `-- name: ListFaceSightingEmbeddings :many
-SELECT id, identity_group_id, COALESCE(identity_group_id, id) AS identity_id, embedding
+SELECT id, COALESCE(identity_group_id, id) AS identity_id, embedding_profile, embedding_model, embedding
 FROM face_sightings
-WHERE tenant_id = $1 AND review_status = 'pending' AND embedding IS NOT NULL
-  AND embedding_profile = $2::text AND embedding_model = $3::text
+WHERE id = ANY($1::uuid[]) AND review_status = 'pending' AND embedding IS NOT NULL
+ORDER BY first_seen_at, id
 `
 
-type ListFaceSightingEmbeddingsParams struct {
-	TenantID uuid.UUID
-	Profile  string
-	Model    string
-}
-
 type ListFaceSightingEmbeddingsRow struct {
-	ID              uuid.UUID
-	IdentityGroupID *uuid.UUID
-	IdentityID      uuid.UUID
-	Embedding       []float32
+	ID               uuid.UUID
+	IdentityID       uuid.UUID
+	EmbeddingProfile *string
+	EmbeddingModel   *string
+	Embedding        []float32
 }
 
-func (q *Queries) ListFaceSightingEmbeddings(ctx context.Context, arg ListFaceSightingEmbeddingsParams) ([]ListFaceSightingEmbeddingsRow, error) {
-	rows, err := q.db.Query(ctx, listFaceSightingEmbeddings, arg.TenantID, arg.Profile, arg.Model)
+func (q *Queries) ListFaceSightingEmbeddings(ctx context.Context, ids []uuid.UUID) ([]ListFaceSightingEmbeddingsRow, error) {
+	rows, err := q.db.Query(ctx, listFaceSightingEmbeddings, ids)
 	if err != nil {
 		return nil, err
 	}
@@ -1048,8 +1043,9 @@ func (q *Queries) ListFaceSightingEmbeddings(ctx context.Context, arg ListFaceSi
 		var i ListFaceSightingEmbeddingsRow
 		if err := rows.Scan(
 			&i.ID,
-			&i.IdentityGroupID,
 			&i.IdentityID,
+			&i.EmbeddingProfile,
+			&i.EmbeddingModel,
 			&i.Embedding,
 		); err != nil {
 			return nil, err

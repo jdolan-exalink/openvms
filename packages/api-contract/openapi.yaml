@@ -6310,6 +6310,16 @@ components:
         score: { type: number, format: double }
         crop_available: { type: boolean }
         ingest_error: { type: string, description: Sanitized retry reason; never contains source URLs or image data. }
+        suggestions:
+          type: array
+          description: Other pending identities that may be the same person. Advisory only; an operator must confirm grouping.
+          items: { $ref: "#/components/schemas/FaceReviewSuggestion" }
+    FaceReviewSuggestion:
+      type: object
+      required: [identity_id, similarity]
+      properties:
+        identity_id: { type: string, format: uuid, description: Identity ID (group ID or sighting ID) of the possible match. }
+        similarity: { type: number, format: double, description: Cosine similarity of the best member pair, between 0 and 1. }
     FaceReviewInbox:
       type: object
       required: [items]

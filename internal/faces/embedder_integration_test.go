@@ -57,3 +57,50 @@ func TestEmbedderStoresVectorsOnceAndRecomputesOnModelChange(t *testing.T) {
 		t.Fatalf("recomputed embeddings = %d, want 2", got)
 	}
 }
+
+func TestReviewSightingsSuggestSimilarIdentitiesWithoutGrouping(t *testing.T) {
+	sf := newSyncFixture(t)
+	sf.setCapability(sf.h01ID, sf.h01, true)
+	sf.svc.Adapters = inventory.NewAdapters(sf.env.Svc)
+	for i, f := range []string{
+		"1700000000.11-aa-1700000100-unknown-0.41.webp",
+		"1700000000.12-bb-1700000200-unknown-0.42.webp",
+		"1700000000.13-cc-1700000300-unknown-0.43.webp",
+	} {
+		sf.h01.AddFaceTrainImage(f, pngOf(t, byte(70+i)))
+	}
+	ctx := context.Background()
+	if err := (&faces.ReviewIngestor{Store: sf.env.Store, Blobs: sf.blobs, Adapters: sf.svc.Adapters, Log: sf.svc.Log}).RunOnce(ctx, 25); err != nil {
+		t.Fatal(err)
+	}
+	page, err := sf.svc.ListReviewSightings(ctx, sf.manager, faces.TrainFilter{TenantID: &sf.tenant})
+	if err != nil || len(page.Items) != 3 {
+		t.Fatalf("pending sightings = %d, %v", len(page.Items), err)
+	}
+	for _, item := range page.Items {
+		if len(item.Suggestions) != 0 {
+			t.Fatalf("sighting %s has suggestions before any embedding", item.ID)
+		}
+	}
+	// Two sightings share a vector; the third points elsewhere, so it must stay without suggestions.
+	emb := &faces.Embedder{Store: sf.env.Store, Blobs: sf.blobs, Runtime: &fakeEmbedder{profile: faces.EmbeddingProfileCPU}, ModelID: "m1", Log: sf.svc.Log}
+	if n, err := emb.RunOnce(ctx, 10); err != nil || n != 3 {
+		t.Fatalf("embedded %d, %v", n, err)
+	}
+	sf.exec(`UPDATE face_sightings SET embedding = (SELECT array_agg(CASE WHEN i = 2 THEN 1.0 ELSE 0.0 END::real ORDER BY i) FROM generate_series(1, 512) i) WHERE id = $1`, page.Items[2].ID)
+
+	page, err = sf.svc.ListReviewSightings(ctx, sf.manager, faces.TrainFilter{TenantID: &sf.tenant})
+	if err != nil {
+		t.Fatal(err)
+	}
+	withSuggestions := 0
+	for _, item := range page.Items {
+		withSuggestions += len(item.Suggestions)
+		if item.GroupID != nil {
+			t.Fatalf("sighting %s was grouped automatically", item.ID)
+		}
+	}
+	if withSuggestions != 2 {
+		t.Fatalf("suggestions = %d, want 2 (the matching pair, one each way)", withSuggestions)
+	}
+}

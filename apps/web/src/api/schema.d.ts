@@ -5051,6 +5051,20 @@ export interface components {
             crop_available: boolean;
             /** @description Sanitized retry reason; never contains source URLs or image data. */
             ingest_error?: string;
+            /** @description Other pending identities that may be the same person. Advisory only; an operator must confirm grouping. */
+            suggestions?: components["schemas"]["FaceReviewSuggestion"][];
+        };
+        FaceReviewSuggestion: {
+            /**
+             * Format: uuid
+             * @description Identity ID (group ID or sighting ID) of the possible match.
+             */
+            identity_id: string;
+            /**
+             * Format: double
+             * @description Cosine similarity of the best member pair
+             */
+            similarity: number;
         };
         FaceReviewInbox: {
             items: components["schemas"]["FaceReviewSighting"][];

@@ -421,6 +421,13 @@ func (h *Handlers) ListFaceReviewInbox(ctx context.Context, r gen.ListFaceReview
 			reason := sighting.IngestError
 			item.IngestError = &reason
 		}
+		if len(sighting.Suggestions) > 0 {
+			suggestions := make([]gen.FaceReviewSuggestion, 0, len(sighting.Suggestions))
+			for _, sug := range sighting.Suggestions {
+				suggestions = append(suggestions, gen.FaceReviewSuggestion{IdentityId: sug.IdentityID, Similarity: sug.Similarity})
+			}
+			item.Suggestions = &suggestions
+		}
 		out.Items = append(out.Items, item)
 	}
 	return out, nil

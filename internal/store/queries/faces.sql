@@ -221,7 +221,7 @@ SET embedding = @embedding::real[], embedding_profile = @profile::text, embeddin
 WHERE id = @id AND review_status = 'pending' AND crop_key IS NOT NULL;
 
 -- name: ListFaceSightingEmbeddings :many
-SELECT id, identity_group_id, COALESCE(identity_group_id, id) AS identity_id, embedding
+SELECT id, COALESCE(identity_group_id, id) AS identity_id, embedding_profile, embedding_model, embedding
 FROM face_sightings
-WHERE tenant_id = @tenant_id AND review_status = 'pending' AND embedding IS NOT NULL
-  AND embedding_profile = @profile::text AND embedding_model = @model::text;
+WHERE id = ANY(@ids::uuid[]) AND review_status = 'pending' AND embedding IS NOT NULL
+ORDER BY first_seen_at, id;
