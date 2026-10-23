@@ -15,7 +15,6 @@ import (
 )
 
 const (
-	faceModelInputSize  = 112
 	faceModelVectorSize = 512
 )
 
