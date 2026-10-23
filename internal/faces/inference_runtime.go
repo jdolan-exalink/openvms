@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"image"
 )
 
 type EmbeddingProfile string
@@ -20,6 +21,7 @@ var ErrEmbeddingRuntimeUnavailable = errors.New("face embedding runtime unavaila
 // Implementations must not use a retained face crop for readiness checks.
 type EmbeddingRuntime interface {
 	Profile() EmbeddingProfile
+	Embed(context.Context, image.Image) ([]float32, error)
 	Smoke(context.Context) error
 	Close() error
 }
@@ -37,7 +39,7 @@ type EmbeddingRuntimeSelection struct {
 	Runtime EmbeddingRuntime
 }
 
-// SelectEmbeddingRuntime prefers NVIDIA, then Hailo-8, then CPU. Device
+// SelectEmbeddingRuntime prefers Hailo-8, then CPU. Device
 // visibility alone is not sufficient: the factory must initialize the real
 // provider and Smoke must successfully execute an inference before selection.
 func SelectEmbeddingRuntime(ctx context.Context, factories []EmbeddingRuntimeFactory) (EmbeddingRuntimeSelection, error) {
@@ -53,7 +55,7 @@ func SelectEmbeddingRuntime(ctx context.Context, factories []EmbeddingRuntimeFac
 	}
 
 	var failures []error
-	for _, profile := range []EmbeddingProfile{EmbeddingProfileNVIDIA, EmbeddingProfileHailo8, EmbeddingProfileCPU} {
+	for _, profile := range []EmbeddingProfile{EmbeddingProfileHailo8, EmbeddingProfileCPU} {
 		factory, exists := factoryByProfile[profile]
 		if !exists {
 			continue

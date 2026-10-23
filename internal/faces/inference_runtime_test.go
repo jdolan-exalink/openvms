@@ -3,6 +3,7 @@ package faces
 import (
 	"context"
 	"errors"
+	"image"
 	"reflect"
 	"testing"
 )
@@ -17,23 +18,22 @@ func TestSelectEmbeddingRuntimePrefersUsableHardwareProfile(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if selection.Profile != EmbeddingProfileNVIDIA || selection.Runtime == nil {
-		t.Fatalf("selection = %+v, want usable NVIDIA runtime", selection)
+	if selection.Profile != EmbeddingProfileHailo8 || selection.Runtime == nil {
+		t.Fatalf("selection = %+v, want usable Hailo-8 runtime", selection)
 	}
-	if !reflect.DeepEqual(tried, []EmbeddingProfile{EmbeddingProfileNVIDIA}) {
-		t.Fatalf("attempt order = %v, want NVIDIA first and stop on success", tried)
+	if !reflect.DeepEqual(tried, []EmbeddingProfile{EmbeddingProfileHailo8}) {
+		t.Fatalf("attempt order = %v, want Hailo-8 first and NVIDIA deferred", tried)
 	}
 }
 
 func TestSelectEmbeddingRuntimeFallsBackAfterProviderAndSmokeFailures(t *testing.T) {
 	var tried []EmbeddingProfile
-	nvidia := &fakeEmbeddingRuntime{profile: EmbeddingProfileNVIDIA, smokeErr: errors.New("CUDA provider unavailable")}
 	hailo := &fakeEmbeddingRuntime{profile: EmbeddingProfileHailo8, smokeErr: errors.New("HEF smoke inference failed")}
 	cpu := &fakeEmbeddingRuntime{profile: EmbeddingProfileCPU}
 	selection, err := SelectEmbeddingRuntime(context.Background(), []EmbeddingRuntimeFactory{
 		fakeEmbeddingFactory{profile: EmbeddingProfileCPU, runtime: cpu, tried: &tried},
 		fakeEmbeddingFactory{profile: EmbeddingProfileHailo8, runtime: hailo, tried: &tried},
-		fakeEmbeddingFactory{profile: EmbeddingProfileNVIDIA, runtime: nvidia, tried: &tried},
+		fakeEmbeddingFactory{profile: EmbeddingProfileNVIDIA, tried: &tried},
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -41,29 +41,29 @@ func TestSelectEmbeddingRuntimeFallsBackAfterProviderAndSmokeFailures(t *testing
 	if selection.Profile != EmbeddingProfileCPU || selection.Runtime != cpu {
 		t.Fatalf("selection = %+v, want CPU fallback", selection)
 	}
-	if !reflect.DeepEqual(tried, []EmbeddingProfile{EmbeddingProfileNVIDIA, EmbeddingProfileHailo8, EmbeddingProfileCPU}) {
+	if !reflect.DeepEqual(tried, []EmbeddingProfile{EmbeddingProfileHailo8, EmbeddingProfileCPU}) {
 		t.Fatalf("attempt order = %v", tried)
 	}
-	if !nvidia.closed || !hailo.closed {
-		t.Fatalf("failed runtime cleanup: NVIDIA closed=%v, Hailo closed=%v", nvidia.closed, hailo.closed)
+	if !hailo.closed {
+		t.Fatalf("failed Hailo runtime was not closed")
 	}
 }
 
 func TestSelectEmbeddingRuntimeFallsBackAfterProviderInitializationFailure(t *testing.T) {
 	var tried []EmbeddingProfile
-	hailo := &fakeEmbeddingRuntime{profile: EmbeddingProfileHailo8}
+	cpu := &fakeEmbeddingRuntime{profile: EmbeddingProfileCPU}
 	selection, err := SelectEmbeddingRuntime(context.Background(), []EmbeddingRuntimeFactory{
-		fakeEmbeddingFactory{profile: EmbeddingProfileNVIDIA, openErr: errors.New("CUDA libraries unavailable"), tried: &tried},
-		fakeEmbeddingFactory{profile: EmbeddingProfileHailo8, runtime: hailo, tried: &tried},
-		fakeEmbeddingFactory{profile: EmbeddingProfileCPU, tried: &tried},
+		fakeEmbeddingFactory{profile: EmbeddingProfileNVIDIA, tried: &tried},
+		fakeEmbeddingFactory{profile: EmbeddingProfileHailo8, openErr: errors.New("Hailo runtime unavailable"), tried: &tried},
+		fakeEmbeddingFactory{profile: EmbeddingProfileCPU, runtime: cpu, tried: &tried},
 	})
 	if err != nil {
 		t.Fatal(err)
 	}
-	if selection.Profile != EmbeddingProfileHailo8 || selection.Runtime != hailo {
-		t.Fatalf("selection = %+v, want Hailo-8 after NVIDIA initialization failure", selection)
+	if selection.Profile != EmbeddingProfileCPU || selection.Runtime != cpu {
+		t.Fatalf("selection = %+v, want CPU after Hailo initialization failure", selection)
 	}
-	if !reflect.DeepEqual(tried, []EmbeddingProfile{EmbeddingProfileNVIDIA, EmbeddingProfileHailo8}) {
+	if !reflect.DeepEqual(tried, []EmbeddingProfile{EmbeddingProfileHailo8, EmbeddingProfileCPU}) {
 		t.Fatalf("attempt order = %v", tried)
 	}
 }
@@ -108,6 +108,10 @@ type fakeEmbeddingRuntime struct {
 }
 
 func (r *fakeEmbeddingRuntime) Profile() EmbeddingProfile { return r.profile }
+
+func (r *fakeEmbeddingRuntime) Embed(context.Context, image.Image) ([]float32, error) {
+	return nil, nil
+}
 
 func (r *fakeEmbeddingRuntime) Smoke(context.Context) error { return r.smokeErr }
 
