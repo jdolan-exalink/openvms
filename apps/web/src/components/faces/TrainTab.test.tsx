@@ -7,11 +7,14 @@ import { json, renderPage } from "@/test-utils";
 afterEach(() => vi.unstubAllGlobals());
 
 const sightingID = "4b03f6ef-e00e-4a17-8d33-7f2d583a4ccd";
+const sightingID2 = "11f15391-cea3-4263-9827-ced0ecb84276";
+const groupID = "8690c9eb-1d61-4254-8739-7a79c6ef72e1";
 const sighting: Schemas["FaceReviewSighting"] = {
-  id: sightingID, server_id: "s1", server_name: "Frigate 1", site_id: "site1",
+  id: sightingID, identity_id: sightingID, server_id: "s1", server_name: "Frigate 1", site_id: "site1",
   first_seen_at: "2026-10-22T10:00:00Z", seen_at: "2026-10-22T09:59:00Z", score: 0.41,
   crop_available: true,
 };
+const secondSighting: Schemas["FaceReviewSighting"] = { ...sighting, id: sightingID2, seen_at: "2026-10-22T10:01:00Z" };
 
 describe("Faces review inbox", () => {
   it("shows a stable ID and uses it for image, assignment and rejection", async () => {
@@ -35,8 +38,7 @@ describe("Faces review inbox", () => {
     renderPage(Faces);
     fireEvent.click(await screen.findByRole("tab", { name: "Entrenar" }));
 
-    const id = await screen.findByText(new RegExp(sightingID));
-    expect(id).toBeInTheDocument();
+    expect(await screen.findAllByText(new RegExp(sightingID))).toHaveLength(2);
     const image = screen.getByRole("img", { name: /intento de reconocimiento/i });
     expect(image).toHaveAttribute("src", `/api/v1/faces/review-inbox/${sightingID}/image`);
 
@@ -50,5 +52,45 @@ describe("Faces review inbox", () => {
     const dialog = await screen.findByRole("dialog");
     fireEvent.click(within(dialog).getByRole("button", { name: "Rechazar rostro" }));
     await waitFor(() => expect(calls).toContainEqual({ method: "DELETE", path: `/api/v1/faces/review-inbox/${sightingID}` }));
+  });
+
+  it("groups two selected sightings only after the manager confirms the action", async () => {
+    const calls: { method: string; path: string; body?: unknown }[] = [];
+    let grouped = false;
+    vi.stubGlobal("fetch", vi.fn(async (raw: Request) => {
+      const url = new URL(raw.url);
+      const call = { method: raw.method, path: url.pathname };
+      if (raw.method !== "GET") {
+        const body = await raw.clone().text();
+        calls.push({ ...call, body: body ? JSON.parse(body) : undefined });
+      }
+      if (url.pathname === "/api/v1/me") return json({ id: "u1", username: "u1", display_name: "u1", mfa_enabled: false, must_change_password: false, auth_method: "session", tenant_id: "t1", grants: ["faces.view", "faces.manage"].map((permission) => ({ permission, effect: "allow", scope_type: "platform" })) });
+      if (url.pathname === "/api/v1/faces/persons") return json({ items: [] });
+      if (url.pathname === "/api/v1/faces/review-inbox") return json({ items: grouped
+        ? [{ ...sighting, identity_id: groupID, group_id: groupID }, { ...secondSighting, identity_id: groupID, group_id: groupID }]
+        : [sighting, secondSighting] });
+      if (url.pathname === "/api/v1/faces/review-inbox/groups" && raw.method === "POST") {
+        grouped = true;
+        return json({ id: groupID, member_sighting_ids: [sightingID, sightingID2], created_at: "2026-10-22T10:02:00Z" }, 201);
+      }
+      if (url.pathname.startsWith("/api/v1/faces/review-inbox/")) return new Response(new Uint8Array(), { status: 200, headers: { "Content-Type": "image/png" } });
+      return json({ code: "not_found", message: "not found" }, 404);
+    }));
+
+    renderPage(Faces);
+    fireEvent.click(await screen.findByRole("tab", { name: "Entrenar" }));
+    const first = await screen.findByRole("checkbox", { name: new RegExp(sightingID) });
+    const second = screen.getByRole("checkbox", { name: new RegExp(sightingID2) });
+    const groupButton = screen.getByRole("button", { name: "Agrupar recortes seleccionados" });
+    expect(groupButton).toBeDisabled();
+    fireEvent.click(first);
+    expect(groupButton).toBeDisabled();
+    fireEvent.click(second);
+    expect(groupButton).toBeEnabled();
+    fireEvent.click(groupButton);
+    await waitFor(() => expect(calls).toContainEqual({
+      method: "POST", path: "/api/v1/faces/review-inbox/groups", body: { sighting_ids: [sightingID, sightingID2] },
+    }));
+    expect(await screen.findAllByText(new RegExp(groupID))).toHaveLength(2);
   });
 });
