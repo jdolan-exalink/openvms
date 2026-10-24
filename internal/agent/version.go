@@ -1,5 +1,7 @@
 package agent
 
-// Version is the edge-agent build the control plane expects.
-// A host reporting any other value is outdated.
-var Version = "0.2.1"
+import agentbundle "github.com/jdolan-exalink/openvms/deploy/agent"
+
+// Version is the edge-agent release the control plane expects; a host reporting any other value is
+// outdated. It is the content of deploy/agent/VERSION, so a release changes one file.
+var Version = agentbundle.Version
