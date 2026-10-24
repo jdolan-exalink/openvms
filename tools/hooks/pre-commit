@@ -1,0 +1,12 @@
+#!/usr/bin/env bash
+# Keeps deploy/agent/VERSION in step with the agent: when a commit changes the edge agent after its
+# current version was released, bump the patch and add the changelog line to the same commit.
+# Install with `make hooks`. The CI job "Agent version" enforces the same rule.
+set -euo pipefail
+root=$(git rev-parse --show-toplevel)
+before=$(cat "$root/deploy/agent/VERSION")
+"$root/tools/agent_version.sh" check --fix
+if [[ "$(cat "$root/deploy/agent/VERSION")" != "$before" ]]; then
+  git -C "$root" add deploy/agent/VERSION CHANGELOG.md
+  echo "pre-commit: agent version bumped and staged (deploy/agent/VERSION, CHANGELOG.md)" >&2
+fi

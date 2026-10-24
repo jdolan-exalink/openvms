@@ -86,6 +86,19 @@ test: ## Unit tests (Go + web)
 test-integration: ## Integration tests against real containers (needs Docker)
 	go test -race -tags integration ./...
 
+.PHONY: agent-version-check
+agent-version-check: ## Fail when the edge agent changed without a version bump (see docs/VERSIONING.md)
+	bash tools/agent_version_test.sh
+	tools/agent_version.sh check
+
+.PHONY: agent-bump
+agent-bump: ## Bump the agent version: make agent-bump LEVEL=patch|minor|major NOTE="what changed"
+	tools/agent_version.sh bump $(or $(LEVEL),patch) --note "$(NOTE)"
+
+.PHONY: hooks
+hooks: ## Install the git hooks (bumps the agent version when a commit needs it)
+	git config core.hooksPath tools/hooks
+
 .PHONY: build
 build: ## Build Go binaries into bin/ and the web bundle
 	@mkdir -p bin

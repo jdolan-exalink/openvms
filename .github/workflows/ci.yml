@@ -33,6 +33,21 @@ jobs:
       - name: govulncheck
         run: go run golang.org/x/vuln/cmd/govulncheck@latest ./...
 
+  agent-version:
+    name: Agent version
+    if: github.event_name == 'pull_request'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0 # the check needs history and the agent-v* tags
+      - uses: actions/setup-go@v7
+        with:
+          go-version-file: go.mod
+      - run: bash tools/agent_version_test.sh
+      # Always against main, also for stacked PRs: the rule is about what was released, not about the PR base.
+      - run: tools/agent_version.sh check origin/main
+
   integration:
     name: Go integration (containers)
     runs-on: ubuntu-latest

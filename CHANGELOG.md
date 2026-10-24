@@ -12,6 +12,10 @@ The version of OpenVMS lives in `VERSION` and the version of the edge agent in
 
 ### Added
 
+- Agent 0.4.0 (in progress): the agent version is one file, `deploy/agent/VERSION`, embedded in
+  the API as the version it expects (it used to be a second string stuck at 0.2.1), and a check
+  (`tools/agent_version.sh`, `make hooks`, CI job "Agent version") requires a new version for any
+  agent change once the current one is released.
 - `make install` takes the first administrator password from `OPENVMS_ADMIN_PASSWORD`
   (`OPENVMS_ADMIN_PASSWORD='...' make install`) and writes it to the new `.env` without
   printing it. It validates the password up front: one shorter than 8 characters aborts before
