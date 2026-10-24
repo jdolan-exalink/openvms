@@ -227,3 +227,28 @@ func TestEventQueueRecoversFromAPartialWrite(t *testing.T) {
 		t.Fatalf("the failed event must not consume a sequence: %+v", got[1])
 	}
 }
+
+// The epoch tells central that this is the same queue it read before: it survives restarts and
+// compaction, and a queue whose file was lost has a new one, even if its sequences have caught up.
+func TestEventQueueEpochSurvivesRestartsAndChangesWhenTheFileIsLost(t *testing.T) {
+	dir := t.TempDir()
+	q := openQueue(t, dir, 100)
+	epoch := q.Stats().Epoch
+	if epoch == "" {
+		t.Fatal("a new queue must have an epoch")
+	}
+	_, _ = q.Append(queueEvent("A1"))
+	if _, err := q.Ack(1); err != nil { // compaction rewrites the file
+		t.Fatal(err)
+	}
+	if got := openQueue(t, dir, 100).Stats().Epoch; got != epoch {
+		t.Fatalf("epoch changed across a restart: %q -> %q", epoch, got)
+	}
+
+	if err := os.Remove(filepath.Join(dir, eventQueueFile)); err != nil {
+		t.Fatal(err)
+	}
+	if got := openQueue(t, dir, 100).Stats().Epoch; got == "" || got == epoch {
+		t.Fatalf("a queue whose file was lost must get a new epoch, got %q (old %q)", got, epoch)
+	}
+}

@@ -37,6 +37,10 @@ type QueuedEvent struct {
 
 // QueueStats describes the queue for the status route.
 type QueueStats struct {
+	// Epoch identifies this queue. It is created with the queue file and survives restarts and
+	// compaction; a queue whose file was lost has a new one, which is how central tells a wiped agent
+	// from a busy one even when the sequences have caught up.
+	Epoch     string `json:"epoch"`
 	Depth     int    `json:"depth"`
 	OldestSeq uint64 `json:"oldest_seq,omitempty"`
 	LastSeq   uint64 `json:"last_seq"`
@@ -52,6 +56,7 @@ type queueRecord struct {
 type queueMeta struct {
 	NextSeq uint64 `json:"next_seq"`
 	Lost    uint64 `json:"lost"`
+	Epoch   string `json:"epoch"`
 }
 
 type queuedLine struct {
@@ -70,6 +75,7 @@ type EventQueue struct {
 	bytes     int64
 	nextSeq   uint64
 	lost      uint64
+	epoch     string
 	// damaged is set when an append failed: the file may end in a partial record that the next write
 	// would glue itself to, so the file is rewritten from memory before anything else is appended.
 	damaged bool
@@ -96,6 +102,12 @@ func OpenEventQueue(dir string, maxEvents int, maxBytes int64) (*EventQueue, err
 	dirty, err := q.load()
 	if err != nil {
 		return nil, err
+	}
+	if q.epoch == "" {
+		if q.epoch, err = newQueueID(); err != nil {
+			return nil, err
+		}
+		dirty = true // written now, so a restart before the first event keeps the same epoch
 	}
 	if dirty {
 		if err := q.compactLocked(); err != nil {
@@ -137,6 +149,7 @@ func (q *EventQueue) load() (bool, error) {
 			case rec.Meta != nil:
 				q.lost = max(q.lost, rec.Meta.Lost)
 				q.nextSeq = max(q.nextSeq, rec.Meta.NextSeq)
+				q.epoch = rec.Meta.Epoch
 			case rec.Seq == 0:
 				dirty = true
 			default:
@@ -266,7 +279,7 @@ func (q *EventQueue) Ack(through uint64) (int, error) {
 func (q *EventQueue) Stats() QueueStats {
 	q.mu.Lock()
 	defer q.mu.Unlock()
-	st := QueueStats{Depth: len(q.items), LastSeq: q.nextSeq - 1, Lost: q.lost}
+	st := QueueStats{Epoch: q.epoch, Depth: len(q.items), LastSeq: q.nextSeq - 1, Lost: q.lost}
 	if len(q.items) > 0 {
 		st.OldestSeq = q.items[0].Seq
 	}
@@ -279,7 +292,7 @@ func (q *EventQueue) compactLocked() error {
 	var buf bytes.Buffer
 	meta, _ := json.Marshal(struct {
 		Meta queueMeta `json:"meta"`
-	}{queueMeta{NextSeq: q.nextSeq, Lost: q.lost}})
+	}{queueMeta{NextSeq: q.nextSeq, Lost: q.lost, Epoch: q.epoch}})
 	buf.Write(meta)
 	buf.WriteByte('\n')
 	for _, it := range q.items {

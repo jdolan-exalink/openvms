@@ -50,6 +50,9 @@ type LPREventsPage struct {
 	LastSeq uint64           `json:"last_seq"`
 	Depth   int              `json:"depth"`
 	Lost    uint64           `json:"lost"`
+	// Epoch identifies the agent's queue; when it changes, the queue was recreated and its sequences
+	// start again.
+	Epoch string `json:"epoch"`
 }
 
 // PullProvisionLPREvents reads the next page of queued events, those with a sequence greater than

@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"strings"
 	"sync"
 	"time"
 
@@ -113,7 +114,7 @@ WHERE fs.deleted_at IS NULL`)
 
 // IngestServer drains one agent's queue, a page at a time, and records the outcome.
 func (a *AgentIngestor) IngestServer(ctx context.Context, serverID, tenantID uuid.UUID) error {
-	cursor, err := a.loadCursor(ctx, serverID)
+	cursor, epoch, err := a.loadCursor(ctx, serverID)
 	if err != nil {
 		return err
 	}
@@ -124,17 +125,20 @@ func (a *AgentIngestor) IngestServer(ctx context.Context, serverID, tenantID uui
 			a.recordError(ctx, serverID, tenantID, err)
 			return err
 		}
-		if page.LastSeq < cursor && !reset {
-			// The agent starts again from 1 after its state is wiped; events below the old cursor would
-			// otherwise never be read.
-			a.Log.WarnContext(ctx, "agent ingest: the agent's sequence went backwards; reading from the start",
-				"server_id", serverID, "cursor", cursor, "agent_last_seq", page.LastSeq)
-			cursor, reset = 0, true
-			if err := a.saveCursorOnly(ctx, serverID, tenantID, 0); err != nil {
+		// The agent starts again from 1 after its state is wiped; events below the old cursor would
+		// never be read. A new epoch says so even when its sequences have already caught up with the
+		// cursor; a sequence that went backwards says so for an agent that sends no epoch.
+		wiped := page.LastSeq < cursor || (page.Epoch != "" && epoch != "" && page.Epoch != epoch)
+		if wiped && !reset {
+			a.Log.WarnContext(ctx, "agent ingest: the agent's queue was recreated; reading from the start",
+				"server_id", serverID, "cursor", cursor, "agent_last_seq", page.LastSeq, "epoch", epoch, "agent_epoch", page.Epoch)
+			cursor, epoch, reset = 0, page.Epoch, true
+			if err := a.saveCursorOnly(ctx, serverID, tenantID, 0, epoch); err != nil {
 				return err
 			}
 			continue
 		}
+		epoch = page.Epoch
 		if len(page.Events) == 0 {
 			if err := a.touch(ctx, serverID, tenantID, page); err != nil {
 				return err
@@ -164,19 +168,20 @@ func (a *AgentIngestor) IngestServer(ctx context.Context, serverID, tenantID uui
 	return nil
 }
 
-func (a *AgentIngestor) loadCursor(ctx context.Context, serverID uuid.UUID) (uint64, error) {
+func (a *AgentIngestor) loadCursor(ctx context.Context, serverID uuid.UUID) (uint64, string, error) {
 	var seq int64
+	var epoch string
 	err := a.Store.TxRaw(ctx, store.AllTenants, func(tx pgx.Tx) error {
-		err := tx.QueryRow(ctx, `SELECT last_seq FROM server_agent_event_cursors WHERE server_id = $1`, serverID).Scan(&seq)
+		err := tx.QueryRow(ctx, `SELECT last_seq, agent_epoch FROM server_agent_event_cursors WHERE server_id = $1`, serverID).Scan(&seq, &epoch)
 		if errors.Is(err, pgx.ErrNoRows) {
 			return nil
 		}
 		return err
 	})
 	if err != nil {
-		return 0, fmt.Errorf("load agent cursor: %w", err)
+		return 0, "", fmt.Errorf("load agent cursor: %w", err)
 	}
-	return uint64(max(seq, 0)), nil //nolint:gosec // clamped non-negative above
+	return uint64(max(seq, 0)), epoch, nil //nolint:gosec // clamped non-negative above
 }
 
 // storePage stores the valid readings of a page and moves the cursor, in one transaction. It returns
@@ -226,16 +231,17 @@ ON CONFLICT (server_id, remote_event_id) DO NOTHING`,
 			ingested += tag.RowsAffected()
 		}
 		_, err = tx.Exec(ctx, `
-INSERT INTO server_agent_event_cursors (server_id, tenant_id, last_seq, ingested_total, skipped_total, agent_lost, agent_depth, last_pull_at, last_error)
-VALUES ($1, $2, $3, $4, $5, $6, $7, now(), '')
+INSERT INTO server_agent_event_cursors (server_id, tenant_id, last_seq, ingested_total, skipped_total, agent_lost, agent_depth, agent_epoch, last_pull_at, last_error)
+VALUES ($1, $2, $3, $4, $5, $6, $7, $8, now(), '')
 ON CONFLICT (server_id) DO UPDATE SET
     last_seq = excluded.last_seq,
+    agent_epoch = excluded.agent_epoch,
     ingested_total = server_agent_event_cursors.ingested_total + excluded.ingested_total,
     skipped_total = server_agent_event_cursors.skipped_total + excluded.skipped_total,
     agent_lost = excluded.agent_lost,
     agent_depth = excluded.agent_depth,
     last_pull_at = now(), last_error = '', updated_at = now()`,
-			serverID, tenantID, int64(through), ingested, skipped, int64(min(page.Lost, 1<<62)), page.Depth) //nolint:gosec // bounded above and below
+			serverID, tenantID, int64(through), ingested, skipped, int64(min(page.Lost, 1<<62)), page.Depth, page.Epoch) //nolint:gosec // bounded above and below
 		return err
 	})
 	if err != nil {
@@ -264,11 +270,11 @@ func serverCameras(ctx context.Context, tx pgx.Tx, serverID, tenantID uuid.UUID)
 }
 
 // saveCursorOnly moves the cursor without touching the counters.
-func (a *AgentIngestor) saveCursorOnly(ctx context.Context, serverID, tenantID uuid.UUID, seq int64) error {
+func (a *AgentIngestor) saveCursorOnly(ctx context.Context, serverID, tenantID uuid.UUID, seq int64, epoch string) error {
 	return a.Store.TxRaw(ctx, store.AllTenants, func(tx pgx.Tx) error {
 		_, err := tx.Exec(ctx, `
-INSERT INTO server_agent_event_cursors (server_id, tenant_id, last_seq) VALUES ($1, $2, $3)
-ON CONFLICT (server_id) DO UPDATE SET last_seq = excluded.last_seq, updated_at = now()`, serverID, tenantID, seq)
+INSERT INTO server_agent_event_cursors (server_id, tenant_id, last_seq, agent_epoch) VALUES ($1, $2, $3, $4)
+ON CONFLICT (server_id) DO UPDATE SET last_seq = excluded.last_seq, agent_epoch = excluded.agent_epoch, updated_at = now()`, serverID, tenantID, seq, epoch)
 		return err
 	})
 }
@@ -277,20 +283,20 @@ ON CONFLICT (server_id) DO UPDATE SET last_seq = excluded.last_seq, updated_at =
 func (a *AgentIngestor) touch(ctx context.Context, serverID, tenantID uuid.UUID, page provision.LPREventsPage) error {
 	return a.Store.TxRaw(ctx, store.AllTenants, func(tx pgx.Tx) error {
 		_, err := tx.Exec(ctx, `
-INSERT INTO server_agent_event_cursors (server_id, tenant_id, agent_lost, agent_depth, last_pull_at)
-VALUES ($1, $2, $3, $4, now())
+INSERT INTO server_agent_event_cursors (server_id, tenant_id, agent_lost, agent_depth, agent_epoch, last_pull_at)
+VALUES ($1, $2, $3, $4, $5, now())
 ON CONFLICT (server_id) DO UPDATE SET agent_lost = excluded.agent_lost, agent_depth = excluded.agent_depth,
-    last_pull_at = now(), last_error = '', updated_at = now()`,
-			serverID, tenantID, int64(min(page.Lost, 1<<62)), page.Depth) //nolint:gosec // bounded above
+    agent_epoch = excluded.agent_epoch, last_pull_at = now(), last_error = '', updated_at = now()`,
+			serverID, tenantID, int64(min(page.Lost, 1<<62)), page.Depth, page.Epoch) //nolint:gosec // bounded above
 		return err
 	})
 }
 
 // recordError keeps the last failure where an operator can see it. It never hides the original error.
 func (a *AgentIngestor) recordError(ctx context.Context, serverID, tenantID uuid.UUID, cause error) {
-	msg := cause.Error()
+	msg := strings.ToValidUTF8(cause.Error(), "")
 	if len(msg) > 500 {
-		msg = msg[:500]
+		msg = strings.ToValidUTF8(msg[:500], "") // cutting inside a multibyte character leaves an invalid tail
 	}
 	err := a.Store.TxRaw(ctx, store.AllTenants, func(tx pgx.Tx) error {
 		_, err := tx.Exec(ctx, `

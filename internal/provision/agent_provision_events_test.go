@@ -10,7 +10,7 @@ import (
 	"github.com/google/uuid"
 )
 
-const eventsPageJSON = `{"events":[{"seq":6,"id":"a1b2c3","event":{"camera_id":"11111111-1111-1111-1111-111111111111","plate":"AF123BC","event_time":"2026-10-24T12:00:00Z","received_time":"2026-10-24T12:00:01Z","confidence":0.93}}],"last_seq":9,"depth":4,"lost":2}`
+const eventsPageJSON = `{"events":[{"seq":6,"id":"a1b2c3","event":{"camera_id":"11111111-1111-1111-1111-111111111111","plate":"AF123BC","event_time":"2026-10-24T12:00:00Z","received_time":"2026-10-24T12:00:01Z","confidence":0.93}}],"last_seq":9,"depth":4,"lost":2,"epoch":"e1f2"}`
 
 func TestPullProvisionLPREventsAsksTheAgentForTheEventsAfterTheCursor(t *testing.T) {
 	var seen *http.Request
@@ -32,7 +32,7 @@ func TestPullProvisionLPREventsAsksTheAgentForTheEventsAfterTheCursor(t *testing
 		page.Events[0].Event.CameraID != "11111111-1111-1111-1111-111111111111" || page.Events[0].Event.Confidence == nil || *page.Events[0].Event.Confidence != 0.93 {
 		t.Fatalf("events = %+v", page.Events)
 	}
-	if page.LastSeq != 9 || page.Depth != 4 || page.Lost != 2 {
+	if page.LastSeq != 9 || page.Depth != 4 || page.Lost != 2 || page.Epoch != "e1f2" {
 		t.Fatalf("page = %+v", page)
 	}
 }

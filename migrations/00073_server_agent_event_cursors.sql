@@ -7,6 +7,8 @@ CREATE TABLE server_agent_event_cursors (
     server_id      uuid PRIMARY KEY REFERENCES frigate_servers (id) ON DELETE CASCADE,
     tenant_id      uuid NOT NULL REFERENCES tenants (id) ON DELETE CASCADE,
     last_seq       bigint NOT NULL DEFAULT 0 CHECK (last_seq >= 0),
+    -- The agent queue the cursor belongs to: a different epoch means the agent recreated its queue.
+    agent_epoch    text NOT NULL DEFAULT '',
     ingested_total bigint NOT NULL DEFAULT 0,
     skipped_total  bigint NOT NULL DEFAULT 0,
     agent_lost     bigint NOT NULL DEFAULT 0,

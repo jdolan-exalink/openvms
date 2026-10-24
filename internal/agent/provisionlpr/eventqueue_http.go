@@ -51,6 +51,7 @@ func (r *Receiver) handleEvents(w http.ResponseWriter, req *http.Request) {
 		"last_seq": st.LastSeq,
 		"depth":    st.Depth,
 		"lost":     st.Lost,
+		"epoch":    st.Epoch,
 	})
 }
 

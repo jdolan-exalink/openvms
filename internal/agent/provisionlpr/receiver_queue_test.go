@@ -89,7 +89,7 @@ func call(r *Receiver, method, target, body string) *httptest.ResponseRecorder {
 }
 
 func TestEventsRouteReturnsTheQueuedEventsAfterASequence(t *testing.T) {
-	r, _ := queueRoutesFixture(t)
+	r, q := queueRoutesFixture(t)
 	r.eventsPage = 1
 	rec := call(r, http.MethodGet, "/v1/provision-lpr/events/after/1", "")
 	if rec.Code != http.StatusOK {
@@ -100,12 +100,16 @@ func TestEventsRouteReturnsTheQueuedEventsAfterASequence(t *testing.T) {
 		LastSeq uint64        `json:"last_seq"`
 		Depth   int           `json:"depth"`
 		Lost    uint64        `json:"lost"`
+		Epoch   string        `json:"epoch"`
 	}
 	if err := json.Unmarshal(rec.Body.Bytes(), &out); err != nil {
 		t.Fatal(err)
 	}
 	if len(out.Events) != 1 || out.Events[0].Seq != 2 || out.Events[0].Event.Plate != "B2" || out.Events[0].ID == "" {
 		t.Fatalf("events = %+v", out.Events)
+	}
+	if out.Epoch == "" || out.Epoch != q.Stats().Epoch {
+		t.Fatalf("epoch = %q, want the queue's %q", out.Epoch, q.Stats().Epoch)
 	}
 	if out.LastSeq != 3 || out.Depth != 3 || out.Lost != 0 {
 		t.Fatalf("stats = %+v", out)

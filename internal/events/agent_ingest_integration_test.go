@@ -5,6 +5,7 @@ package events_test
 import (
 	"context"
 	"errors"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -26,6 +27,7 @@ type fakeAgent struct {
 	lastSeq   uint64
 	lost      uint64
 	pullErr   error
+	epoch     string
 	failAcks  int
 	acks      []uint64
 	pageLimit int
@@ -46,7 +48,7 @@ func (a *fakeAgent) PullProvisionLPREvents(_ context.Context, _ uuid.UUID, after
 	if a.pullErr != nil {
 		return provision.LPREventsPage{}, a.pullErr
 	}
-	page := provision.LPREventsPage{LastSeq: a.lastSeq, Depth: len(a.queue), Lost: a.lost}
+	page := provision.LPREventsPage{LastSeq: a.lastSeq, Depth: len(a.queue), Lost: a.lost, Epoch: a.epoch}
 	for _, e := range a.queue {
 		if e.Seq > after && (a.pageLimit == 0 || len(page.Events) < a.pageLimit) {
 			page.Events = append(page.Events, e)
@@ -84,7 +86,7 @@ type ingestWorld struct {
 func newIngestWorld(t *testing.T) *ingestWorld {
 	t.Helper()
 	pool, _ := pgtest.Migrated(t)
-	w := &ingestWorld{st: &store.Store{Pool: pool}, tenant: uuid.New(), site: uuid.New(), server: uuid.New(), camA: uuid.New(), camOtherServer: uuid.New(), agent: &fakeAgent{}}
+	w := &ingestWorld{st: &store.Store{Pool: pool}, tenant: uuid.New(), site: uuid.New(), server: uuid.New(), camA: uuid.New(), camOtherServer: uuid.New(), agent: &fakeAgent{epoch: "epoch-1"}}
 	otherServer := uuid.New()
 	ctx := context.Background()
 	err := w.st.TxRaw(ctx, store.AllTenants, func(tx pgx.Tx) error {
@@ -275,8 +277,8 @@ func TestAgentIngestRestartsFromTheStartWhenTheAgentLostItsState(t *testing.T) {
 		t.Fatalf("setup: cursor = %+v", c)
 	}
 
-	// The agent's state directory is wiped: sequences start again at 1.
-	w.agent.queue, w.agent.lastSeq = nil, 0
+	// The agent's state directory is wiped: sequences start again at 1 under a new epoch.
+	w.agent.queue, w.agent.lastSeq, w.agent.epoch = nil, 0, "epoch-2"
 	w.agent.add(w.camA.String(), "NEWONE", nil, t0.Add(time.Hour))
 	w.ing.IngestAll(context.Background())
 
@@ -318,5 +320,56 @@ func TestAgentIngestReadsSeveralPagesInOnePass(t *testing.T) {
 	w.ing.IngestAll(context.Background())
 	if got := w.reads(t); len(got) != 5 {
 		t.Fatalf("reads = %d, want all 5 over three pages", len(got))
+	}
+}
+
+// The sequence alone cannot tell a wiped agent from a busy one: once it has produced as many events
+// as the old cursor, "after the cursor" would skip the new ones. The epoch does.
+func TestAgentIngestDetectsAWipedAgentEvenWhenItsSequenceCaughtUp(t *testing.T) {
+	w := newIngestWorld(t)
+	for i := 0; i < 5; i++ {
+		w.agent.add(w.camA.String(), "OLD"+string(rune('A'+i))+"11", nil, t0)
+	}
+	w.ing.IngestAll(context.Background())
+
+	w.agent.queue, w.agent.lastSeq, w.agent.epoch = nil, 0, "epoch-2"
+	for i := 0; i < 7; i++ { // more events than the old cursor before central looks again
+		w.agent.add(w.camA.String(), "NEW"+string(rune('A'+i))+"22", nil, t0.Add(time.Hour))
+	}
+	w.ing.IngestAll(context.Background())
+
+	if got := w.reads(t); len(got) != 12 {
+		t.Fatalf("reads = %d, want 5 old + 7 new: the first five events of the new queue were skipped", len(got))
+	}
+	if c := w.cursor(t); c.lastSeq != 7 {
+		t.Fatalf("cursor = %+v, want 7", c)
+	}
+}
+
+func TestAgentIngestWithoutAnEpochStillDetectsABackwardsSequence(t *testing.T) {
+	w := newIngestWorld(t)
+	w.agent.epoch = "" // an agent that predates the epoch
+	for i := 0; i < 5; i++ {
+		w.agent.add(w.camA.String(), "OLD"+string(rune('A'+i))+"11", nil, t0)
+	}
+	w.ing.IngestAll(context.Background())
+
+	w.agent.queue, w.agent.lastSeq = nil, 0
+	w.agent.add(w.camA.String(), "NEWONE", nil, t0.Add(time.Hour))
+	w.ing.IngestAll(context.Background())
+
+	if got := w.reads(t); len(got) != 6 {
+		t.Fatalf("reads = %d, want 6", len(got))
+	}
+}
+
+// An error text that is cut inside a multibyte character must still be recorded.
+func TestAgentIngestRecordsALongNonASCIIErrorMessage(t *testing.T) {
+	w := newIngestWorld(t)
+	w.agent.pullErr = errors.New(strings.Repeat("\u20ac", 300)) // 900 bytes; byte 500 falls inside a character
+	w.ing.IngestAll(context.Background())
+
+	if c := w.cursor(t); c.lastError == "" {
+		t.Fatal("the failure was not recorded: the truncated message was rejected by the database")
 	}
 }
