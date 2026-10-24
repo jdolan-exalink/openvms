@@ -313,6 +313,32 @@ func (h *Handlers) GetServerProvisionLPRRegistryHandler(w http.ResponseWriter, r
 	_ = json.NewEncoder(w).Encode(reg)
 }
 
+// GetServerProvisionLPRIngestionHandler reports how far central got collecting the plate readings
+// that the server's cameras reported to its agent: last pull, backlog, totals and the last error.
+func (h *Handlers) GetServerProvisionLPRIngestionHandler(w http.ResponseWriter, r *http.Request) {
+	a, err := actor(r.Context())
+	if err != nil {
+		writeError(w, r, http.StatusUnauthorized, "unauthorized", "authentication required")
+		return
+	}
+	serverID, err := uuid.Parse(chi.URLParam(r, "serverId"))
+	if err != nil {
+		writeError(w, r, http.StatusBadRequest, "invalid_id", "invalid server id")
+		return
+	}
+	state, err := h.Provision.GetProvisionLPRIngestion(r.Context(), a, serverID)
+	switch {
+	case errors.Is(err, access.ErrForbidden):
+		writeError(w, r, http.StatusForbidden, "forbidden", "permission servers.manage required")
+		return
+	case err != nil:
+		writeError(w, r, http.StatusInternalServerError, "ingestion_failed", "the ingestion state could not be read")
+		return
+	}
+	w.Header().Set("Content-Type", "application/json")
+	_ = json.NewEncoder(w).Encode(state)
+}
+
 // SetServerProvisionLPREnforceHandler turns on or off the refusal of cameras that are not registered
 // on a server's agent.
 func (h *Handlers) SetServerProvisionLPREnforceHandler(w http.ResponseWriter, r *http.Request) {

@@ -45,7 +45,8 @@ everyone, and the screen says so; repair or delete the file on the host
 Camera-facing routes carry no token (cameras cannot send one): `/SendKeepalive`, `/v1/provision-lpr/event`
 and the other event paths. Everything else needs the agent token as a bearer: `/v1/provision-lpr/status`
 (it lists camera addresses and plates; it used to be open), `/v1/provision-lpr/registry...`,
-`/v1/provision-lpr/captures...` and `/v1/provision-lpr/configure`.
+`/v1/provision-lpr/captures...`, `/v1/provision-lpr/events...` (the queue central collects, see
+`ingestion.md`) and `/v1/provision-lpr/configure`.
 
 Central API (cookie or API token, needs `servers.manage` on the camera's server for changes):
 
@@ -54,6 +55,7 @@ POST   /api/v1/cameras/{cameraId}/provision-lpr/configure   register + prepare +
 DELETE /api/v1/cameras/{cameraId}/provision-lpr/register    unregister
 GET    /api/v1/servers/{serverId}/provision-lpr/registry    registry and unregistered sources
 PUT    /api/v1/servers/{serverId}/provision-lpr/enforce     {"enforce": true|false}
+GET    /api/v1/servers/{serverId}/provision-lpr/ingestion   how far central got collecting readings
 ```
 
 An agent older than this stage answers 404 to the registry routes; the API turns that into

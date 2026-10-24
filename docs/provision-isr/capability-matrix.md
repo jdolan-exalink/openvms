@@ -28,6 +28,7 @@ the ONVIF probe (the camera configuration screen shows both once probed).
 | Camera retry policy when the server does not answer 200 | To verify | DOC section 17. |
 | HTTPS for the push | To verify | DOC section 13: do not assume it follows the admin HTTPS setting. |
 | Long Polling Port (documented as 8080) for external software | To verify | DOC section 3. A pull alternative to the push; not investigated. |
+| Reading survives an agent restart and a central outage, and reaches `lpr_reads` exactly once | Confirmed (OpenVMS side) | CODE. The agent queue and the central ingestor are tested separately (agent unit tests; central against Postgres with a fake agent that behaves like the queue). No test runs the real agent and the real worker together, and no real camera has fed it, so what a real camera pushes is still the open question above. |
 | Auto Report Server (default port 2009) | Confirmed | DOC section 3. Reports the camera IP; it is not an LPR event. |
 
 ## License plate recognition

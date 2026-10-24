@@ -122,6 +122,7 @@ func NewRouter(h *Handlers, log *slog.Logger, opts Options) (http.Handler, error
 	r.Delete("/api/v1/cameras/{cameraId}/provision-lpr/register", h.UnregisterCameraProvisionLPRHandler)
 	r.Get("/api/v1/servers/{serverId}/provision-lpr/registry", h.GetServerProvisionLPRRegistryHandler)
 	r.Put("/api/v1/servers/{serverId}/provision-lpr/enforce", h.SetServerProvisionLPREnforceHandler)
+	r.Get("/api/v1/servers/{serverId}/provision-lpr/ingestion", h.GetServerProvisionLPRIngestionHandler)
 
 	return otelhttp.NewHandler(r, "openvms-api"), nil
 }

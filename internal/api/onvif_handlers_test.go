@@ -113,6 +113,7 @@ func TestCheckOnvifRoutesAreRegisteredAndRequireActor(t *testing.T) {
 		"camera_provision_lpr_unregister": {http.MethodDelete, "/api/v1/cameras/11111111-1111-1111-1111-111111111111/provision-lpr/register", ""},
 		"server_provision_lpr_registry":   {http.MethodGet, "/api/v1/servers/11111111-1111-1111-1111-111111111111/provision-lpr/registry", ""},
 		"server_provision_lpr_enforce":    {http.MethodPut, "/api/v1/servers/11111111-1111-1111-1111-111111111111/provision-lpr/enforce", `{"enforce":true}`},
+		"server_provision_lpr_ingestion":  {http.MethodGet, "/api/v1/servers/11111111-1111-1111-1111-111111111111/provision-lpr/ingestion", ""},
 	} {
 		t.Run(name, func(t *testing.T) {
 			req := httptest.NewRequest(tc.method, tc.path, strings.NewReader(tc.body))
