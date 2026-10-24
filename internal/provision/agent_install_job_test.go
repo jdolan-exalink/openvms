@@ -102,7 +102,9 @@ func TestStartAgentInstallExistingAgentRefusedBeforeArtifactOrRunner(t *testing.
 	}
 }
 
-func TestConfirmedReplacementPreservesExistingRegistrationUntilEnrollmentAndHealthSucceed(t *testing.T) {
+// The existing registration is replaced only after the new agent answers over HTTPS. A missing
+// enrollment alone no longer blocks it (a host behind a NAT never enrolls); a failed health check does.
+func TestConfirmedReplacementPreservesExistingRegistrationUntilHealthSucceeds(t *testing.T) {
 	for _, failurePoint := range []string{"enrollment", "health"} {
 		t.Run(failurePoint, func(t *testing.T) {
 			actor, serverID := authz.Actor{UserID: uuid.New()}, uuid.New()
@@ -145,6 +147,12 @@ func TestConfirmedReplacementPreservesExistingRegistrationUntilEnrollmentAndHeal
 				t.Fatal(err)
 			}
 			final := waitAgentInstallJob(t, svc, actor, serverID, job)
+			if failurePoint == "enrollment" {
+				if final.Status != "succeeded" || registerCalls != 1 {
+					t.Fatalf("job=%#v register calls=%d; a healthy agent that did not enroll is registered and polled", final, registerCalls)
+				}
+				return
+			}
 			if final.Status != "failed" || registerCalls != 0 || !registrationPresent {
 				t.Fatalf("job=%#v register calls=%d registration present=%v", final, registerCalls, registrationPresent)
 			}
@@ -274,7 +282,9 @@ func TestStartAgentInstallRegistersOnlyAfterRunnerSuccess(t *testing.T) {
 	}
 }
 
-func TestStartAgentInstallEnrollmentVerificationFailureDoesNotRegister(t *testing.T) {
+// A host that cannot reach OpenVMS (behind a NAT) never enrolls, but OpenVMS can reach it. When the
+// HTTPS health check from OpenVMS passes, the install finishes and the agent is polled instead.
+func TestStartAgentInstallWithoutEnrollmentFallsBackToPollingWhenHTTPSHealthPasses(t *testing.T) {
 	actor, serverID := authz.Actor{UserID: uuid.New()}, uuid.New()
 	registered := false
 	svc := &Service{
@@ -283,15 +293,46 @@ func TestStartAgentInstallEnrollmentVerificationFailureDoesNotRegister(t *testin
 		requireAgentInstallPermissions: func(context.Context, authz.Actor, uuid.UUID) error { return nil },
 		agentInstallExists:             func(context.Context, authz.Actor, uuid.UUID) (bool, error) { return false, nil },
 		agentInstallBinary:             func() ([]byte, error) { return []byte("trusted fake binary"), nil },
-		agentInstallRun: func(_ context.Context, request AgentInstallRequest, _ func(string)) error {
-			if request.MTLS == nil || request.MTLS.EnrollToken != "fresh-enrollment-token" {
-				t.Fatal("runner did not receive a one-time token for fresh enrollment")
-			}
-			return nil
-		},
+		agentInstallRun:                func(context.Context, AgentInstallRequest, func(string)) error { return nil },
 		agentInstallEnrollmentCheck: func(context.Context, authz.Actor, uuid.UUID, time.Time) error {
 			return errors.New("remote enrollment details must not escape")
 		},
+		agentInstallHealthCheck: func(context.Context, string, uint16, string, []byte) error { return nil },
+		agentInstallRegister: func(context.Context, authz.Actor, uuid.UUID, string, uint16, string, []byte) error {
+			registered = true
+			return nil
+		},
+	}
+	job, err := svc.StartServerAgentInstall(context.Background(), actor, serverID, validAgentInstallStartRequest())
+	if err != nil {
+		t.Fatal(err)
+	}
+	final := waitAgentInstallJob(t, svc, actor, serverID, job)
+	if final.Status != "succeeded" || !registered {
+		t.Fatalf("job=%#v registered=%v; want the install to finish and register the agent", final, registered)
+	}
+	if !strings.Contains(final.Message, "polls") {
+		t.Fatalf("the operator must be told the agent was not enrolled and is polled: %#v", final)
+	}
+	if strings.Contains(final.Message, "remote enrollment details") {
+		t.Fatalf("job exposed remote error: %#v", final)
+	}
+}
+
+func TestStartAgentInstallWithoutEnrollmentAndWithoutHTTPSHealthDoesNotRegister(t *testing.T) {
+	actor, serverID := authz.Actor{UserID: uuid.New()}, uuid.New()
+	registered := false
+	svc := &Service{
+		AgentMTLS:                      &AgentMTLS{GRPCAddr: "vms.example.com:9443", APIURL: "https://vms.example.com"},
+		NewEnrollToken:                 func(context.Context, authz.Actor, uuid.UUID) (string, error) { return "fresh-enrollment-token", nil },
+		requireAgentInstallPermissions: func(context.Context, authz.Actor, uuid.UUID) error { return nil },
+		agentInstallExists:             func(context.Context, authz.Actor, uuid.UUID) (bool, error) { return false, nil },
+		agentInstallBinary:             func() ([]byte, error) { return []byte("trusted fake binary"), nil },
+		agentInstallRun:                func(context.Context, AgentInstallRequest, func(string)) error { return nil },
+		agentInstallEnrollmentCheck: func(context.Context, authz.Actor, uuid.UUID, time.Time) error {
+			return errors.New("remote enrollment details must not escape")
+		},
+		agentInstallHealthCheck: func(context.Context, string, uint16, string, []byte) error { return errors.New("unreachable") },
 		agentInstallRegister: func(context.Context, authz.Actor, uuid.UUID, string, uint16, string, []byte) error {
 			registered = true
 			return nil
