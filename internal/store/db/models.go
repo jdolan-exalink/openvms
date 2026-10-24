@@ -887,6 +887,20 @@ type ServerAgent struct {
 	UpdatedAt   time.Time
 }
 
+type ServerAgentEventCursor struct {
+	ServerID      uuid.UUID
+	TenantID      uuid.UUID
+	LastSeq       int64
+	AgentEpoch    string
+	IngestedTotal int64
+	SkippedTotal  int64
+	AgentLost     int64
+	AgentDepth    int32
+	LastPullAt    *time.Time
+	LastError     string
+	UpdatedAt     time.Time
+}
+
 type ServerAgentSshHostKey struct {
 	ServerID    uuid.UUID
 	TenantID    uuid.UUID
