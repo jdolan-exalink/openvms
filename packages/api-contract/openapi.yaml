@@ -715,6 +715,56 @@ paths:
         "401": { $ref: "#/components/responses/Unauthorized" }
         "403": { $ref: "#/components/responses/Forbidden" }
         "404": { $ref: "#/components/responses/NotFound" }
+  /api/v1/servers/{serverId}/agent/connection:
+    parameters:
+      - { name: serverId, in: path, required: true, schema: { type: string, format: uuid } }
+    get:
+      tags: [servers]
+      operationId: getServerAgentConnection
+      summary: How the server's agent is connected
+      description: Requires servers.manage. Says whether the agent was connected by address and at which one; never returns the token, the headers or the certificate.
+      responses:
+        "200":
+          description: Connection state
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ServerAgentConnection" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { $ref: "#/components/responses/NotFound" }
+    put:
+      tags: [servers]
+      operationId: connectServerAgent
+      summary: Connect an agent that already runs at an address OpenVMS can reach
+      description: Requires servers.manage and servers.config.secrets. OpenVMS calls the address with the token before storing anything, so a mistake cannot replace a working registration. The token and the headers are stored sealed and never returned. The address may be a LAN or VPN address, or a name published through a tunnel; OpenVMS never connects to this host, link-local or multicast addresses, and uses https for public ones.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/ServerAgentConnectRequest" }
+      responses:
+        "200":
+          description: The agent answered and was registered
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ServerAgentConnectResult" }
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { $ref: "#/components/responses/NotFound" }
+        "409": { $ref: "#/components/responses/Conflict" }
+        "422": { $ref: "#/components/responses/AgentConnectFailed" }
+        "502": { $ref: "#/components/responses/AgentConnectFailed" }
+    delete:
+      tags: [servers]
+      operationId: disconnectServerAgent
+      summary: Forget an agent that was connected by address
+      description: Requires servers.manage and servers.config.secrets. An agent installed over SSH is not affected; remove it with the uninstall flow.
+      responses:
+        "204": { description: The registration was removed }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { $ref: "#/components/responses/NotFound" }
   /api/v1/servers/{serverId}/agent/install:
     parameters:
       - { name: serverId, in: path, required: true, schema: { type: string, format: uuid } }
@@ -4761,6 +4811,11 @@ components:
       content:
         application/json:
           schema: { $ref: "#/components/schemas/Error" }
+    AgentConnectFailed:
+      description: The agent could not be reached (502) or did not accept the connection (422); the code says which
+      content:
+        application/json:
+          schema: { $ref: "#/components/schemas/Error" }
     WahaUnavailable:
       description: The internal WhatsApp service (WAHA) could not be reached
       content:
@@ -5168,6 +5223,46 @@ components:
         bundled_version: { type: string, maxLength: 64, description: Agent version this OpenVMS ships, when code is agent_already_installed. }
         registered_here: { type: boolean, description: True when this OpenVMS already has an agent registered for the server (use the update flow). }
         version_state: { type: string, enum: [up_to_date, outdated, unknown], description: How the installed agent compares with the bundled one; unknown when either is not a MAJOR.MINOR.PATCH version. }
+    ServerAgentConnectRequest:
+      type: object
+      additionalProperties: false
+      required: [url, token]
+      properties:
+        url: { type: string, maxLength: 300, description: "Where OpenVMS reaches the agent: http://host:port on a LAN or VPN, or https://name for a published agent. No path, user or query." }
+        token: { type: string, minLength: 1, maxLength: 256, writeOnly: true, description: A token created on the agent (openvms-agent connection). Stored sealed. }
+        headers:
+          type: object
+          writeOnly: true
+          maxProperties: 8
+          additionalProperties: { type: string, maxLength: 1024 }
+          description: Extra headers a gateway in front of the agent asks for (a Zero Trust service token). Stored sealed. Authorization and Host cannot be set.
+        ca_pem: { type: string, maxLength: 65536, description: Public certificate authority of a private https agent. Applies to this address only. }
+        replace_existing: { type: boolean, description: Confirms replacing an agent that is already registered for the server. }
+    ServerAgentConnectResult:
+      type: object
+      additionalProperties: false
+      required: [base_url, version, scopes]
+      properties:
+        base_url: { type: string }
+        version: { type: string, maxLength: 64 }
+        scopes:
+          type: object
+          additionalProperties: false
+          required: [read, events, control]
+          description: What the token may do on the agent, as far as OpenVMS could tell without changing anything. update cannot be probed.
+          properties:
+            read: { type: boolean }
+            events: { type: boolean, description: Collecting plate readings. }
+            control: { type: boolean, description: ONVIF operations and the camera registry. }
+    ServerAgentConnection:
+      type: object
+      additionalProperties: false
+      required: [connected, has_headers, has_custom_ca]
+      properties:
+        connected: { type: boolean, description: True when the agent was connected by address. }
+        base_url: { type: string }
+        has_headers: { type: boolean }
+        has_custom_ca: { type: boolean }
     ServerAgentTLSConfig:
       type: object
       additionalProperties: false
