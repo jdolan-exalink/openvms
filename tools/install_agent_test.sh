@@ -99,4 +99,40 @@ p7="$tmp/p7"
 OPENVMS_AGENT_PREFIX="$p7" OPENVMS_AGENT_SKIP_SYSTEMD=1 OPENVMS_AGENT_NO_ROOT_CHECK=1 OPENVMS_AGENT_BASE_URL="http://127.0.0.1:$port" bash "$baked" >/dev/null 2>&1 || fail "the baked script failed"
 [[ "$("$p7/usr/local/bin/openvms-agent" --version)" == "$version" ]] || fail "the baked script installed another version"
 
+# 10. An upgrade whose health check fails puts the previous binary back, and a second failed run does
+# not turn the broken binary into the "previous" one.
+p8="$tmp/p8"
+run "$p8" --version "$version" >/dev/null 2>&1 || fail "setup install failed"
+good=$(sha256sum "$p8/usr/local/bin/openvms-agent" | awk '{print $1}')
+rel2="$tmp/release/agent-v9.8.8"
+mkdir -p "$rel2"
+(cd "$root" && CGO_ENABLED=0 go build -trimpath -ldflags "-X github.com/jdolan-exalink/openvms/internal/platform/buildinfo.Version=9.8.8" -o "$rel2/openvms-agent_9.8.8_linux_${arch}" ./apps/edge-agent)
+(cd "$rel2" && sha256sum "openvms-agent_9.8.8_linux_${arch}" >SHA256SUMS)
+for attempt in 1 2; do
+  if out8=$(OPENVMS_AGENT_HEALTH_CHECK_CMD=false OPENVMS_AGENT_HEALTH_WAIT=1 run "$p8" --version 9.8.8 2>&1); then fail "an upgrade that fails its health check reported success"; fi
+  grep -qi 'previous' <<<"$out8" || fail "the failure should say the previous version is back: $out8"
+  [[ "$("$p8/usr/local/bin/openvms-agent" --version)" == "$version" ]] || fail "attempt $attempt: the previous binary was not restored"
+  [[ "$(sha256sum "$p8/usr/local/bin/openvms-agent" | awk '{print $1}')" == "$good" ]] || fail "attempt $attempt: the restored binary differs"
+  [[ ! -e "$p8/usr/local/bin/openvms-agent.rollback" ]] || fail "a rollback file was left behind"
+done
+# A healthy upgrade keeps the old binary as .prev.
+OPENVMS_AGENT_HEALTH_CHECK_CMD=true run "$p8" --version 9.8.8 >/dev/null 2>&1 || fail "a healthy upgrade failed"
+[[ "$("$p8/usr/local/bin/openvms-agent" --version)" == "9.8.8" ]] || fail "the upgrade did not install 9.8.8"
+[[ "$("$p8/usr/local/bin/openvms-agent.prev" --version)" == "$version" ]] || fail ".prev is not the previous version"
+
+# 11. An explicit --port that disagrees with an existing agent.env is refused, not ignored; without
+# --port the address printed is the one the agent really listens on.
+p9="$tmp/p9"
+run "$p9" --version "$version" --port 8443 >/dev/null 2>&1 || fail "setup install failed"
+if out9=$(run "$p9" --version "$version" --port 9000 2>&1); then fail "a conflicting --port was accepted"; fi
+grep -q '8443' <<<"$out9" || fail "the refusal should name the port in use: $out9"
+out9b=$(OPENVMS_AGENT_HEALTH_CHECK_CMD=true run "$p9" --version "$version" 2>&1) || fail "re-run failed: $out9b"
+if grep -q ':7419' <<<"$out9b"; then fail "the re-run talks about the default port instead of the real one: $out9b"; fi
+
+# 12. Without --version the script asks the release list for the newest agent release.
+p10="$tmp/p10"
+printf '[{"tag_name": "v0.9.0"}, {"tag_name": "agent-v%s"}, {"tag_name": "agent-v0.1.0"}]\n' "$version" >"$tmp/release/releases.json"
+OPENVMS_AGENT_API_URL="http://127.0.0.1:$port/releases.json" run "$p10" >/dev/null 2>&1 || fail "installing the newest release failed"
+[[ "$("$p10/usr/local/bin/openvms-agent" --version)" == "$version" ]] || fail "installed another release than the newest agent release"
+
 echo "install_agent_test: ok"

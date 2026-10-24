@@ -18,6 +18,7 @@ PREFIX="${OPENVMS_AGENT_PREFIX:-}"
 
 VERSION="${OPENVMS_AGENT_VERSION:-$DEFAULT_VERSION}"
 PORT=7419
+PORT_EXPLICIT=0
 ACTION=install
 PURGE=0
 
@@ -50,7 +51,7 @@ USAGE
 while [[ $# -gt 0 ]]; do
   case "$1" in
     --version) [[ $# -ge 2 ]] || die "--version needs a value"; VERSION=$2; shift 2 ;;
-    --port) [[ $# -ge 2 ]] || die "--port needs a value"; PORT=$2; shift 2 ;;
+    --port) [[ $# -ge 2 ]] || die "--port needs a value"; PORT=$2; PORT_EXPLICIT=1; shift 2 ;;
     --uninstall) ACTION=uninstall; shift ;;
     --purge) PURGE=1; shift ;;
     --help | -h) usage 0 ;;
@@ -65,6 +66,17 @@ if [[ -z "${OPENVMS_AGENT_NO_ROOT_CHECK:-}" && $EUID -ne 0 ]]; then
 fi
 
 systemd() { [[ -n "${OPENVMS_AGENT_SKIP_SYSTEMD:-}" ]] || systemctl "$@"; }
+
+# A host that already has an agent.env keeps it, so the port it names is the port the agent uses.
+if [[ "$ACTION" == install && -f "$CONF_DIR/agent.env" ]]; then
+  existing_port=$(sed -n 's/^OPENVMS_AGENT_LISTEN=.*:\([0-9][0-9]*\)$/\1/p' "$CONF_DIR/agent.env" | head -1)
+  if [[ -n "$existing_port" ]]; then
+    if ((PORT_EXPLICIT)) && [[ "$existing_port" != "$PORT" ]]; then
+      die "$CONF_DIR/agent.env already sets port $existing_port; pass --port $existing_port or edit that file first"
+    fi
+    PORT=$existing_port
+  fi
+fi
 
 if [[ "$ACTION" == uninstall ]]; then
   systemd disable --now openvms-agent 2>/dev/null || true
@@ -105,7 +117,7 @@ if [[ "$VERSION" == @*@ ]]; then
   # Running the script from the repository rather than from a release (the release build replaces
   # DEFAULT_VERSION above): use the newest agent release.
   tmp_api=$(mktemp)
-  fetch "https://api.github.com/repos/$REPO/releases?per_page=30" "$tmp_api" || die "could not list the releases of $REPO"
+  fetch "${OPENVMS_AGENT_API_URL:-https://api.github.com/repos/$REPO/releases?per_page=30}" "$tmp_api" || die "could not list the releases of $REPO"
   VERSION=$(grep -o '"tag_name": *"agent-v[0-9][0-9.]*"' "$tmp_api" | head -1 | sed 's/.*agent-v//; s/"//') || true
   rm -f "$tmp_api"
   [[ -n "$VERSION" ]] || die "no agent release found; pass --version"
@@ -135,10 +147,13 @@ mkdir -p "$BIN_DIR" "$CONF_DIR" "$STATE_DIR" "$(dirname "$UNIT_FILE")"
 chmod 0750 "$CONF_DIR"
 chmod 0700 "$STATE_DIR"
 
+# The binary being replaced is kept aside until the new one has answered: it only becomes ".prev" (the
+# known-good one) after a healthy upgrade, so a failed run can neither lose it nor turn a broken
+# binary into the "previous" one.
 upgrading=0
 if [[ -x "$BIN" ]]; then
   upgrading=1
-  cp -p "$BIN" "$BIN.prev"
+  cp -p "$BIN" "$BIN.rollback"
 fi
 install -m 0755 "$work/$ASSET" "$BIN.new"
 mv -f "$BIN.new" "$BIN"
@@ -156,8 +171,8 @@ OPENVMS_AGENT_TOKEN_FILE=/etc/openvms/agent.token
 OPENVMS_AGENT_STATE_DIR=/var/lib/openvms-agent
 ENV
   chmod 0640 "$CONF_DIR/agent.env"
-elif ! grep -q "^OPENVMS_AGENT_LISTEN=.*:$PORT\$" "$CONF_DIR/agent.env"; then
-  say "Note: $CONF_DIR/agent.env already exists and was kept; its listen address is unchanged."
+else
+  say "Kept $CONF_DIR/agent.env (the agent listens on port $PORT)."
 fi
 
 cat >"$UNIT_FILE" <<'UNIT'
@@ -181,16 +196,31 @@ systemd daemon-reload
 systemd enable openvms-agent >/dev/null 2>&1
 systemd restart openvms-agent
 
-if [[ -z "${OPENVMS_AGENT_SKIP_SYSTEMD:-}" ]]; then
-  listen_port=$(sed -n 's/^OPENVMS_AGENT_LISTEN=.*:\([0-9]*\)$/\1/p' "$CONF_DIR/agent.env" | head -1)
-  legacy=$(cat "$CONF_DIR/agent.token")
-  ok=0
-  for _ in $(seq 1 30); do
-    if curl -fsS -o /dev/null -H "Authorization: Bearer $legacy" "http://127.0.0.1:${listen_port:-$PORT}/v1/metrics" 2>/dev/null; then ok=1; break; fi
-    sleep 1
-  done
-  ((ok)) || die "the agent was installed but did not answer on port ${listen_port:-$PORT}; see: journalctl -u openvms-agent -n 50"
+healthy() {
+  if [[ -n "${OPENVMS_AGENT_HEALTH_CHECK_CMD:-}" ]]; then
+    bash -c "$OPENVMS_AGENT_HEALTH_CHECK_CMD"
+  elif [[ -n "${OPENVMS_AGENT_SKIP_SYSTEMD:-}" ]]; then
+    return 0
+  else
+    curl -fsS -o /dev/null -H "Authorization: Bearer $(cat "$CONF_DIR/agent.token")" "http://127.0.0.1:$PORT/v1/metrics" 2>/dev/null
+  fi
+}
+
+ok=0
+for _ in $(seq 1 "${OPENVMS_AGENT_HEALTH_WAIT:-30}"); do
+  if healthy; then ok=1; break; fi
+  sleep 1
+done
+if ((!ok)); then
+  if ((upgrading)); then
+    mv -f "$BIN.rollback" "$BIN"
+    systemd restart openvms-agent || true
+    die "the new agent did not answer on port $PORT; the previous version is back. See: journalctl -u openvms-agent -n 50"
+  fi
+  rm -f "$BIN.rollback"
+  die "the agent was installed but did not answer on port $PORT; see: journalctl -u openvms-agent -n 50"
 fi
+if ((upgrading)); then mv -f "$BIN.rollback" "$BIN.prev"; fi
 
 if ((upgrading)); then say "Upgraded to $VERSION (the previous binary is kept as $BIN.prev)."; else say "Installed $VERSION."; fi
 

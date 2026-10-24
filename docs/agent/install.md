@@ -42,7 +42,11 @@ OpenVMS agent connection
 Copy the token now; it will not be shown again.
 ```
 
-Running it again is an **upgrade in place**: same tokens, same configuration. It tells you how to get a
+Running it again is an **upgrade in place**: same tokens, same configuration. If the new version does not
+answer within 30 seconds the script puts the previous binary back and says so; only a healthy upgrade
+turns the old binary into `openvms-agent.prev`. An existing `agent.env` is never rewritten: asking for a
+different `--port` than the one it sets is refused, and without `--port` the printed address uses the port
+the agent really listens on. It tells you how to get a
 new `openvms` token (`openvms-agent token rotate openvms`) instead of printing a second one.
 
 ## Reaching the agent from OpenVMS

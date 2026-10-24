@@ -61,6 +61,6 @@ jobs:
             echo "curl -fsSL https://github.com/$GITHUB_REPOSITORY/releases/download/$GITHUB_REF_NAME/install-agent.sh | sudo bash"
             echo '```'
             echo
-            grep -h "Agent $VERSION" CHANGELOG.md || true
+            grep -hF "Agent $VERSION" CHANGELOG.md || true
           } > notes.md
           gh release create "$GITHUB_REF_NAME" dist/* --title "OpenVMS edge agent $VERSION" --notes-file notes.md
