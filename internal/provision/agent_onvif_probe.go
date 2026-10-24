@@ -176,6 +176,8 @@ func (s *Service) getAgentClientAndToken(ctx context.Context, actor authz.Actor,
 	}
 	baseURL, gatewayHeaders, err := s.agentConnection(ctx, actor, serverID)
 	if err != nil {
+		// Say why without the sealed values: an unreadable blob (a changed key) looks like a network failure otherwise.
+		s.logger().Warn("agent connection settings cannot be read", "server_id", serverID, "error", err)
 		return nil, "", ErrAgentProbeFailed
 	}
 	endpoint, err := AgentEndpointFromRow(host, port, baseURL)
@@ -221,7 +223,7 @@ func (s *Service) endpointClient(endpoint AgentEndpoint, config AgentTLSConfig) 
 	if endpoint.Scheme == "http" {
 		client, err := newPlainAgentHTTPClient(endpoint.Host, port, onvifProbeTimeout, s.probeRoundTripper)
 		if err == nil && s.probeRoundTripper == nil {
-			guardAgentTransport(client.client, "http")
+			err = guardAgentTransport(client.client, "http")
 		}
 		return client, err
 	}
@@ -233,17 +235,21 @@ func (s *Service) endpointClient(endpoint AgentEndpoint, config AgentTLSConfig) 
 		client, err = newVerifiedAgentHTTPClient(endpoint.Host, port, nil, true, onvifProbeTimeout, nil, s.probeRoundTripper)
 	}
 	if err == nil && s.probeRoundTripper == nil {
-		guardAgentTransport(client.client, "https")
+		err = guardAgentTransport(client.client, "https")
 	}
 	return client, err
 }
 
-// guardAgentTransport makes the client connect only to approved destinations (see agent_dial_guard.go).
-func guardAgentTransport(client *http.Client, scheme string) {
-	if transport, ok := client.Transport.(*http.Transport); ok {
-		dialer := &net.Dialer{Timeout: 5 * time.Second}
-		transport.DialContext = guardedDialContext(scheme, systemLookup, dialer.DialContext)
+// guardAgentTransport makes the client connect only to approved destinations (see
+// agent_dial_guard.go). A transport it cannot control is an error: the client is never left unguarded.
+func guardAgentTransport(client *http.Client, scheme string) error {
+	transport, ok := client.Transport.(*http.Transport)
+	if !ok {
+		return errors.New("agent client transport cannot be guarded")
 	}
+	dialer := &net.Dialer{Timeout: 5 * time.Second}
+	transport.DialContext = guardedDialContext(scheme, systemLookup, dialer.DialContext)
+	return nil
 }
 
 // agentConnection returns the stored base URL of the server's agent (empty when it uses host and

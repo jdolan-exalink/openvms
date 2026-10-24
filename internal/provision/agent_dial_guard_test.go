@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"net"
+	"net/http"
 	"testing"
 )
 
@@ -60,5 +61,35 @@ func TestGuardedDialResolvesOnceChecksEveryAddressAndDialsAnApprovedOne(t *testi
 		if _, err := guarded(context.Background(), "tcp", addr); err == nil || dialed != "" {
 			t.Errorf("%s: err = %v dialed = %q; want a refusal before any connection", addr, err, dialed)
 		}
+	}
+}
+
+// A name with several approved addresses is tried address by address, like the stock dialer would:
+// the first one being unreachable (an IPv6 answer on a host with no route) must not fail the agent.
+func TestGuardedDialFallsBackToTheNextApprovedAddress(t *testing.T) {
+	var tried []string
+	dial := func(_ context.Context, _, addr string) (net.Conn, error) {
+		tried = append(tried, addr)
+		if len(tried) == 1 {
+			return nil, errors.New("no route to host")
+		}
+		return nil, errors.New("stop here")
+	}
+	lookup := func(context.Context, string) ([]net.IP, error) {
+		return []net.IP{net.ParseIP("2001:db8::1"), net.ParseIP("203.0.113.9")}, nil
+	}
+	_, _ = guardedDialContext("https", lookup, dial)(context.Background(), "tcp", "agent.example.com:443")
+	if len(tried) != 2 || tried[0] != "[2001:db8::1]:443" || tried[1] != "203.0.113.9:443" {
+		t.Fatalf("tried %q, want both approved addresses in order", tried)
+	}
+}
+
+// A client whose transport the guard cannot control must be refused, not left unguarded.
+func TestGuardAgentTransportFailsClosedOnAnUnknownTransport(t *testing.T) {
+	if err := guardAgentTransport(&http.Client{Transport: roundTripFunc(func(*http.Request) (*http.Response, error) { return nil, nil })}, "https"); err == nil {
+		t.Fatal("an unknown transport must be an error")
+	}
+	if err := guardAgentTransport(&http.Client{Transport: &http.Transport{}}, "https"); err != nil {
+		t.Fatalf("an *http.Transport is guarded: %v", err)
 	}
 }

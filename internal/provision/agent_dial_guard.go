@@ -59,7 +59,20 @@ func guardedDialContext(scheme string, lookup func(context.Context, string) ([]n
 				return nil, err
 			}
 		}
-		return dial(ctx, network, net.JoinHostPort(ips[0].String(), port))
+		// Every answer is approved; try them in order, as the stock dialer does, so an unreachable first
+		// address (an IPv6 answer on a host with no route) does not fail a name that has another.
+		var lastErr error
+		for _, ip := range ips {
+			conn, err := dial(ctx, network, net.JoinHostPort(ip.String(), port))
+			if err == nil {
+				return conn, nil
+			}
+			lastErr = err
+			if ctx.Err() != nil {
+				break
+			}
+		}
+		return nil, lastErr
 	}
 }
 
