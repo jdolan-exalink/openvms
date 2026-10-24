@@ -87,3 +87,32 @@ export async function postForm<T>(path: string, form: FormData): Promise<T> {
   }
   return body as T;
 }
+
+/**
+ * requestJson calls an endpoint that is not in the OpenAPI contract with the same session/token and
+ * CSRF headers as every other request, which a bare fetch lacks (the API refuses cookie-authenticated
+ * writes without them). A 204 answer gives undefined. It throws ApiError like unwrap.
+ */
+export async function requestJson<T>(method: "GET" | "POST" | "PUT" | "DELETE", path: string, body?: unknown): Promise<T> {
+  const headers = new Headers(csrfHeader);
+  headers.set("Accept", "application/json");
+  const token = currentToken();
+  if (token) headers.set("Authorization", `Bearer ${token}`);
+  if (body !== undefined) headers.set("Content-Type", "application/json");
+  const response = await globalThis.fetch(path, {
+    method,
+    headers,
+    body: body === undefined ? undefined : JSON.stringify(body),
+    credentials: "same-origin",
+  });
+  if (response.status === 401 && window.location.pathname !== "/login") {
+    clearToken();
+    window.location.assign("/login");
+  }
+  const parsed: unknown = await response.json().catch(() => undefined);
+  if (!response.ok) {
+    const err = (parsed ?? {}) as Partial<Schemas["Error"]>;
+    throw new ApiError(response.status, err.code ?? "error", err.message || fallbackApiMessage(response.status));
+  }
+  return parsed as T;
+}

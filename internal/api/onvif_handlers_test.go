@@ -109,6 +109,22 @@ func TestCheckOnvifRoutesAreRegisteredAndRequireActor(t *testing.T) {
 		}
 	})
 
+	for name, tc := range map[string]struct{ method, path, body string }{
+		"camera_provision_lpr_unregister": {http.MethodDelete, "/api/v1/cameras/11111111-1111-1111-1111-111111111111/provision-lpr/register", ""},
+		"server_provision_lpr_registry":   {http.MethodGet, "/api/v1/servers/11111111-1111-1111-1111-111111111111/provision-lpr/registry", ""},
+		"server_provision_lpr_enforce":    {http.MethodPut, "/api/v1/servers/11111111-1111-1111-1111-111111111111/provision-lpr/enforce", `{"enforce":true}`},
+	} {
+		t.Run(name, func(t *testing.T) {
+			req := httptest.NewRequest(tc.method, tc.path, strings.NewReader(tc.body))
+			req.Header.Set("Content-Type", "application/json")
+			rw := httptest.NewRecorder()
+			router.ServeHTTP(rw, req)
+			if rw.Code != http.StatusUnauthorized {
+				t.Fatalf("status = %d body=%s; want unauthorized", rw.Code, rw.Body.String())
+			}
+		})
+	}
+
 	t.Run("camera_provision_lpr_configure", func(t *testing.T) {
 		req := httptest.NewRequest(http.MethodPost, "/api/v1/cameras/11111111-1111-1111-1111-111111111111/provision-lpr/configure", strings.NewReader(`{}`))
 		req.Header.Set("Content-Type", "application/json")
