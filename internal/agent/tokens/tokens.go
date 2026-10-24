@@ -163,6 +163,21 @@ func (s *Store) Revoke(idOrName string) error {
 	})
 }
 
+// LoadError reports why the token file cannot be used (unreadable, corrupt, an unknown version), or
+// nil when it can, including when it does not exist yet.
+func (s *Store) LoadError() error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.refreshLocked()
+	return s.loadErr
+}
+
+// LooksLikeToken reports whether a bearer value has the shape of a console token, without checking it.
+func LooksLikeToken(presented string) bool {
+	_, _, ok := parse(presented)
+	return ok
+}
+
 // List returns the stored tokens (without secrets).
 func (s *Store) List() ([]Token, error) {
 	s.mu.Lock()

@@ -1,8 +1,11 @@
 package main
 
 import (
+	"bytes"
+	"log/slog"
 	"net/http"
 	"net/http/httptest"
+	"os"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -166,5 +169,56 @@ func TestTLSListenerProvisionRoutesNeedATokenToo(t *testing.T) {
 	}
 	if got := do(http.MethodPost, "/SendKeepalive", ""); got != http.StatusOK {
 		t.Errorf("camera keepalive = %d, want 200", got)
+	}
+}
+
+// A token file that cannot be read refuses every console token. That is the safe answer, but the
+// operator must be able to see why, instead of a wall of 401s.
+func TestUnreadableTokenFileIsLoggedNotJustRefused(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "agent.tokens.json")
+	store := tokens.Open(path)
+	secret, _, err := store.Create("central", tokens.AllScopes, 0, time.Now())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(path, []byte("{not json"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	var logs bytes.Buffer
+	clock := time.Date(2026, 10, 24, 12, 0, 0, 0, time.UTC)
+	auth := &authenticator{secret: "legacy", tokens: store, log: slog.New(slog.NewTextHandler(&logs, nil)), now: func() time.Time { return clock }}
+	handler := auth.scoped(tokens.ScopeRead, http.HandlerFunc(func(http.ResponseWriter, *http.Request) {}))
+
+	call := func(bearer string) int {
+		req := httptest.NewRequest(http.MethodGet, "/v1/metrics", nil)
+		req.Header.Set("Authorization", "Bearer "+bearer)
+		rec := httptest.NewRecorder()
+		handler.ServeHTTP(rec, req)
+		return rec.Code
+	}
+	if got := call(secret); got != http.StatusUnauthorized {
+		t.Fatalf("status = %d, want 401", got)
+	}
+	if !strings.Contains(logs.String(), "token file") || strings.Contains(logs.String(), secret) {
+		t.Fatalf("log = %q; want a warning about the token file and never the secret", logs.String())
+	}
+	// Once a minute, not once per request.
+	logs.Reset()
+	call(secret)
+	call(secret)
+	if logs.Len() != 0 {
+		t.Fatalf("the warning repeated within a minute: %q", logs.String())
+	}
+	clock = clock.Add(2 * time.Minute)
+	call(secret)
+	if !strings.Contains(logs.String(), "token file") {
+		t.Fatal("the warning should come back after a minute")
+	}
+	// A request that is not even shaped like a console token says nothing about the file.
+	logs.Reset()
+	clock = clock.Add(2 * time.Minute)
+	call("wrong")
+	if logs.Len() != 0 {
+		t.Fatalf("a wrong legacy secret must not blame the token file: %q", logs.String())
 	}
 }

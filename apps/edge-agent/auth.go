@@ -2,8 +2,10 @@ package main
 
 import (
 	"crypto/subtle"
+	"log/slog"
 	"net/http"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/jdolan-exalink/openvms/internal/agent/tokens"
@@ -20,6 +22,35 @@ type authenticator struct {
 	secret string
 	tokens *tokens.Store
 	now    func() time.Time
+	log    *slog.Logger
+
+	warnMu   sync.Mutex
+	lastWarn time.Time
+}
+
+const tokenFileWarnEvery = time.Minute
+
+// warnTokenFile says, at most once a minute, that console tokens are being refused because the token
+// file cannot be used: fail-closed is right, but a wall of 401s must not be the only symptom.
+func (a *authenticator) warnTokenFile(presented string, now time.Time) {
+	if a.tokens == nil || !tokens.LooksLikeToken(presented) {
+		return
+	}
+	err := a.tokens.LoadError()
+	if err == nil {
+		return
+	}
+	a.warnMu.Lock()
+	defer a.warnMu.Unlock()
+	if !a.lastWarn.IsZero() && now.Sub(a.lastWarn) < tokenFileWarnEvery {
+		return
+	}
+	a.lastWarn = now
+	log := a.log
+	if log == nil {
+		log = slog.Default()
+	}
+	log.Warn("agent API tokens are being refused: the token file cannot be used; fix or restore it (the legacy token still works)", "error", err)
 }
 
 func bearerValue(r *http.Request) (string, bool) {
@@ -50,6 +81,9 @@ func (a *authenticator) scoped(scope tokens.Scope, next http.Handler) http.Handl
 				now = a.now
 			}
 			tok, allowed := a.tokens.Authenticate(presented, scope, now())
+			if tok.ID == "" {
+				a.warnTokenFile(presented, now())
+			}
 			switch {
 			case allowed:
 				forwarded := r.Clone(r.Context())
