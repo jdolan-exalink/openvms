@@ -9,6 +9,7 @@ import (
 	"testing"
 
 	"github.com/jdolan-exalink/openvms/internal/inventory"
+	"github.com/jdolan-exalink/openvms/internal/onvif"
 	"github.com/jdolan-exalink/openvms/internal/provision"
 )
 
@@ -190,6 +191,36 @@ func TestParseOnvifProbeCapabilities(t *testing.T) {
 			t.Errorf("has_media1 = %v, want true", caps.HasMedia1)
 		}
 	})
+}
+
+func TestParseOnvifProbeCapabilitiesDetectsTheAnalyticsTheCameraAdvertises(t *testing.T) {
+	res := provision.OnvifProbeResult{
+		Information: provision.OnvifProbeDeviceInformation{Manufacturer: "Provision-ISR", Model: "I6-340"},
+		Services: []provision.OnvifProbeService{
+			{Namespace: "http://www.onvif.org/ver10/events/wsdl", XAddrs: []string{"http://10.0.15.107/events"}, Version: provision.OnvifProbeVersion{Major: 1, Minor: 10}},
+		},
+	}
+	res.Analytics.SupportedTopics = []string{"RuleEngine/LineDetector/Crossed", "VideoSource/MotionAlarm", "Device/Offline/State"}
+
+	_, _, caps := parseOnvifProbeCapabilities(res)
+	got, ok := caps.Get("analytics")
+	if !ok {
+		t.Fatal("analytics capability set is missing")
+	}
+	detected, ok := got.([]onvif.AnalyticsCapability)
+	if !ok || len(detected) != 2 || detected[0].ID != "line_crossing" || detected[1].ID != "motion" {
+		t.Fatalf("analytics = %#v, want line_crossing and motion only", got)
+	}
+	if detected[0].Status != onvif.AnalyticsAdvertised || len(detected[0].Topics) != 1 {
+		t.Fatalf("capability %+v must say it is only advertised and keep its evidence", detected[0])
+	}
+
+	res.Analytics.SupportedTopics = nil
+	if _, _, caps := parseOnvifProbeCapabilities(res); caps.AdditionalProperties != nil {
+		if _, present := caps.Get("analytics"); present {
+			t.Fatal("a camera that lists no topics must not get an analytics set")
+		}
+	}
 }
 
 func TestFindStreamInfo(t *testing.T) {

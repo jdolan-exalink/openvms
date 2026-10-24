@@ -5,6 +5,7 @@ import (
 	"io"
 	"log/slog"
 	"net/http"
+	"strings"
 	"sync"
 	"time"
 )
@@ -22,6 +23,8 @@ type Receiver struct {
 	subMu       sync.RWMutex
 	log         *slog.Logger
 	eventsQueue chan LPREvent
+	captures    *CaptureStore
+	captureAll  bool
 }
 
 // NewReceiver creates a new Receiver with the given config and dependencies.
@@ -52,6 +55,14 @@ func NewReceiver(cfg Config, log *slog.Logger) *Receiver {
 	return r
 }
 
+// SetCaptures makes the receiver keep the requests it cannot parse, so an unknown firmware or
+// camera model is recorded instead of silently dropped. With all set it keeps every event request,
+// parsed or not, which is how the real protocol of a camera is learned. Call it before serving.
+func (r *Receiver) SetCaptures(store *CaptureStore, all bool) {
+	r.captures = store
+	r.captureAll = all && store != nil
+}
+
 // Subscribe registers a callback to receive normalized LPR events.
 func (r *Receiver) Subscribe(sub EventSubscriber) {
 	if sub == nil {
@@ -76,6 +87,8 @@ func (r *Receiver) ServeHTTP(w http.ResponseWriter, req *http.Request) {
 		r.handleKeepalive(w, req)
 	case path == "/v1/provision-lpr/status":
 		r.handleStatus(w, req)
+	case path == "/v1/provision-lpr/captures" || strings.HasPrefix(path, "/v1/provision-lpr/captures/"):
+		r.handleCaptures(w, req)
 	case req.Method == http.MethodPost:
 		r.handleEvent(w, req)
 	default:
@@ -123,9 +136,14 @@ func (r *Receiver) handleEvent(w http.ResponseWriter, req *http.Request) {
 	event, err := r.parser.Parse(req, body, now)
 	if err != nil {
 		r.log.Warn("provision-isr payload unparseable", "error", err, "path", req.URL.Path, "size", len(body))
+		r.capture(req, body, CaptureUnparsed, err.Error(), now)
 		// Still record keepalive from the camera IP
 		r.heartbeat.RecordKeepalive("", extractClientIP(req), now)
 		return
+	}
+
+	if r.captureAll {
+		r.capture(req, body, CaptureAll, "", now)
 	}
 
 	// Deduplicate
@@ -144,6 +162,57 @@ func (r *Receiver) handleEvent(w http.ResponseWriter, req *http.Request) {
 	default:
 		r.log.Warn("provision-isr events queue full; dropping event", "camera_id", event.CameraID, "plate", event.Plate)
 	}
+}
+
+// capture keeps a request when a store is configured. A failure to store never affects the reply
+// the camera already received.
+func (r *Receiver) capture(req *http.Request, body []byte, reason, parseErr string, now time.Time) {
+	if r.captures == nil {
+		return
+	}
+	if _, err := r.captures.Save(req, body, reason, parseErr, extractClientIP(req), now); err != nil {
+		r.log.Warn("provision-isr capture not stored", "error", err, "path", req.URL.Path)
+	}
+}
+
+// handleCaptures serves the stored captures: the list, one description, or the original body.
+// The receiver itself does not authenticate; the agent mux puts these routes behind the bearer token.
+func (r *Receiver) handleCaptures(w http.ResponseWriter, req *http.Request) {
+	if req.Method != http.MethodGet {
+		w.Header().Set("Allow", "GET")
+		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+	if r.captures == nil {
+		http.Error(w, "captures are not enabled", http.StatusNotFound)
+		return
+	}
+	rest := strings.TrimPrefix(strings.TrimPrefix(req.URL.Path, "/v1/provision-lpr/captures"), "/")
+	if rest == "" {
+		list, err := r.captures.List(100)
+		if err != nil {
+			http.Error(w, "captures unavailable", http.StatusInternalServerError)
+			return
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(map[string]any{"captures": list})
+		return
+	}
+	id, wantBody := strings.CutSuffix(rest, "/body")
+	meta, body, err := r.captures.Get(id)
+	if err != nil {
+		http.NotFound(w, req)
+		return
+	}
+	if wantBody {
+		w.Header().Set("Content-Type", "application/octet-stream")
+		w.Header().Set("Content-Disposition", `attachment; filename="`+meta.ID+`.bin"`)
+		w.Header().Set("X-Content-Type-Options", "nosniff")
+		_, _ = w.Write(body) //nolint:gosec // served as an octet-stream attachment with nosniff, behind the agent token.
+		return
+	}
+	w.Header().Set("Content-Type", "application/json")
+	_ = json.NewEncoder(w).Encode(meta)
 }
 
 func (r *Receiver) handleStatus(w http.ResponseWriter, req *http.Request) {

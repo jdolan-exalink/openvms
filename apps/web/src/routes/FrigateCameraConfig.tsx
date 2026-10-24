@@ -3,6 +3,7 @@ import {
   RefreshCw, Settings, ShieldCheck, SlidersHorizontal, Sparkles, TriangleAlert, Video,
 } from "lucide-react";
 import { FisheyeSection } from "@/components/fisheye/FisheyeSection";
+import { AdvertisedAnalytics } from "@/components/provision/AdvertisedAnalytics";
 import { isProvisionCamera, ProvisionLprSection } from "@/components/provision/ProvisionLprSection";
 import { Icon } from "@/components/Icon";
 import { useT } from "@/i18n";
@@ -1523,6 +1524,8 @@ function CameraOnvifPanel({
           </div>
         </div>
       </div>
+
+      <AdvertisedAnalytics analytics={caps?.analytics} />
 
       {caps?.services && caps.services.length > 0 && (
         <div className="flex flex-col gap-2">
