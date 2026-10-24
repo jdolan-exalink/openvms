@@ -114,11 +114,11 @@ func normalizeCamera(c RegisteredCamera) (RegisteredCamera, error) {
 	if err != nil {
 		return c, fmt.Errorf("%w: ip is not an address", ErrInvalidCamera)
 	}
-	addr = addr.Unmap()
+	addr = addr.Unmap().WithZone("")
 	if addr.IsUnspecified() || addr.IsMulticast() || addr.IsLoopback() {
 		return c, fmt.Errorf("%w: ip must be the address the camera connects from", ErrInvalidCamera)
 	}
-	return RegisteredCamera{CameraID: c.CameraID, IP: addr.String()}, nil
+	return RegisteredCamera{CameraID: c.CameraID, IP: canonicalAddr(addr)}, nil
 }
 
 func (r *Registry) addLocked(c RegisteredCamera) error {
@@ -212,7 +212,7 @@ func (r *Registry) Identify(ip string) (RegisteredCamera, bool) {
 	}
 	r.mu.RLock()
 	defer r.mu.RUnlock()
-	id, ok := r.byIP[addr.Unmap().String()]
+	id, ok := r.byIP[canonicalAddr(addr)]
 	if !ok {
 		return RegisteredCamera{}, false
 	}

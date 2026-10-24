@@ -17,6 +17,7 @@ func TestClientIPIsTheConnectionPeerAndNeverAHeaderTheClientChooses(t *testing.T
 		"ipv6 ignores forwarded-for":  {"[2001:db8::2]:54321", "2001:db8::1", "2001:db8::2"},
 		"address without a port":      {"10.0.0.5", "", "10.0.0.5"},
 		"ipv4-mapped ipv6 is unmaped": {"[::ffff:10.0.15.107]:5000", "", "10.0.15.107"},
+		"ipv6 zone is dropped":        {"[fe80::1%eth0]:5000", "", "fe80::1"},
 	} {
 		req := httptest.NewRequest(http.MethodPost, "/SendKeepalive", nil)
 		req.RemoteAddr = tc.remote

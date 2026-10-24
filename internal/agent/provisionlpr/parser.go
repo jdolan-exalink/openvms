@@ -444,10 +444,15 @@ func extractClientIP(r *http.Request) string {
 		host = strings.TrimSpace(r.RemoteAddr)
 	}
 	if addr, err := netip.ParseAddr(host); err == nil {
-		return addr.Unmap().String()
+		return canonicalAddr(addr)
 	}
 	return host
 }
+
+// canonicalAddr is the one spelling of an address used to identify cameras: an IPv4-mapped IPv6
+// address is its IPv4 form and an IPv6 zone (fe80::1%eth0) is dropped, since the zone names the
+// agent's own interface, not the camera.
+func canonicalAddr(a netip.Addr) string { return a.Unmap().WithZone("").String() }
 
 func parseTime(raw string) (time.Time, error) {
 	formats := []string{

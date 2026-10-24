@@ -71,6 +71,18 @@ func TestRegistryIdentifiesByCanonicalAddress(t *testing.T) {
 	}
 }
 
+func TestRegistryIgnoresTheZoneOfALinkLocalAddress(t *testing.T) {
+	r, _ := newRegistry(t)
+	if err := r.Upsert(RegisteredCamera{CameraID: "cam-ll", IP: "fe80::1%eth0"}); err != nil {
+		t.Fatalf("a zone-qualified link-local address was refused: %v", err)
+	}
+	for _, ip := range []string{"fe80::1", "fe80::1%eth0", "fe80::1%wlan0"} {
+		if c, ok := r.Identify(ip); !ok || c.CameraID != "cam-ll" || c.IP != "fe80::1" {
+			t.Fatalf("Identify(%q) = %+v, %v; the zone must not decide who a camera is", ip, c, ok)
+		}
+	}
+}
+
 func TestRegistryRejectsInvalidRegistrations(t *testing.T) {
 	r, _ := newRegistry(t)
 	for name, c := range map[string]RegisteredCamera{

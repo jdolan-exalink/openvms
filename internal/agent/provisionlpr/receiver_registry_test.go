@@ -7,18 +7,18 @@ import (
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
-	"sync"
 	"testing"
 	"time"
 )
 
 type registryFixture struct {
-	r      *Receiver
-	reg    *Registry
-	store  *CaptureStore
-	mu     sync.Mutex
-	events []LPREvent
+	r       *Receiver
+	reg     *Registry
+	store   *CaptureStore
+	events  chan LPREvent
+	barrier int
 }
 
 func newRegistryFixture(t *testing.T) *registryFixture {
@@ -31,22 +31,40 @@ func newRegistryFixture(t *testing.T) *registryFixture {
 	if err != nil {
 		t.Fatal(err)
 	}
-	f := &registryFixture{r: NewReceiver(DefaultConfig(), nil), reg: reg, store: store}
+	f := &registryFixture{r: NewReceiver(DefaultConfig(), nil), reg: reg, store: store, events: make(chan LPREvent, 64)}
 	f.r.SetRegistry(reg)
 	f.r.SetCaptures(store, false)
-	f.r.Subscribe(func(ev LPREvent) {
-		f.mu.Lock()
-		defer f.mu.Unlock()
-		f.events = append(f.events, ev)
-	})
+	f.r.Subscribe(func(ev LPREvent) { f.events <- ev })
 	return f
 }
 
-func (f *registryFixture) emitted() []LPREvent {
-	time.Sleep(60 * time.Millisecond) // the subscriber runs on the receiver's own goroutine
-	f.mu.Lock()
-	defer f.mu.Unlock()
-	return append([]LPREvent(nil), f.events...)
+// emitted returns the events the receiver has delivered so far, without sleeping. The receiver
+// delivers in order on its own goroutine, so a sentinel event from a registered camera arrives after
+// everything sent before it: once the sentinel is seen, whatever came earlier is all there is, and an
+// event that was never emitted cannot be missed by waiting too short.
+func (f *registryFixture) emitted(t *testing.T) []LPREvent {
+	t.Helper()
+	if err := f.reg.Upsert(RegisteredCamera{CameraID: "sentinel", IP: "10.0.15.250"}); err != nil {
+		t.Fatal(err)
+	}
+	f.barrier++
+	plate := "SENTINEL" + strconv.Itoa(f.barrier)
+	if rec := f.send(http.MethodPost, "/v1/provision-lpr/event", "10.0.15.250:1", `{"plate":"`+plate+`"}`, nil); rec.Code != http.StatusOK {
+		t.Fatalf("sentinel status = %d", rec.Code)
+	}
+	var got []LPREvent
+	deadline := time.After(5 * time.Second)
+	for {
+		select {
+		case ev := <-f.events:
+			if ev.Plate == plate {
+				return got
+			}
+			got = append(got, ev)
+		case <-deadline:
+			t.Fatalf("the sentinel event never arrived; events so far: %+v", got)
+		}
+	}
 }
 
 func (f *registryFixture) send(method, path, remote, body string, headers map[string]string) *httptest.ResponseRecorder {
@@ -69,7 +87,7 @@ func TestRegisteredCameraEventCarriesTheRegisteredIDAndKeepsWhatThePayloadClaime
 	if rec := f.send(http.MethodPost, "/v1/provision-lpr/event", "10.0.15.107:5000", lprBody, nil); rec.Code != http.StatusOK {
 		t.Fatalf("status = %d", rec.Code)
 	}
-	got := f.emitted()
+	got := f.emitted(t)
 	if len(got) != 1 || got[0].CameraID != "11111111-2222-3333-4444-555555555555" {
 		t.Fatalf("events = %+v, want one with the registered camera ID", got)
 	}
@@ -94,7 +112,7 @@ func TestWithoutEnforcementUnknownCamerasAreAcceptedButListed(t *testing.T) {
 	if rec := f.send(http.MethodPost, "/v1/provision-lpr/event", "10.0.15.200:5000", lprBody, nil); rec.Code != http.StatusOK {
 		t.Fatalf("status = %d, want the legacy behaviour (accepted)", rec.Code)
 	}
-	if got := f.emitted(); len(got) != 1 || got[0].CameraID != "id-the-payload-claims" {
+	if got := f.emitted(t); len(got) != 1 || got[0].CameraID != "id-the-payload-claims" {
 		t.Fatalf("events = %+v, want the event accepted as before", got)
 	}
 	seen := f.reg.Snapshot().Unregistered
@@ -112,7 +130,7 @@ func TestEnforcementRefusesUnregisteredCamerasAndKeepsTheRequestAsEvidence(t *te
 	if rec.Code != http.StatusForbidden {
 		t.Fatalf("status = %d, want 403", rec.Code)
 	}
-	if got := f.emitted(); len(got) != 0 {
+	if got := f.emitted(t); len(got) != 0 {
 		t.Fatalf("events = %+v, an unregistered camera injected an event", got)
 	}
 	list, _ := f.store.List(0)
@@ -131,7 +149,7 @@ func TestEnforcementRefusesUnregisteredCamerasAndKeepsTheRequestAsEvidence(t *te
 	if ok := f.send(http.MethodPost, "/v1/provision-lpr/event", "10.0.15.107:5000", lprBody, nil); ok.Code != http.StatusOK {
 		t.Fatalf("registered camera status = %d, want 200", ok.Code)
 	}
-	if got := f.emitted(); len(got) != 1 || got[0].CameraID != "cam-a" {
+	if got := f.emitted(t); len(got) != 1 || got[0].CameraID != "cam-a" {
 		t.Fatalf("events = %+v, want the registered camera's event", got)
 	}
 }
@@ -145,7 +163,7 @@ func TestAForwardedForHeaderCannotMakeAnUnregisteredHostLookRegistered(t *testin
 	if rec.Code != http.StatusForbidden {
 		t.Fatalf("status = %d, want 403: headers must not choose the identity", rec.Code)
 	}
-	if got := f.emitted(); len(got) != 0 {
+	if got := f.emitted(t); len(got) != 0 {
 		t.Fatalf("events = %+v, a spoofed header injected an event", got)
 	}
 }
