@@ -16,8 +16,10 @@ import {
   Tag,
   XCircle,
 } from "lucide-react";
-import { api, type Schemas, unwrap } from "@/api/client";
+import { api, requestJson, type Schemas, unwrap } from "@/api/client";
 import { Icon } from "@/components/Icon";
+import { type ConfigureResult, ProvisionConfigureResult } from "@/components/provision/ProvisionConfigureResult";
+import { ProvisionRegistryCard } from "@/components/provision/ProvisionRegistryCard";
 import { Button, ErrorNote, TextInput } from "@/components/ui";
 import { cn } from "@/lib/cn";
 
@@ -71,14 +73,6 @@ interface ProvisionStatusResponse {
   }[];
 }
 
-interface ConfigureResult {
-  success: boolean;
-  method?: string;
-  message?: string;
-  web_ui_path?: string;
-  parameters?: Record<string, string>;
-}
-
 export function isProvisionCamera(cam?: Schemas["Camera"] | null): boolean {
   if (!cam) return false;
   if (cam.tags?.includes("provision")) return true;
@@ -111,9 +105,6 @@ export function ProvisionLprSection({ camera, onCameraUpdate }: ProvisionLprSect
 
   // Configuration form state
   const [cameraIp, setCameraIp] = useState("");
-  const [cameraPort, setCameraPort] = useState("80");
-  const [username, setUsername] = useState("admin");
-  const [password, setPassword] = useState("");
   const [targetHost, setTargetHost] = useState("");
   const [targetPort, setTargetPort] = useState("7419");
   const [configResult, setConfigResult] = useState<ConfigureResult | null>(null);
@@ -189,24 +180,13 @@ export function ProvisionLprSection({ camera, onCameraUpdate }: ProvisionLprSect
   const configureCamera = useMutation({
     mutationFn: async () => {
       setConfigResult(null);
-      const res = await fetch(`/api/v1/cameras/${camera.id}/provision-lpr/configure`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          camera_ip: cameraIp.trim() || undefined,
-          camera_port: cameraPort ? parseInt(cameraPort, 10) : 80,
-          username: username.trim() || undefined,
-          password: password || undefined,
-          target_host: targetHost.trim() || undefined,
-          target_port: targetPort ? parseInt(targetPort, 10) : 7419,
-          interval_second: 20,
-        }),
+      // The camera's credentials are not sent: nothing is applied to the camera remotely.
+      return requestJson<ConfigureResult>("POST", `/api/v1/cameras/${camera.id}/provision-lpr/configure`, {
+        camera_ip: cameraIp.trim() || undefined,
+        target_host: targetHost.trim() || undefined,
+        target_port: targetPort ? parseInt(targetPort, 10) : 7419,
+        interval_second: 20,
       });
-      if (!res.ok) {
-        const text = await res.text();
-        throw new Error(text || `Error ${res.status}`);
-      }
-      return (await res.json()) as ConfigureResult;
     },
     onSuccess: (data) => {
       setConfigResult(data);
@@ -397,34 +377,6 @@ export function ProvisionLprSection({ camera, onCameraUpdate }: ProvisionLprSect
                   placeholder={status?.camera_ip || "Ej: 172.22.148.100"}
                 />
               </div>
-              <div>
-                <label className="block text-[11px] font-bold text-muted uppercase mb-1">Puerto HTTP</label>
-                <TextInput
-                  value={cameraPort}
-                  onChange={(e) => setCameraPort(e.target.value)}
-                  placeholder="80"
-                />
-              </div>
-            </div>
-
-            <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
-              <div>
-                <label className="block text-[11px] font-bold text-muted uppercase mb-1">Usuario Cámara</label>
-                <TextInput
-                  value={username}
-                  onChange={(e) => setUsername(e.target.value)}
-                  placeholder="admin"
-                />
-              </div>
-              <div>
-                <label className="block text-[11px] font-bold text-muted uppercase mb-1">Contraseña</label>
-                <TextInput
-                  type="password"
-                  value={password}
-                  onChange={(e) => setPassword(e.target.value)}
-                  placeholder="••••••••"
-                />
-              </div>
             </div>
 
             <div className="grid grid-cols-1 sm:grid-cols-3 gap-2.5">
@@ -452,7 +404,7 @@ export function ProvisionLprSection({ camera, onCameraUpdate }: ProvisionLprSect
               className="mt-2 w-full justify-center"
             >
               <Icon icon={Send} size="xs" className={configureCamera.isPending ? "animate-spin" : ""} />
-              {configureCamera.isPending ? "Aplicando en cámara…" : "Aplicar configuración LPR en cámara"}
+              {configureCamera.isPending ? "Registrando…" : "Registrar cámara y preparar configuración"}
             </Button>
           </form>
 
@@ -460,24 +412,7 @@ export function ProvisionLprSection({ camera, onCameraUpdate }: ProvisionLprSect
             <ErrorNote error={configureCamera.error instanceof Error ? configureCamera.error : new Error(String(configureCamera.error))} />
           )}
 
-          {configResult && (
-            <div
-              className={cn(
-                "rounded-m3-xl p-3 text-xs flex flex-col gap-1.5",
-                configResult.success ? "bg-ok/15 text-ok" : "bg-warn/15 text-warn"
-              )}
-            >
-              <div className="flex items-center gap-2 font-bold">
-                <Icon icon={configResult.success ? CheckCircle2 : Info} size="xs" />
-                <span>{configResult.message || (configResult.success ? "Configuración enviada correctamente" : "Requiere ajuste manual")}</span>
-              </div>
-              {!configResult.success && (
-                <p className="text-[11px] opacity-90">
-                  La cámara no respondió al endpoint CGI automatizado. Utilice los parámetros guiados a continuación para ingresarlos en su panel web.
-                </p>
-              )}
-            </div>
-          )}
+          {configResult && <ProvisionConfigureResult result={configResult} />}
         </div>
 
         {/* Panel 2: Parámetros del Servidor y Guía de Configuración Web */}
@@ -507,11 +442,11 @@ export function ProvisionLprSection({ camera, onCameraUpdate }: ProvisionLprSect
             <span className="text-[11px] font-bold text-muted uppercase">Parámetros a ingresar en la cámara:</span>
             <div className="flex flex-col gap-1.5">
               {[
-                { label: "Dirección IP / Dominio", val: targetHost || "IP de este servidor", key: "host" },
-                { label: "Puerto del Servidor", val: "7419", key: "port" },
-                { label: "Ruta Keepalive / Latido", val: "/SendKeepalive", key: "keepalive" },
-                { label: "Ruta de Evento LPR", val: "/v1/provision-lpr/event", key: "event" },
-                { label: "Intervalo de Latido", val: "20 segundos", key: "interval" },
+                { label: "Dirección IP / Dominio", val: configResult?.parameters?.["Server IP / Domain"] || targetHost || "IP de este servidor", key: "host" },
+                { label: "Puerto del Servidor", val: configResult?.parameters?.["Server Port"] || targetPort || "7419", key: "port" },
+                { label: "Ruta Keepalive / Latido", val: configResult?.parameters?.["Keepalive Endpoint"] || "/SendKeepalive", key: "keepalive" },
+                { label: "Ruta de Evento LPR", val: configResult?.parameters?.["LPR Event Endpoint"] || "/v1/provision-lpr/event", key: "event" },
+                { label: "Intervalo de Latido", val: configResult?.parameters?.["Heartbeat Interval"] || "20 s", key: "interval" },
                 { label: "Protocolo", val: "HTTP POST", key: "proto" },
               ].map((p) => (
                 <div key={p.key} className="flex items-center justify-between rounded-m3-lg bg-surface-2 px-3 py-2 text-xs">
@@ -533,6 +468,8 @@ export function ProvisionLprSection({ camera, onCameraUpdate }: ProvisionLprSect
           </div>
         </div>
       </div>
+
+      <ProvisionRegistryCard serverId={camera.server_id} />
 
       {/* Monitor en Vivo: Imagen, Chapa y Atributos de Vehículo */}
       <div className="flex flex-col gap-4 rounded-m3-2xl border border-outline-variant/50 bg-surface-1 p-5 shadow-sm">
