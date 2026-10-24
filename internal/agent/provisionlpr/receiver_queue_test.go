@@ -90,7 +90,8 @@ func call(r *Receiver, method, target, body string) *httptest.ResponseRecorder {
 
 func TestEventsRouteReturnsTheQueuedEventsAfterASequence(t *testing.T) {
 	r, _ := queueRoutesFixture(t)
-	rec := call(r, http.MethodGet, "/v1/provision-lpr/events?after=1&limit=1", "")
+	r.eventsPage = 1
+	rec := call(r, http.MethodGet, "/v1/provision-lpr/events/after/1", "")
 	if rec.Code != http.StatusOK {
 		t.Fatalf("status = %d: %s", rec.Code, rec.Body)
 	}
@@ -130,8 +131,10 @@ func TestQueueRoutesRejectBadInputAndMethods(t *testing.T) {
 		method, target, body string
 		want                 int
 	}{
-		{http.MethodGet, "/v1/provision-lpr/events?after=abc", "", http.StatusBadRequest},
-		{http.MethodGet, "/v1/provision-lpr/events?limit=0", "", http.StatusBadRequest},
+		{http.MethodGet, "/v1/provision-lpr/events/after/abc", "", http.StatusBadRequest},
+		{http.MethodGet, "/v1/provision-lpr/events/after/", "", http.StatusBadRequest},
+		{http.MethodGet, "/v1/provision-lpr/events/after/-1", "", http.StatusBadRequest},
+		{http.MethodGet, "/v1/provision-lpr/events/other", "", http.StatusNotFound},
 		{http.MethodPost, "/v1/provision-lpr/events", "", http.StatusMethodNotAllowed},
 		{http.MethodGet, "/v1/provision-lpr/events/ack", "", http.StatusMethodNotAllowed},
 		{http.MethodPost, "/v1/provision-lpr/events/ack", `not json`, http.StatusBadRequest},

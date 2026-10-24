@@ -5,6 +5,7 @@ import (
 	"io"
 	"net/http"
 	"strconv"
+	"strings"
 )
 
 const (
@@ -12,12 +13,14 @@ const (
 	eventsAckPath = "/v1/provision-lpr/events/ack"
 
 	defaultEventsPage = 100
-	maxEventsPage     = 500
 	maxAckBody        = 1 << 10
 )
 
-// handleEvents lists the queued events after a sequence. Like the captures and registry routes it
-// does not authenticate itself: the agent mux puts it behind the bearer token.
+// handleEvents lists the queued events after a sequence: GET /v1/provision-lpr/events (everything
+// from the start) or GET /v1/provision-lpr/events/after/{seq}. A page holds at most eventsPage events;
+// the caller asks again with the last sequence it got. The sequence is in the path because central's
+// agent client refuses query strings. Like the captures and registry routes it does not authenticate
+// itself: the agent mux puts it behind the bearer token.
 func (r *Receiver) handleEvents(w http.ResponseWriter, req *http.Request) {
 	if req.Method != http.MethodGet {
 		w.Header().Set("Allow", "GET")
@@ -29,26 +32,22 @@ func (r *Receiver) handleEvents(w http.ResponseWriter, req *http.Request) {
 		return
 	}
 	var after uint64
-	if v := req.URL.Query().Get("after"); v != "" {
-		n, err := strconv.ParseUint(v, 10, 64)
+	if rest := strings.TrimPrefix(req.URL.Path, eventsPath); rest != "" {
+		seq, ok := strings.CutPrefix(rest, "/after/")
+		n, err := strconv.ParseUint(seq, 10, 64)
+		if !ok {
+			http.NotFound(w, req)
+			return
+		}
 		if err != nil {
-			http.Error(w, "after must be a sequence number", http.StatusBadRequest)
+			http.Error(w, "the sequence must be a number", http.StatusBadRequest)
 			return
 		}
 		after = n
 	}
-	limit := defaultEventsPage
-	if v := req.URL.Query().Get("limit"); v != "" {
-		n, err := strconv.Atoi(v)
-		if err != nil || n < 1 {
-			http.Error(w, "limit must be a positive number", http.StatusBadRequest)
-			return
-		}
-		limit = min(n, maxEventsPage)
-	}
 	st := r.queue.Stats()
 	writeJSON(w, map[string]any{
-		"events":   r.queue.After(after, limit),
+		"events":   r.queue.After(after, r.eventsPage),
 		"last_seq": st.LastSeq,
 		"depth":    st.Depth,
 		"lost":     st.Lost,

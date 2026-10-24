@@ -27,6 +27,7 @@ type Receiver struct {
 	captureAll  bool
 	registry    *Registry
 	queue       *EventQueue
+	eventsPage  int
 }
 
 // NewReceiver creates a new Receiver with the given config and dependencies.
@@ -51,6 +52,7 @@ func NewReceiver(cfg Config, log *slog.Logger) *Receiver {
 		heartbeat:   NewHeartbeatManager(cfg.HeartbeatTimeout),
 		log:         log,
 		eventsQueue: make(chan LPREvent, 256),
+		eventsPage:  defaultEventsPage,
 	}
 
 	go r.processEvents()
@@ -104,10 +106,10 @@ func (r *Receiver) ServeHTTP(w http.ResponseWriter, req *http.Request) {
 		r.handleStatus(w, req)
 	case path == "/v1/provision-lpr/captures" || strings.HasPrefix(path, "/v1/provision-lpr/captures/"):
 		r.handleCaptures(w, req)
-	case path == eventsPath:
-		r.handleEvents(w, req)
 	case path == eventsAckPath:
 		r.handleEventsAck(w, req)
+	case path == eventsPath || strings.HasPrefix(path, eventsPath+"/"):
+		r.handleEvents(w, req)
 	case path == "/v1/provision-lpr/registry" || strings.HasPrefix(path, "/v1/provision-lpr/registry/"):
 		r.handleRegistry(w, req)
 	case req.Method == http.MethodPost:

@@ -31,7 +31,7 @@ func TestProvisionEventRoutesNeedTheAgentToken(t *testing.T) {
 	}
 	for _, c := range []struct{ method, path, body string }{
 		{http.MethodGet, "/v1/provision-lpr/events", ""},
-		{http.MethodGet, "/v1/provision-lpr/events?after=0", ""},
+		{http.MethodGet, "/v1/provision-lpr/events/after/0", ""},
 		{http.MethodPost, "/v1/provision-lpr/events/ack", `{"through":1}`},
 		{http.MethodPost, "/v1/provision-lpr/events", ""},
 		{http.MethodGet, "/v1/provision-lpr/events/ack", ""},
