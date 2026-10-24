@@ -7,7 +7,6 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"net"
 	"strings"
 
 	"github.com/google/uuid"
@@ -37,8 +36,8 @@ type AgentTLSConfig struct {
 }
 
 func validateAgentTLSConfig(host string, in AgentTLSConfig) error {
-	ip := net.ParseIP(host)
-	if ip == nil || ip.To4() == nil || in.SecurePort < 1 || in.SecurePort > 65535 {
+	host = strings.ToLower(host)
+	if !validAgentHost(host) || in.SecurePort < 1 || in.SecurePort > 65535 {
 		return errors.New("invalid registered agent TLS configuration")
 	}
 	if len(in.CAPEM) > maxAgentCAPEM {
@@ -49,13 +48,13 @@ func validateAgentTLSConfig(host string, in AgentTLSConfig) error {
 		if len(in.CAPEM) != 0 {
 			return errors.New("system trust mode cannot include a CA bundle")
 		}
-		_, err := buildAgentTLSConfig(ip.To4().String(), nil, true)
+		_, err := buildAgentTLSConfig(host, nil, true)
 		return err
 	case AgentTLSTrustCustom:
 		if len(in.CAPEM) == 0 {
 			return errors.New("custom trust mode requires a CA bundle")
 		}
-		_, err := buildAgentTLSConfig(ip.To4().String(), in.CAPEM, false)
+		_, err := buildAgentTLSConfig(host, in.CAPEM, false)
 		return err
 	default:
 		return errors.New("invalid agent TLS trust mode")

@@ -39,3 +39,23 @@ WHERE server_id = @server_id;
 -- name: UpdateServerAgentRequestHeaders :execrows
 UPDATE server_agents SET request_headers_sealed = @request_headers_sealed, updated_at = now()
 WHERE server_id = @server_id;
+
+-- name: UpsertServerAgentConnection :exec
+-- Registers or replaces an agent that OpenVMS reaches at a stored address (edge agent 0.4.0).
+INSERT INTO server_agents (server_id, tenant_id, host, port, variant, token_sealed, version, base_url, request_headers_sealed)
+VALUES (@server_id, @tenant_id, @host, @port, @variant, @token_sealed, @version, @base_url, @request_headers_sealed)
+ON CONFLICT (server_id) DO UPDATE SET
+    tenant_id = EXCLUDED.tenant_id,
+    host = EXCLUDED.host,
+    port = EXCLUDED.port,
+    variant = EXCLUDED.variant,
+    token_sealed = EXCLUDED.token_sealed,
+    version = EXCLUDED.version,
+    base_url = EXCLUDED.base_url,
+    request_headers_sealed = EXCLUDED.request_headers_sealed,
+    updated_at = now();
+
+-- name: DeleteServerAgentConnection :execrows
+-- Forgets an agent that was connected by address. An agent installed over SSH is not touched here.
+DELETE FROM server_agents
+WHERE server_id = @server_id AND base_url <> '';
