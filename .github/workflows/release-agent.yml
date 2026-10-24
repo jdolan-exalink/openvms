@@ -1,0 +1,66 @@
+name: Release agent
+
+# Publishes the edge agent when a tag agent-vX.Y.Z is pushed: linux amd64 and arm64 binaries, SHA256SUMS
+# and install-agent.sh as release assets. The tag has to match deploy/agent/VERSION.
+on:
+  push:
+    tags: ["agent-v*"]
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    name: Build and publish the edge agent
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-go@v7
+        with:
+          go-version-file: go.mod
+      - name: The tag matches deploy/agent/VERSION
+        run: |
+          version="${GITHUB_REF_NAME#agent-v}"
+          file="$(tr -d '[:space:]' < deploy/agent/VERSION)"
+          if [ "$version" != "$file" ]; then
+            echo "::error::tag $GITHUB_REF_NAME does not match deploy/agent/VERSION ($file)"
+            exit 1
+          fi
+          echo "VERSION=$version" >> "$GITHUB_ENV"
+      - name: Tests
+        run: |
+          go test ./apps/edge-agent/... ./internal/agent/... ./internal/provision/...
+          bash tools/agent_version_test.sh
+          bash tools/install_agent_test.sh
+      - name: Build
+        run: |
+          mkdir dist
+          pkg=github.com/jdolan-exalink/openvms/internal/platform/buildinfo
+          for arch in amd64 arm64; do
+            CGO_ENABLED=0 GOOS=linux GOARCH="$arch" go build -trimpath \
+              -ldflags "-X $pkg.Version=$VERSION -X $pkg.Commit=$GITHUB_SHA -X $pkg.BuildTime=$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
+              -o "dist/openvms-agent_${VERSION}_linux_${arch}" ./apps/edge-agent
+          done
+          sed -e "s/^DEFAULT_VERSION=\"@AGENT_VERSION@\"\$/DEFAULT_VERSION=\"$VERSION\"/" \
+              -e "s/agent-v@AGENT_VERSION@/agent-v$VERSION/" \
+              deploy/agent/install-agent.sh > dist/install-agent.sh
+          grep -q "^DEFAULT_VERSION=\"$VERSION\"\$" dist/install-agent.sh
+          (cd dist && sha256sum openvms-agent_* install-agent.sh > SHA256SUMS)
+      - name: Publish
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          {
+            echo "OpenVMS edge agent $VERSION."
+            echo
+            echo "Install or upgrade on a Linux host with systemd (amd64 or arm64):"
+            echo
+            echo '```'
+            echo "curl -fsSL https://github.com/$GITHUB_REPOSITORY/releases/download/$GITHUB_REF_NAME/install-agent.sh | sudo bash"
+            echo '```'
+            echo
+            grep -h "Agent $VERSION" CHANGELOG.md || true
+          } > notes.md
+          gh release create "$GITHUB_REF_NAME" dist/* --title "OpenVMS edge agent $VERSION" --notes-file notes.md
