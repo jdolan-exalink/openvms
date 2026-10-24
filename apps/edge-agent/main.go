@@ -101,6 +101,13 @@ func main() {
 		log.Error("Provision-ISR camera registry is unreadable: every camera is refused until it is repaired", "error", err)
 	}
 	lprReceiver.SetRegistry(registry)
+	queue, err := provisionlpr.OpenEventQueue(stateDir, 0, 0)
+	if err != nil {
+		// Without the queue the readings still reach the live subscribers, but central cannot collect them.
+		log.Error("Provision-ISR event queue unavailable: readings will not reach central", "error", err)
+	} else {
+		lprReceiver.SetEventQueue(queue)
+	}
 	capture, err := parseCaptureMode(os.Getenv("OPENVMS_AGENT_PROVISION_CAPTURE"))
 	if err != nil {
 		log.Error("invalid Provision-ISR capture configuration", "error", err)
@@ -351,6 +358,9 @@ func buildMux(secret, variant string, sampler *agent.Sampler, discoveryHandler, 
 		mux.Handle("GET /v1/provision-lpr/status", requireBearer(secret, lprHandler))
 		mux.Handle("/v1/provision-lpr/registry", requireBearer(secret, lprHandler))
 		mux.Handle("/v1/provision-lpr/registry/", requireBearer(secret, lprHandler))
+		// The queued readings are what central collects: token only, for every method.
+		mux.Handle("/v1/provision-lpr/events", requireBearer(secret, lprHandler))
+		mux.Handle("/v1/provision-lpr/events/", requireBearer(secret, lprHandler))
 	}
 	configurator := provisionlpr.NewConfigurator()
 	mux.HandleFunc("POST /v1/provision-lpr/configure", func(w http.ResponseWriter, r *http.Request) {

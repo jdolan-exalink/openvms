@@ -26,6 +26,7 @@ type Receiver struct {
 	captures    *CaptureStore
 	captureAll  bool
 	registry    *Registry
+	queue       *EventQueue
 }
 
 // NewReceiver creates a new Receiver with the given config and dependencies.
@@ -69,6 +70,14 @@ func (r *Receiver) SetCaptures(store *CaptureStore, all bool) {
 // accepted, as before. Call it before serving.
 func (r *Receiver) SetRegistry(reg *Registry) { r.registry = reg }
 
+// SetEventQueue makes the receiver keep every reading from an identified camera on disk until
+// central collects it. Readings from addresses the registry does not know are not queued: central
+// cannot map them to a camera. Call it before serving.
+func (r *Receiver) SetEventQueue(q *EventQueue) { r.queue = q }
+
+// EventQueue returns the durable queue, or nil when none is configured.
+func (r *Receiver) EventQueue() *EventQueue { return r.queue }
+
 // Subscribe registers a callback to receive normalized LPR events.
 func (r *Receiver) Subscribe(sub EventSubscriber) {
 	if sub == nil {
@@ -95,6 +104,10 @@ func (r *Receiver) ServeHTTP(w http.ResponseWriter, req *http.Request) {
 		r.handleStatus(w, req)
 	case path == "/v1/provision-lpr/captures" || strings.HasPrefix(path, "/v1/provision-lpr/captures/"):
 		r.handleCaptures(w, req)
+	case path == eventsPath:
+		r.handleEvents(w, req)
+	case path == eventsAckPath:
+		r.handleEventsAck(w, req)
 	case path == "/v1/provision-lpr/registry" || strings.HasPrefix(path, "/v1/provision-lpr/registry/"):
 		r.handleRegistry(w, req)
 	case req.Method == http.MethodPost:
@@ -185,6 +198,14 @@ func (r *Receiver) handleEvent(w http.ResponseWriter, req *http.Request) {
 	// Update heartbeat with reading
 	r.heartbeat.RecordFullEvent(event, now)
 	r.log.Info("provision-isr lpr event accepted", "camera_id", event.CameraID, "plate", event.Plate, "ip", event.CameraIP)
+
+	// Keep it for central before anything that can drop it: the camera has already been answered, so
+	// a failure here is logged and the reading still reaches the subscribers.
+	if r.queue != nil && registered != nil {
+		if _, err := r.queue.Append(event); err != nil {
+			r.log.Error("provision-isr event not queued for central", "error", err, "camera_id", event.CameraID)
+		}
+	}
 
 	// Enqueue for subscribers
 	select {
@@ -284,6 +305,9 @@ func (r *Receiver) handleStatus(w http.ResponseWriter, req *http.Request) {
 	out := map[string]any{"cameras": statuses}
 	if r.registry != nil {
 		out["registry"] = r.registry.Snapshot()
+	}
+	if r.queue != nil {
+		out["events"] = r.queue.Stats()
 	}
 	w.Header().Set("Content-Type", "application/json")
 	_ = json.NewEncoder(w).Encode(out)
