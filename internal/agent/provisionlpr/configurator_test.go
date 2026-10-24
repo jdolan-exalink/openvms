@@ -6,10 +6,12 @@ import (
 	"net/http/httptest"
 	"net/url"
 	"strconv"
+	"strings"
+	"sync/atomic"
 	"testing"
 )
 
-func TestConfiguratorManualInstructions(t *testing.T) {
+func TestConfiguratorPreparesTheStepsAndDoesNotClaimSuccess(t *testing.T) {
 	c := NewConfigurator()
 	res := c.Configure(context.Background(), CameraConfigParams{
 		TargetHost:     "10.0.15.2",
@@ -17,8 +19,8 @@ func TestConfiguratorManualInstructions(t *testing.T) {
 		IntervalSecond: 20,
 	})
 
-	if !res.Success {
-		t.Fatal("expected success")
+	if res.Success {
+		t.Fatal("the configurator reported success although nothing was applied to the camera")
 	}
 	if res.Method != "manual_instructions" {
 		t.Fatalf("expected manual_instructions, got %q", res.Method)
@@ -29,47 +31,44 @@ func TestConfiguratorManualInstructions(t *testing.T) {
 	if res.Parameters["Server Port"] != "7419" {
 		t.Fatalf("unexpected target port: %v", res.Parameters)
 	}
+	if res.Parameters["Heartbeat Interval"] != "20 s" || res.WebUIPath == "" {
+		t.Fatalf("the steps are incomplete: %+v", res)
+	}
 }
 
-func TestConfiguratorAutomatedCGI(t *testing.T) {
-	var receivedForm url.Values
-	var receivedUser, receivedPass string
-	var hasAuth bool
+func TestConfiguratorAppliesDefaultsToMissingValues(t *testing.T) {
+	res := NewConfigurator().Configure(context.Background(), CameraConfigParams{TargetHost: "10.0.15.2"})
+	if res.Parameters["Server Port"] != "7419" || res.Parameters["Keepalive Endpoint"] != "/SendKeepalive" ||
+		res.Parameters["LPR Event Endpoint"] != "/v1/provision-lpr/event" || res.Parameters["Heartbeat Interval"] != "20 s" {
+		t.Fatalf("defaults missing: %v", res.Parameters)
+	}
+}
 
-	fakeCameraServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if r.URL.Path == "/http/post.cgi" {
-			_ = r.ParseForm()
-			receivedForm = r.PostForm
-			receivedUser, receivedPass, hasAuth = r.BasicAuth()
-			w.WriteHeader(http.StatusOK)
-			_, _ = w.Write([]byte("OK"))
-			return
-		}
-		http.NotFound(w, r)
+// The manufacturer documents no way to set the push remotely, so the configurator must not guess an
+// endpoint on the camera or hand it credentials.
+func TestConfiguratorNeverContactsTheCameraOrUsesItsCredentials(t *testing.T) {
+	var requests atomic.Int32
+	camera := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		requests.Add(1)
+		w.WriteHeader(http.StatusOK)
 	}))
-	defer fakeCameraServer.Close()
-
-	u, _ := url.Parse(fakeCameraServer.URL)
+	defer camera.Close()
+	u, _ := url.Parse(camera.URL)
 	port, _ := strconv.Atoi(u.Port())
 
-	c := NewConfigurator()
-	res := c.Configure(context.Background(), CameraConfigParams{
-		CameraIP:       u.Hostname(),
-		CameraPort:     port,
-		Username:       "admin",
-		Password:       "pass123",
-		TargetHost:     "10.0.15.2",
-		TargetPort:     7419,
-		IntervalSecond: 20,
+	res := NewConfigurator().Configure(context.Background(), CameraConfigParams{
+		CameraIP: u.Hostname(), CameraPort: port, Username: "admin", Password: "pass123",
+		TargetHost: "10.0.15.2", TargetPort: 7419, IntervalSecond: 20,
 	})
-
-	if !res.Success || res.Method != "cgi_api" {
-		t.Fatalf("expected cgi_api success, got: %+v", res)
+	if got := requests.Load(); got != 0 {
+		t.Fatalf("the camera received %d requests; the configurator must not guess endpoints on it", got)
 	}
-	if !hasAuth || receivedUser != "admin" || receivedPass != "pass123" {
-		t.Fatalf("expected basic auth credentials, got user=%q pass=%q auth=%v", receivedUser, receivedPass, hasAuth)
+	if res.Success || res.Method != "manual_instructions" {
+		t.Fatalf("result = %+v", res)
 	}
-	if receivedForm.Get("server_ip") != "10.0.15.2" || receivedForm.Get("port") != "7419" {
-		t.Fatalf("unexpected form params: %+v", receivedForm)
+	for k, v := range res.Parameters {
+		if strings.Contains(k+v, "pass123") || strings.Contains(k+v, "admin") {
+			t.Fatalf("a credential leaked into the result: %s=%s", k, v)
+		}
 	}
 }
