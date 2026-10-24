@@ -386,6 +386,12 @@ func (s *Service) runServerAgentInstall(parent context.Context, actor authz.Acto
 			enrollmentCheck = s.waitForFreshAgentEnrollment
 		}
 		if err := enrollmentCheck(ctx, actor, job.serverID, enrollmentIssuedAt); err != nil {
+			if ctx.Err() != nil {
+				// The whole install was cancelled or timed out: that is not a host that cannot reach OpenVMS.
+				job.fail(AgentInstallCodeRegistrationFailed, "")
+				s.logger().Warn("agent install registration failed", "server_id", job.serverID, "reason", "enrollment_verification")
+				return
+			}
 			pollOnly = true
 			s.logger().Warn("agent install: the agent did not enroll with OpenVMS; continuing with OpenVMS polling it", "server_id", job.serverID, "reason", "enrollment_not_observed")
 		}

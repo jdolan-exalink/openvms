@@ -319,6 +319,36 @@ func TestStartAgentInstallWithoutEnrollmentFallsBackToPollingWhenHTTPSHealthPass
 	}
 }
 
+// A cancelled or timed-out install is not a host that cannot reach OpenVMS: it must not be taken for
+// a successful pull-only install.
+func TestStartAgentInstallCancelledWhileWaitingForEnrollmentFails(t *testing.T) {
+	actor, serverID := authz.Actor{UserID: uuid.New()}, uuid.New()
+	registered := false
+	ctx, cancel := context.WithCancel(context.Background())
+	svc := &Service{
+		AgentMTLS:                      &AgentMTLS{GRPCAddr: "vms.example.com:9443", APIURL: "https://vms.example.com"},
+		NewEnrollToken:                 func(context.Context, authz.Actor, uuid.UUID) (string, error) { return "fresh-enrollment-token", nil },
+		requireAgentInstallPermissions: func(context.Context, authz.Actor, uuid.UUID) error { return nil },
+		agentInstallExists:             func(context.Context, authz.Actor, uuid.UUID) (bool, error) { return false, nil },
+		agentInstallBinary:             func() ([]byte, error) { return []byte("trusted fake binary"), nil },
+		agentInstallRun:                func(context.Context, AgentInstallRequest, func(string)) error { return nil },
+		agentInstallEnrollmentCheck: func(context.Context, authz.Actor, uuid.UUID, time.Time) error {
+			cancel()
+			return context.Canceled
+		},
+		agentInstallHealthCheck: func(context.Context, string, uint16, string, []byte) error { return nil },
+		agentInstallRegister: func(context.Context, authz.Actor, uuid.UUID, string, uint16, string, []byte) error {
+			registered = true
+			return nil
+		},
+	}
+	job := &agentInstallJob{serverID: serverID, snapshot: AgentInstallJob{ID: uuid.New()}}
+	svc.runServerAgentInstall(ctx, actor, job, AgentInstallRequest{Host: "192.0.2.10"}, "agent-token", nil)
+	if final := job.read(); final.Status != "failed" || registered {
+		t.Fatalf("job=%#v registered=%v; a cancelled install must not register", final, registered)
+	}
+}
+
 func TestStartAgentInstallWithoutEnrollmentAndWithoutHTTPSHealthDoesNotRegister(t *testing.T) {
 	actor, serverID := authz.Actor{UserID: uuid.New()}, uuid.New()
 	registered := false

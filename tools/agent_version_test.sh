@@ -88,6 +88,13 @@ before=$(cat "$d/deploy/agent/VERSION")
 (cd "$d" && AGENT_PACKAGE_DIRS="internal/agent apps/edge-agent" "$script" check main --fix) >/dev/null
 [[ $(cat "$d/deploy/agent/VERSION") == "$before" ]] || fail "--fix must not bump twice"
 
+# 9b. A new file that is staged (what a pre-commit hook sees) counts as an agent change.
+d=$(new_repo staged)
+git -C "$d" tag agent-v0.4.0
+printf 'package agent\n' >"$d/internal/agent/new.go"; git -C "$d" add internal/agent/new.go
+out=$(check "$d") && fail "a staged new agent file on a released version must fail"
+grep -q "internal/agent/new.go" <<<"$out" || fail "the staged file should be listed: $out"
+
 # 10. An unknown base fails loudly instead of passing.
 d=$(new_repo nobase)
 (cd "$d" && AGENT_PACKAGE_DIRS="internal/agent" "$script" check no-such-ref >/dev/null 2>&1) && fail "an unknown base must fail"
