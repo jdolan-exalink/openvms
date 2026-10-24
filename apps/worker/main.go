@@ -48,6 +48,7 @@ import (
 	"github.com/jdolan-exalink/openvms/internal/platform/objectstore"
 	"github.com/jdolan-exalink/openvms/internal/platform/postgres"
 	"github.com/jdolan-exalink/openvms/internal/platform/telemetry"
+	"github.com/jdolan-exalink/openvms/internal/provision"
 	"github.com/jdolan-exalink/openvms/internal/realtime/outbox"
 	"github.com/jdolan-exalink/openvms/internal/rules"
 	"github.com/jdolan-exalink/openvms/internal/secrets"
@@ -147,6 +148,14 @@ func run() error {
 		Interval: cfg.EventSyncInterval, Backfill: cfg.EventBackfill, Concurrency: 8,
 	}
 	go syncer.Run(ctx)
+
+	// Collects the plate readings Provision-ISR cameras report to their edge agents. An agent that
+	// is unreachable or too old only gets its error recorded; it never stops the other jobs.
+	agentIngest := &events.AgentIngestor{
+		Store: st, Log: log, Interval: 15 * time.Second,
+		Source: &provision.Service{Store: st, Sealer: sealer, Log: log},
+	}
+	go agentIngest.Run(ctx)
 
 	// Closes open/acknowledged alarms that saw no new event for alarm_settings.auto_close_after.
 	autoCloser := &alarms.AutoCloser{Store: st, Pub: &jetstreamPublisher{js: js}, Log: log}

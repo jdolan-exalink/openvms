@@ -19,6 +19,7 @@ import {
 import { api, requestJson, type Schemas, unwrap } from "@/api/client";
 import { Icon } from "@/components/Icon";
 import { type ConfigureResult, ProvisionConfigureResult } from "@/components/provision/ProvisionConfigureResult";
+import { ProvisionIngestionCard } from "@/components/provision/ProvisionIngestionCard";
 import { ProvisionRegistryCard } from "@/components/provision/ProvisionRegistryCard";
 import { Button, ErrorNote, TextInput } from "@/components/ui";
 import { cn } from "@/lib/cn";
@@ -470,6 +471,7 @@ export function ProvisionLprSection({ camera, onCameraUpdate }: ProvisionLprSect
       </div>
 
       <ProvisionRegistryCard serverId={camera.server_id} />
+      <ProvisionIngestionCard serverId={camera.server_id} />
 
       {/* Monitor en Vivo: Imagen, Chapa y Atributos de Vehículo */}
       <div className="flex flex-col gap-4 rounded-m3-2xl border border-outline-variant/50 bg-surface-1 p-5 shadow-sm">
