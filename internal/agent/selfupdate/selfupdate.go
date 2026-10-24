@@ -13,12 +13,14 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"log/slog"
 	"os"
 	"os/exec"
 	"path/filepath"
 	"regexp"
 	"runtime"
 	"strings"
+	"sync"
 	"time"
 
 	"crypto/sha256"
@@ -55,6 +57,10 @@ type Updater struct {
 	MaxSize          int64
 	MaxStartAttempts int
 	ConfirmWindow    time.Duration
+
+	// mu serialises everything that reads or writes the pending record and the binaries: two
+	// overlapping requests must not both pass the pending check.
+	mu sync.Mutex
 }
 
 // Result describes an applied update.
@@ -95,13 +101,15 @@ func (u *Updater) Apply(ctx context.Context, data []byte, wantSHA256, wantVersio
 	if err := u.check(data, wantSHA256); err != nil {
 		return Result{}, err
 	}
+	u.mu.Lock()
+	defer u.mu.Unlock()
 	if m, err := u.readMarker(); err != nil {
 		return Result{}, err
 	} else if m != nil {
 		if u.now().Before(m.Deadline.Add(watchdogSlack)) {
 			return Result{}, ErrUpdatePending
 		}
-		if _, err := u.RollbackIfPending(ctx); err != nil {
+		if _, err := u.rollbackIfPendingLocked(ctx); err != nil {
 			return Result{}, fmt.Errorf("an earlier update never confirmed and could not be rolled back: %w", err)
 		}
 	}
@@ -215,6 +223,8 @@ func (u *Updater) stopWatchdog(ctx context.Context, m marker) {
 
 // Confirm is called by the new process once it is healthy: the update is final.
 func (u *Updater) Confirm(ctx context.Context) error {
+	u.mu.Lock()
+	defer u.mu.Unlock()
 	m, err := u.readMarker()
 	if err != nil || m == nil {
 		return err
@@ -230,6 +240,8 @@ func (u *Updater) Confirm(ctx context.Context) error {
 // confirm too many times in a row the previous binary is put back. It reports whether it did, so the
 // caller can restart.
 func (u *Updater) NoteStart(ctx context.Context) (bool, error) {
+	u.mu.Lock()
+	defer u.mu.Unlock()
 	m, err := u.readMarker()
 	if err != nil || m == nil {
 		return false, err
@@ -240,7 +252,7 @@ func (u *Updater) NoteStart(ctx context.Context) (bool, error) {
 	}
 	m.Attempts++
 	if m.Attempts > limit {
-		return u.RollbackIfPending(ctx)
+		return u.rollbackIfPendingLocked(ctx)
 	}
 	return false, u.writeMarker(*m)
 }
@@ -248,6 +260,12 @@ func (u *Updater) NoteStart(ctx context.Context) (bool, error) {
 // RollbackIfPending restores the previous binary when an update is waiting for confirmation. It is
 // what the watchdog runs (from the previous binary) and what a crash loop triggers.
 func (u *Updater) RollbackIfPending(ctx context.Context) (bool, error) {
+	u.mu.Lock()
+	defer u.mu.Unlock()
+	return u.rollbackIfPendingLocked(ctx)
+}
+
+func (u *Updater) rollbackIfPendingLocked(ctx context.Context) (bool, error) {
 	m, err := u.readMarker()
 	if err != nil || m == nil {
 		return false, err
@@ -266,6 +284,9 @@ func (u *Updater) RollbackIfPending(ctx context.Context) (bool, error) {
 	return true, nil
 }
 
+// readMarker returns the pending update, or nil when there is none. A record that cannot be read is
+// set aside (kept as evidence next to the original) and treated as none: refusing every update for
+// ever because of it would leave the agent unable to be updated until someone deleted a file by hand.
 func (u *Updater) readMarker() (*marker, error) {
 	data, err := os.ReadFile(u.markerPath())
 	if errors.Is(err, os.ErrNotExist) {
@@ -276,7 +297,11 @@ func (u *Updater) readMarker() (*marker, error) {
 	}
 	var m marker
 	if err := json.Unmarshal(data, &m); err != nil || m.Previous == "" {
-		return nil, errors.New("the pending update record is unreadable")
+		slog.Error("the pending agent update record is unreadable; setting it aside", "path", u.markerPath())
+		if err := os.Rename(u.markerPath(), u.markerPath()+".corrupt"); err != nil {
+			return nil, fmt.Errorf("the pending update record is unreadable and cannot be set aside: %w", err)
+		}
+		return nil, nil
 	}
 	return &m, nil
 }

@@ -10,6 +10,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 )
@@ -35,6 +36,7 @@ func sum(b []byte) string { h := sha256.Sum256(b); return hex.EncodeToString(h[:
 type fixture struct {
 	dir, exe, state string
 	u               *Updater
+	mu              sync.Mutex
 	calls           [][]string
 	smoke           func(path string) (string, error)
 	systemdRunErr   error
@@ -54,7 +56,9 @@ func newFixture(t *testing.T) *fixture {
 	f.u = &Updater{
 		ExePath: f.exe, StateDir: f.state, GOARCH: "amd64", Now: func() time.Time { return t0 },
 		Run: func(_ context.Context, name string, args ...string) ([]byte, error) {
+			f.mu.Lock()
 			f.calls = append(f.calls, append([]string{name}, args...))
+			f.mu.Unlock()
 			switch {
 			case name == "systemd-run":
 				return nil, f.systemdRunErr
@@ -278,5 +282,60 @@ func TestAnUpdateCannotOverwriteThePreviousBinaryWhileAnotherIsPending(t *testin
 	f.u.Now = func() time.Time { return t0.Add(time.Hour) }
 	if _, err := f.u.Apply(context.Background(), elf(emX86_64, "NEWER"), "", ""); err != nil {
 		t.Fatalf("a stale pending update must not block for ever: %v", err)
+	}
+}
+
+// Two overlapping requests must not both pass the pending check: the second would overwrite the
+// known-good binary with the first one's unconfirmed one.
+func TestConcurrentUpdatesAllowExactlyOneAndKeepTheKnownGoodBinary(t *testing.T) {
+	f := newFixture(t)
+	const n = 8
+	results := make(chan error, n)
+	start := make(chan struct{})
+	for i := 0; i < n; i++ {
+		go func() {
+			<-start
+			_, err := f.u.Apply(context.Background(), elf(emX86_64, "NEW"+strings.Repeat("x", i)), "", "")
+			results <- err
+		}()
+	}
+	close(start)
+	ok, pending := 0, 0
+	for i := 0; i < n; i++ {
+		switch err := <-results; {
+		case err == nil:
+			ok++
+		case errors.Is(err, ErrUpdatePending):
+			pending++
+		default:
+			t.Fatalf("unexpected error: %v", err)
+		}
+	}
+	if ok != 1 || pending != n-1 {
+		t.Fatalf("applied %d, pending %d; want exactly one applied", ok, pending)
+	}
+	if f.read(t, f.exe+".prev") != string(elf(emX86_64, "OLD")) {
+		t.Fatal("the known-good binary was overwritten by an unconfirmed one")
+	}
+}
+
+// A marker that cannot be read must not block updates for ever: it is set aside and the agent goes on.
+func TestACorruptPendingRecordIsSetAsideNotFatal(t *testing.T) {
+	f := newFixture(t)
+	marker := filepath.Join(f.state, markerFile)
+	if err := os.WriteFile(marker, []byte("{garbage"), 0o600); err != nil { //nolint:gosec // inside t.TempDir()
+		t.Fatal(err)
+	}
+	if rolled, err := f.u.NoteStart(context.Background()); err != nil || rolled {
+		t.Fatalf("NoteStart: rolled=%v err=%v", rolled, err)
+	}
+	if f.exists(marker) || !f.exists(marker+".corrupt") {
+		t.Fatal("the unreadable record should be set aside, not deleted and not kept in place")
+	}
+	if err := os.WriteFile(marker, []byte("{garbage"), 0o600); err != nil { //nolint:gosec // inside t.TempDir()
+		t.Fatal(err)
+	}
+	if _, err := f.u.Apply(context.Background(), elf(emX86_64, "NEW"), "", ""); err != nil {
+		t.Fatalf("an unreadable record blocked an update: %v", err)
 	}
 }
