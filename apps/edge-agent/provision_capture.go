@@ -37,17 +37,6 @@ func parseCaptureMode(value string) (captureMode, error) {
 // captureDir is where captures live inside the agent state directory.
 func captureDir(stateDir string) string { return filepath.Join(stateDir, "provision-captures") }
 
-// requireBearer lets a request through only with the agent token.
-func requireBearer(secret string, next http.Handler) http.Handler {
-	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if !bearer(r, secret) {
-			http.Error(w, "unauthorized", http.StatusUnauthorized)
-			return
-		}
-		next.ServeHTTP(w, r)
-	})
-}
-
 // postsAnywhere sends POSTs on paths nothing else claims to next and answers 404 to the rest.
 func postsAnywhere(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {

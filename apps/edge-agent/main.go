@@ -22,6 +22,7 @@ import (
 	"github.com/jdolan-exalink/openvms/internal/agent"
 	"github.com/jdolan-exalink/openvms/internal/agent/onvifdiscover"
 	"github.com/jdolan-exalink/openvms/internal/agent/provisionlpr"
+	"github.com/jdolan-exalink/openvms/internal/agent/tokens"
 	"github.com/jdolan-exalink/openvms/internal/onvif"
 	"github.com/jdolan-exalink/openvms/internal/platform/buildinfo"
 	"github.com/jdolan-exalink/openvms/internal/platform/grpctls"
@@ -41,6 +42,9 @@ func runVersionFlag(args []string, out io.Writer) bool {
 func main() {
 	if runVersionFlag(os.Args[1:], os.Stdout) {
 		return
+	}
+	if len(os.Args) > 1 && (os.Args[1] == "token" || os.Args[1] == "connection") {
+		os.Exit(runConsoleCommand(os.Args[1:], os.Stdout, os.Stderr, time.Now))
 	}
 	log := slog.New(slog.NewJSONHandler(os.Stdout, nil))
 	token, err := os.ReadFile(env("OPENVMS_AGENT_TOKEN_FILE", "/etc/openvms/agent.token"))
@@ -89,6 +93,7 @@ func main() {
 		log.Error("invalid ONVIF TLS configuration", "error", err)
 		os.Exit(1)
 	}
+	auth := &authenticator{secret: secret, tokens: tokens.Open(tokensFile())}
 	healthHandler := newAgentHealthHandler(secret, currentAgentHealthInfo(variant))
 	lprReceiver := provisionlpr.NewReceiver(provisionlpr.DefaultConfig(), log)
 	stateDir := env("OPENVMS_AGENT_STATE_DIR", "/var/lib/openvms-agent")
@@ -122,7 +127,7 @@ func main() {
 			lprReceiver.SetCaptures(store, capture == captureEverything)
 		}
 	}
-	mux := buildMux(secret, variant, sampler, discoveryHandler, probeHandler, opsHandler, lprReceiver, replaceBinary, func() { go restart() })
+	mux := buildMuxWithAuth(auth, variant, sampler, discoveryHandler, probeHandler, opsHandler, lprReceiver, replaceBinary, func() { go restart() })
 	if capture == captureEverything {
 		log.Warn("Provision-ISR capture-all is on: POSTs on any path are accepted and kept; turn it off once the camera protocol is known")
 		mux.Handle("/", postsAnywhere(lprReceiver))
@@ -190,7 +195,7 @@ func main() {
 	}()
 
 	if tlsEnabled {
-		tlsServer := newAgentTLSServer(tlsConfig, healthHandler, discoveryHandler, probeHandler, lprReceiver)
+		tlsServer := newAgentTLSServer(tlsConfig, auth, healthHandler, discoveryHandler, probeHandler, lprReceiver)
 		log.Info("ONVIF TLS listener enabled", "addr", tlsServer.Addr)
 		if err := serveAgentServers(log, srv, tlsServer); err != nil && !errors.Is(err, http.ErrServerClosed) {
 			log.Error("agent listener stopped", "error", err)
@@ -309,65 +314,45 @@ func serveAgentServersWith(log *slog.Logger, serve func(*http.Server) error, shu
 }
 
 func buildMux(secret, variant string, sampler *agent.Sampler, discoveryHandler, probeHandler http.Handler, opsHandler *onvifdiscover.OpsHandler, lprHandler http.Handler, replace func(*http.Request) error, restartUpdate func()) *http.ServeMux {
+	return buildMuxWithAuth(&authenticator{secret: secret}, variant, sampler, discoveryHandler, probeHandler, opsHandler, lprHandler, replace, restartUpdate)
+}
+
+// buildMuxWithAuth wires the agent's routes. Scopes: read (metrics, health), events (the reading queue
+// and the receiver status), control (ONVIF operations, discovery, the camera registry, captures,
+// configuration) and update (replacing the binary). The legacy token has every scope.
+func buildMuxWithAuth(auth *authenticator, variant string, sampler *agent.Sampler, discoveryHandler, probeHandler http.Handler, opsHandler *onvifdiscover.OpsHandler, lprHandler http.Handler, replace func(*http.Request) error, restartUpdate func()) *http.ServeMux {
 	mux := http.NewServeMux()
-	mux.HandleFunc("GET /v1/metrics", func(w http.ResponseWriter, r *http.Request) {
-		if !bearer(r, secret) {
-			http.Error(w, "unauthorized", http.StatusUnauthorized)
-			return
-		}
+	mux.Handle("GET /v1/metrics", auth.scoped(tokens.ScopeRead, http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		writeJSON(w, sampler.Current(variant))
-	})
-	mux.HandleFunc("POST /v1/update", func(w http.ResponseWriter, r *http.Request) {
-		if !bearer(r, secret) {
-			http.Error(w, "unauthorized", http.StatusUnauthorized)
-			return
-		}
+	})))
+	mux.Handle("POST /v1/update", auth.scoped(tokens.ScopeUpdate, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if err := replace(r); err != nil {
 			http.Error(w, err.Error(), http.StatusBadRequest)
 			return
 		}
 		w.WriteHeader(http.StatusAccepted)
 		restartUpdate()
-	})
+	})))
 	if discoveryHandler != nil {
-		mux.Handle("POST /v1/onvif/discover", discoveryHandler)
+		mux.Handle("POST /v1/onvif/discover", auth.scoped(tokens.ScopeControl, discoveryHandler))
 	}
 	if probeHandler != nil {
-		mux.Handle("POST /v1/onvif/probe", probeHandler)
+		mux.Handle("POST /v1/onvif/probe", auth.scoped(tokens.ScopeControl, probeHandler))
 	}
 	if opsHandler != nil {
-		mux.HandleFunc("POST /v1/onvif/sync-time", opsHandler.HandleSyncTime)
-		mux.HandleFunc("POST /v1/onvif/ptz", opsHandler.HandlePTZ)
-		mux.HandleFunc("POST /v1/onvif/video-config", opsHandler.HandleVideoConfig)
-		mux.HandleFunc("POST /v1/onvif/video-encoding", opsHandler.HandleVideoEncoding)
-		mux.HandleFunc("POST /v1/onvif/imaging", opsHandler.HandleImaging)
-		mux.HandleFunc("POST /v1/onvif/snapshot", opsHandler.HandleSnapshot)
+		control := func(h http.HandlerFunc) http.Handler { return auth.scoped(tokens.ScopeControl, h) }
+		mux.Handle("POST /v1/onvif/sync-time", control(opsHandler.HandleSyncTime))
+		mux.Handle("POST /v1/onvif/ptz", control(opsHandler.HandlePTZ))
+		mux.Handle("POST /v1/onvif/video-config", control(opsHandler.HandleVideoConfig))
+		mux.Handle("POST /v1/onvif/video-encoding", control(opsHandler.HandleVideoEncoding))
+		mux.Handle("POST /v1/onvif/imaging", control(opsHandler.HandleImaging))
+		mux.Handle("POST /v1/onvif/snapshot", control(opsHandler.HandleSnapshot))
 	}
 	if lprHandler != nil {
-		mux.Handle("/SendKeepalive", lprHandler)
-		mux.Handle("/v1/provision-lpr/", lprHandler)
-		mux.Handle("/v1/provision-lpr/event", lprHandler)
-		mux.Handle("/SendLPR", lprHandler)
-		mux.Handle("/LPR", lprHandler)
-		mux.Handle("/Notification/LPR", lprHandler)
-		// Captured requests can hold plates and images: only the agent token reads them.
-		mux.Handle("GET /v1/provision-lpr/captures", requireBearer(secret, lprHandler))
-		mux.Handle("GET /v1/provision-lpr/captures/", requireBearer(secret, lprHandler))
-		// The status lists camera addresses and plates, and the registry decides which cameras are
-		// trusted: both are agent-token routes. Only the camera-facing routes above stay open.
-		mux.Handle("GET /v1/provision-lpr/status", requireBearer(secret, lprHandler))
-		mux.Handle("/v1/provision-lpr/registry", requireBearer(secret, lprHandler))
-		mux.Handle("/v1/provision-lpr/registry/", requireBearer(secret, lprHandler))
-		// The queued readings are what central collects: token only, for every method.
-		mux.Handle("/v1/provision-lpr/events", requireBearer(secret, lprHandler))
-		mux.Handle("/v1/provision-lpr/events/", requireBearer(secret, lprHandler))
+		mountProvisionLPR(mux, auth, lprHandler)
 	}
 	configurator := provisionlpr.NewConfigurator()
-	mux.HandleFunc("POST /v1/provision-lpr/configure", func(w http.ResponseWriter, r *http.Request) {
-		if !bearer(r, secret) {
-			http.Error(w, "unauthorized", http.StatusUnauthorized)
-			return
-		}
+	mux.Handle("POST /v1/provision-lpr/configure", auth.scoped(tokens.ScopeControl, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		var p provisionlpr.CameraConfigParams
 		if err := json.NewDecoder(r.Body).Decode(&p); err != nil {
 			http.Error(w, "invalid request body", http.StatusBadRequest)
@@ -376,7 +361,7 @@ func buildMux(secret, variant string, sampler *agent.Sampler, discoveryHandler, 
 		res := configurator.Configure(r.Context(), p)
 		w.Header().Set("Content-Type", "application/json")
 		_ = json.NewEncoder(w).Encode(res)
-	})
+	})))
 	return mux
 }
 
@@ -458,4 +443,27 @@ func env(key, fallback string) string {
 func writeJSON(w http.ResponseWriter, snap agent.Snapshot) {
 	w.Header().Set("Content-Type", "application/json")
 	_ = json.NewEncoder(w).Encode(snap)
+}
+
+// mountProvisionLPR registers the Provision-ISR receiver on a mux. The camera-facing routes carry no
+// token (cameras cannot send one). Everything else is behind a scope: captured requests can hold
+// plates and images and the registry decides which cameras are trusted (control); the receiver status
+// lists camera addresses and plates and the queued readings are what central collects (events). The
+// receiver does not authenticate by itself, so every listener that serves it has to mount it here.
+func mountProvisionLPR(mux *http.ServeMux, auth *authenticator, lprHandler http.Handler) {
+	mux.Handle("/SendKeepalive", lprHandler)
+	mux.Handle("/v1/provision-lpr/", lprHandler)
+	mux.Handle("/v1/provision-lpr/event", lprHandler)
+	mux.Handle("/SendLPR", lprHandler)
+	mux.Handle("/LPR", lprHandler)
+	mux.Handle("/Notification/LPR", lprHandler)
+	control := auth.scoped(tokens.ScopeControl, lprHandler)
+	mux.Handle("GET /v1/provision-lpr/captures", control)
+	mux.Handle("GET /v1/provision-lpr/captures/", control)
+	mux.Handle("/v1/provision-lpr/registry", control)
+	mux.Handle("/v1/provision-lpr/registry/", control)
+	events := auth.scoped(tokens.ScopeEvents, lprHandler)
+	mux.Handle("GET /v1/provision-lpr/status", events)
+	mux.Handle("/v1/provision-lpr/events", events)
+	mux.Handle("/v1/provision-lpr/events/", events)
 }
