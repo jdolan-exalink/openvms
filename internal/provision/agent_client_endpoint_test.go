@@ -5,6 +5,7 @@ import (
 	"crypto/tls"
 	"errors"
 	"net/http"
+	"net/http/httptest"
 	"testing"
 
 	"github.com/google/uuid"
@@ -17,7 +18,9 @@ func endpointService(host string, port int32, trust AgentTLSConfig, base string,
 		loadProbeAgent: func(context.Context, authz.Actor, uuid.UUID) (string, int32, string, AgentTLSConfig, error) {
 			return host, port, "agent-token", trust, nil
 		},
-		loadAgentBaseURL: func(context.Context, authz.Actor, uuid.UUID) (string, error) { return base, baseErr },
+		loadAgentConnection: func(context.Context, authz.Actor, uuid.UUID) (string, map[string]string, error) {
+			return base, nil, baseErr
+		},
 	}
 }
 
@@ -111,5 +114,26 @@ func TestAgentStatusOverTheEndpointReportsAnUnhealthyAgent(t *testing.T) {
 	}
 	if _, err := svc.fetchEndpointIdentity(context.Background(), authz.Actor{}, uuid.New()); err == nil {
 		t.Fatal("a 401 from the agent must be an error")
+	}
+}
+
+// The guard is wired into the production transport: an agent address that points at this host never
+// receives a connection, whatever the operator typed.
+func TestAgentClientNeverConnectsToThisHostThroughAStoredBaseURL(t *testing.T) {
+	hits := 0
+	server := httptest.NewServer(http.HandlerFunc(func(http.ResponseWriter, *http.Request) { hits++ }))
+	defer server.Close()
+	svc := endpointService("ignored", 1, AgentTLSConfig{TrustMode: AgentTLSTrustPlaintext}, server.URL, nil) // http://127.0.0.1:port
+	doer, _, err := svc.getAgentClientAndToken(context.Background(), authz.Actor{}, uuid.New())
+	if err != nil {
+		t.Fatal(err)
+	}
+	resp, err := doer.Do(context.Background(), http.MethodGet, "/v1/metrics", http.Header{}, nil)
+	if err == nil {
+		_ = resp.Body.Close()
+		t.Fatal("a request to a loopback agent address must fail")
+	}
+	if hits != 0 {
+		t.Fatalf("the loopback server received %d requests", hits)
 	}
 }

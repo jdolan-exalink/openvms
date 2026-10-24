@@ -67,7 +67,7 @@ type Service struct {
 	requireLocalAgentPermissions   func(context.Context, authz.Actor, uuid.UUID) error
 	localAgentTx                   localAgentTx
 	loadProbeAgent                 func(context.Context, authz.Actor, uuid.UUID) (string, int32, string, AgentTLSConfig, error)
-	loadAgentBaseURL               func(context.Context, authz.Actor, uuid.UUID) (string, error)
+	loadAgentConnection            func(context.Context, authz.Actor, uuid.UUID) (string, map[string]string, error)
 	probeRoundTripper              http.RoundTripper
 	requireAgentInstallPermissions func(context.Context, authz.Actor, uuid.UUID) error
 	agentInstallExists             func(context.Context, authz.Actor, uuid.UUID) (bool, error)
