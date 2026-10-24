@@ -262,8 +262,12 @@ func (s *Service) GetAgentConnection(ctx context.Context, actor authz.Actor, ser
 	}
 	out := AgentConnection{Connected: row.BaseUrl != "", BaseURL: row.BaseUrl, HasHeaders: len(row.RequestHeadersSealed) != 0}
 	if out.Connected {
-		if tlsRow, err := s.agentTLSRow(ctx, actor, serverID); err == nil && tlsRow.TrustMode == AgentTLSTrustCustom {
-			out.HasCustomCA = true
+		tlsRow, err := s.agentTLSRow(ctx, actor, serverID)
+		switch {
+		case err == nil:
+			out.HasCustomCA = tlsRow.TrustMode == AgentTLSTrustCustom
+		case !errors.Is(err, store.ErrNotFound):
+			return AgentConnection{}, err // a database failure is not "no certificate authority"
 		}
 	}
 	return out, nil

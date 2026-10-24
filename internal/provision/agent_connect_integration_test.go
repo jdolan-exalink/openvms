@@ -132,4 +132,19 @@ func TestConnectAgentStoresTheRegistrationOnlyAfterTheAgentAnswers(t *testing.T)
 	if _, err := svc.agentRow(ctx, actor, sshServer); err != nil {
 		t.Fatalf("the SSH-installed registration was touched: %v", err)
 	}
+
+	// Replacing an SSH-installed registration is allowed, but only with the explicit confirmation,
+	// like replacing any other registration: the old agent stops being followed by this OpenVMS.
+	if _, err := svc.ConnectAgent(ctx, actor, sshServer, ConnectAgentInput{URL: "http://10.8.0.5:7419", Token: "agent-token"}); !errors.Is(err, ErrAgentAlreadyProvisioned) {
+		t.Fatalf("connecting over an SSH install without confirmation = %v", err)
+	}
+	if row, _ := svc.agentRow(ctx, actor, sshServer); row.Variant != "ssh" || row.BaseUrl != "" {
+		t.Fatalf("a refused replacement changed the SSH registration: %+v", row)
+	}
+	if _, err := svc.ConnectAgent(ctx, actor, sshServer, ConnectAgentInput{URL: "http://10.8.0.5:7419", Token: "agent-token", Replace: true}); err != nil {
+		t.Fatal(err)
+	}
+	if row, _ := svc.agentRow(ctx, actor, sshServer); row.Variant != "remote" || row.BaseUrl != "http://10.8.0.5:7419" {
+		t.Fatalf("the confirmed replacement was not stored: %+v", row)
+	}
 }
