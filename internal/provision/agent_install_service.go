@@ -375,6 +375,10 @@ func (s *Service) runServerAgentInstall(parent context.Context, actor authz.Acto
 		s.failInstallJob(ctx, actor, job, request.Host, err)
 		return
 	}
+	// A host behind a NAT cannot call OpenVMS, so it never enrolls; OpenVMS can still reach it. The
+	// HTTPS health check below is what proves the agent, so a missing enrollment only changes how the
+	// agent is followed: OpenVMS polls it instead of waiting for its heartbeat.
+	pollOnly := false
 	if request.MTLS != nil {
 		job.update("running", "registering", "Verifying fresh agent enrollment and HTTPS health")
 		enrollmentCheck := s.agentInstallEnrollmentCheck
@@ -382,9 +386,14 @@ func (s *Service) runServerAgentInstall(parent context.Context, actor authz.Acto
 			enrollmentCheck = s.waitForFreshAgentEnrollment
 		}
 		if err := enrollmentCheck(ctx, actor, job.serverID, enrollmentIssuedAt); err != nil {
-			job.fail(AgentInstallCodeRegistrationFailed, "")
-			s.logger().Warn("agent install registration failed", "server_id", job.serverID, "reason", "enrollment_verification")
-			return
+			if ctx.Err() != nil {
+				// The whole install was cancelled or timed out: that is not a host that cannot reach OpenVMS.
+				job.fail(AgentInstallCodeRegistrationFailed, "")
+				s.logger().Warn("agent install registration failed", "server_id", job.serverID, "reason", "enrollment_verification")
+				return
+			}
+			pollOnly = true
+			s.logger().Warn("agent install: the agent did not enroll with OpenVMS; continuing with OpenVMS polling it", "server_id", job.serverID, "reason", "enrollment_not_observed")
 		}
 	}
 	healthCheck := s.agentInstallHealthCheck
@@ -405,7 +414,11 @@ func (s *Service) runServerAgentInstall(parent context.Context, actor authz.Acto
 		job.update("failed", "failed", "Agent files may be installed but registration failed; inspect the target before retrying")
 		return
 	}
-	job.update("succeeded", "complete", "Agent files reconciled and credentials registered after HTTPS health verification")
+	if pollOnly {
+		job.update("succeeded", "complete", "Agent installed and verified over HTTPS from OpenVMS. It did not enroll with OpenVMS (the host probably cannot reach it), so OpenVMS polls the agent")
+	} else {
+		job.update("succeeded", "complete", "Agent files reconciled and credentials registered after HTTPS health verification")
+	}
 	if s.OnAgentInstalled != nil {
 		// #nosec G118 -- background task outlives caller request context
 		go s.OnAgentInstalled(context.WithoutCancel(ctx), actor, job.serverID)

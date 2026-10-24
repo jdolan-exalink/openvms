@@ -102,6 +102,11 @@ func fetchVerifiedAgentIdentity(ctx context.Context, registeredHost, token strin
 	if err != nil {
 		return agent.BinaryIdentity{}, err
 	}
+	return readAgentIdentity(ctx, client, token)
+}
+
+// readAgentIdentity asks an agent for its health and returns the binary identity it reports.
+func readAgentIdentity(ctx context.Context, client AgentProbeDoer, token string) (agent.BinaryIdentity, error) {
 	header := make(http.Header)
 	header.Set("Authorization", "Bearer "+token)
 	response, err := client.Do(ctx, http.MethodGet, "/v1/health", header, nil)

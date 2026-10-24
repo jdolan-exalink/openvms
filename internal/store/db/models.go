@@ -885,6 +885,7 @@ type ServerAgent struct {
 	TokenSealed []byte
 	Version     string
 	UpdatedAt   time.Time
+	BaseUrl     string
 }
 
 type ServerAgentEventCursor struct {

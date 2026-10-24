@@ -9,7 +9,7 @@ lleva el historial en [`CHANGELOG.md`](../CHANGELOG.md) con el formato
 | Componente | Archivo | Valor actual |
 | --- | --- | --- |
 | OpenVMS (API, relay, worker, web) | `VERSION` | `0.4.0` |
-| Agente de borde (`edge-agent`) | `deploy/agent/VERSION` | `0.3.0` |
+| Agente de borde (`edge-agent`) | `deploy/agent/VERSION` | `0.4.0` |
 
 Cada archivo contiene solo la versión y un salto de línea. `make`, `deploy/deploy.sh`,
 `deploy/install.sh` y los Dockerfiles leen estos archivos; nadie debe escribir una versión
@@ -55,6 +55,23 @@ systemd, formato de configuración o protocolo con la API).
 
 Un cambio de OpenVMS que no toca el agente no cambia `deploy/agent/VERSION`. Un cambio del
 agente se anota en la sección de la release de OpenVMS que lo incluye (`Agent X.Y.Z`).
+
+#### La versión del agente sube sola
+
+Una vez publicada una versión del agente (existe el tag `agent-vX.Y.Z`), cualquier cambio en lo
+que el agente incluye exige una versión nueva. "Lo que el agente incluye" es todo archivo que no
+sea de prueba ni documentación en un paquete del que se compila `apps/edge-agent`
+(`go list -deps`) y todo lo que hay en `deploy/agent/` salvo `VERSION`. Mientras la versión
+vigente no tenga tag, los cambios se suman a ella.
+
+- `tools/agent_version.sh check [BASE]` aplica la regla y falla si falta subir la versión;
+  `make agent-version-check` lo corre junto con su prueba.
+- `make hooks` instala un hook de pre-commit que sube el patch y agrega la línea al changelog en
+  el mismo commit cuando hace falta (`check --fix`).
+- `make agent-bump LEVEL=minor NOTE="qué cambió"` sube la versión a mano.
+- El job de CI «Agent version» corre la regla en cada PR contra `main`, también en PRs apilados.
+- La versión sale de un solo archivo: `deploy/agent/VERSION` se incrusta en el binario de OpenVMS
+  (la que espera la API) y se inyecta en el agente al compilar (la que reporta).
 
 ## Cómo publicar una release
 

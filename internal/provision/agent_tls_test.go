@@ -93,7 +93,7 @@ func TestVerifiedAgentTLSClientTrustChoicesFailClosed(t *testing.T) {
 func TestNewVerifiedAgentHTTPClientRejectsUnregisteredAuthority(t *testing.T) {
 	root, _ := testCA(t, "operator root", time.Now().Add(-time.Hour), time.Now().Add(time.Hour))
 	ca := pem.EncodeToMemory(&pem.Block{Type: "CERTIFICATE", Bytes: root.Raw})
-	for _, host := range []string{"camera.example", "::1", "", "10.30.0.7:443"} {
+	for _, host := range []string{"::1", "", "10.30.0.7:443", "bad_host", "a b", "-x.example", "256.1.1.1"} {
 		if _, err := NewVerifiedAgentHTTPClient(host, 9443, ca, false, time.Second); err == nil {
 			t.Errorf("host %q unexpectedly accepted", host)
 		}
@@ -205,6 +205,64 @@ func testLeaf(t *testing.T, root *x509.Certificate, rootKey *ecdsa.PrivateKey, i
 		t.Fatal(err)
 	}
 	tmpl := &x509.Certificate{SerialNumber: serial, Subject: pkix.Name{CommonName: ip}, NotBefore: notBefore, NotAfter: notAfter, KeyUsage: x509.KeyUsageDigitalSignature, ExtKeyUsage: []x509.ExtKeyUsage{x509.ExtKeyUsageServerAuth}, IPAddresses: []net.IP{net.ParseIP(ip)}}
+	der, err := x509.CreateCertificate(rand.Reader, tmpl, root, &key.PublicKey, rootKey)
+	if err != nil {
+		t.Fatal(err)
+	}
+	cert, err := x509.ParseCertificate(der)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return cert
+}
+
+// An agent published under a DNS name (a VPN name or a tunnel) is verified by that name, against the
+// registered name only, never against whatever the server presents.
+func TestVerifiedAgentTLSConfigValidatesPeerByDNSName(t *testing.T) {
+	root, rootKey := testCA(t, "operator root", time.Now().Add(-time.Hour), time.Now().Add(time.Hour))
+	good := testLeafDNS(t, root, rootKey, "agent.example.com", time.Now().Add(-time.Minute), time.Now().Add(time.Hour))
+	other := testLeafDNS(t, root, rootKey, "other.example.com", time.Now().Add(-time.Minute), time.Now().Add(time.Hour))
+	ipOnly := testLeaf(t, root, rootKey, "10.30.0.7", time.Now().Add(-time.Minute), time.Now().Add(time.Hour))
+	client, err := NewVerifiedAgentHTTPClient("Agent.Example.com", 443, pem.EncodeToMemory(&pem.Block{Type: "CERTIFICATE", Bytes: root.Raw}), false, time.Second)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if client.baseURL != "https://agent.example.com:443" {
+		t.Fatalf("baseURL = %q", client.baseURL)
+	}
+	config := client.client.Transport.(*http.Transport).TLSClientConfig
+	if config.ServerName != "agent.example.com" {
+		t.Fatalf("ServerName = %q, want the registered name", config.ServerName)
+	}
+	for _, tt := range []struct {
+		name    string
+		leaf    *x509.Certificate
+		wantErr bool
+	}{
+		{name: "matching DNS SAN", leaf: good},
+		{name: "another name", leaf: other, wantErr: true},
+		{name: "an IP-only certificate", leaf: ipOnly, wantErr: true},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			err := config.VerifyConnection(tls.ConnectionState{PeerCertificates: []*x509.Certificate{tt.leaf}})
+			if (err != nil) != tt.wantErr {
+				t.Fatalf("VerifyConnection error = %v, wantErr %v", err, tt.wantErr)
+			}
+		})
+	}
+}
+
+func testLeafDNS(t *testing.T, root *x509.Certificate, rootKey *ecdsa.PrivateKey, name string, notBefore, notAfter time.Time) *x509.Certificate {
+	t.Helper()
+	key, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
+	if err != nil {
+		t.Fatal(err)
+	}
+	serial, err := rand.Int(rand.Reader, big.NewInt(1<<62))
+	if err != nil {
+		t.Fatal(err)
+	}
+	tmpl := &x509.Certificate{SerialNumber: serial, Subject: pkix.Name{CommonName: name}, NotBefore: notBefore, NotAfter: notAfter, KeyUsage: x509.KeyUsageDigitalSignature, ExtKeyUsage: []x509.ExtKeyUsage{x509.ExtKeyUsageServerAuth}, DNSNames: []string{name}}
 	der, err := x509.CreateCertificate(rand.Reader, tmpl, root, &key.PublicKey, rootKey)
 	if err != nil {
 		t.Fatal(err)

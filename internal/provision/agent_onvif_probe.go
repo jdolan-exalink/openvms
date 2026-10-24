@@ -174,12 +174,25 @@ func (s *Service) getAgentClientAndToken(ctx context.Context, actor authz.Actor,
 	if err != nil {
 		return nil, "", err
 	}
-	if token == "" || net.ParseIP(host) == nil || net.ParseIP(host).To4() == nil || port < 1 || port > 65535 {
+	baseURL, err := s.agentBaseURL(ctx, actor, serverID)
+	if err != nil {
 		return nil, "", ErrAgentProbeFailed
+	}
+	endpoint, err := AgentEndpointFromRow(host, port, baseURL)
+	if token == "" || err != nil {
+		return nil, "", ErrAgentProbeFailed
+	}
+	if baseURL != "" {
+		client, err := s.endpointClient(endpoint, config)
+		if err != nil {
+			return nil, "", ErrAgentProbeFailed
+		}
+		return client, token, nil
 	}
 	var client AgentProbeDoer
 	if config.TrustMode == AgentTLSTrustPlaintext {
-		plainClient, err := newPlainAgentHTTPClient(host, uint16(port), onvifProbeTimeout, s.probeRoundTripper)
+		// #nosec G115 -- AgentEndpointFromRow constrains the port to 1..65535.
+		plainClient, err := newPlainAgentHTTPClient(endpoint.Host, uint16(endpoint.Port), onvifProbeTimeout, s.probeRoundTripper)
 		if err != nil {
 			return nil, "", ErrAgentProbeFailed
 		}
@@ -190,13 +203,46 @@ func (s *Service) getAgentClientAndToken(ctx context.Context, actor authz.Actor,
 		}
 		useSystemRoots := config.TrustMode == AgentTLSTrustSystem
 		// #nosec G115 -- validateAgentTLSConfig constrains the port to 1..65535 above.
-		httpsClient, err := newVerifiedAgentHTTPClient(host, uint16(config.SecurePort), config.CAPEM, useSystemRoots, onvifProbeTimeout, nil, s.probeRoundTripper)
+		httpsClient, err := newVerifiedAgentHTTPClient(endpoint.Host, uint16(config.SecurePort), config.CAPEM, useSystemRoots, onvifProbeTimeout, nil, s.probeRoundTripper)
 		if err != nil {
 			return nil, "", ErrAgentProbeFailed
 		}
 		client = httpsClient
 	}
 	return client, token, nil
+}
+
+// endpointClient builds the client of an agent that has a stored base URL. HTTPS verifies the host
+// name with the system roots unless the server has its own CA configured; plain HTTP is for a
+// private address (LAN or VPN) and is the operator's explicit choice.
+func (s *Service) endpointClient(endpoint AgentEndpoint, config AgentTLSConfig) (AgentProbeDoer, error) {
+	// #nosec G115 -- ParseAgentEndpoint constrains the port to 1..65535.
+	port := uint16(endpoint.Port)
+	if endpoint.Scheme == "http" {
+		return newPlainAgentHTTPClient(endpoint.Host, port, onvifProbeTimeout, s.probeRoundTripper)
+	}
+	if config.TrustMode == AgentTLSTrustCustom && len(config.CAPEM) != 0 {
+		return newVerifiedAgentHTTPClient(endpoint.Host, port, config.CAPEM, false, onvifProbeTimeout, nil, s.probeRoundTripper)
+	}
+	return newVerifiedAgentHTTPClient(endpoint.Host, port, nil, true, onvifProbeTimeout, nil, s.probeRoundTripper)
+}
+
+// agentBaseURL returns the stored base URL of the server's agent, empty when it uses host and port.
+func (s *Service) agentBaseURL(ctx context.Context, actor authz.Actor, serverID uuid.UUID) (string, error) {
+	if s.loadAgentBaseURL != nil {
+		return s.loadAgentBaseURL(ctx, actor, serverID)
+	}
+	if s.Store == nil {
+		return "", nil
+	}
+	row, err := s.agentRow(ctx, actor, serverID)
+	if errors.Is(err, store.ErrNotFound) {
+		return "", nil
+	}
+	if err != nil {
+		return "", err
+	}
+	return row.BaseUrl, nil
 }
 
 func validateOnvifProbeRequest(in OnvifProbeRequest) error {
@@ -230,12 +276,11 @@ type PlainAgentHTTPClient struct {
 	client  *http.Client
 }
 
-func newPlainAgentHTTPClient(registeredIPv4 string, port uint16, timeout time.Duration, testTransport http.RoundTripper) (*PlainAgentHTTPClient, error) {
-	ip := net.ParseIP(registeredIPv4)
-	if ip == nil || ip.To4() == nil || port == 0 || timeout <= 0 {
+func newPlainAgentHTTPClient(registeredHost string, port uint16, timeout time.Duration, testTransport http.RoundTripper) (*PlainAgentHTTPClient, error) {
+	host := strings.ToLower(registeredHost)
+	if !validAgentHost(host) || port == 0 || timeout <= 0 {
 		return nil, errors.New("invalid registered agent HTTP configuration")
 	}
-	ipv4 := ip.To4().String()
 	transport := &http.Transport{
 		Proxy:                 nil,
 		ResponseHeaderTimeout: timeout,
@@ -250,7 +295,7 @@ func newPlainAgentHTTPClient(registeredIPv4 string, port uint16, timeout time.Du
 		CheckRedirect: func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse },
 	}
 	return &PlainAgentHTTPClient{
-		baseURL: "http://" + net.JoinHostPort(ipv4, strconv.Itoa(int(port))),
+		baseURL: "http://" + net.JoinHostPort(host, strconv.Itoa(int(port))),
 		client:  client,
 	}, nil
 }

@@ -84,7 +84,12 @@ func (s *Service) AgentStatus(ctx context.Context, actor authz.Actor, serverID u
 		out.Error = "agent credential cannot be opened"
 		return out, nil
 	}
-	snap, err := fetchMetrics(ctx, row.Host, row.Port, string(token))
+	var snap agent.Snapshot
+	if row.BaseUrl != "" {
+		snap, err = s.fetchEndpointMetrics(ctx, actor, serverID)
+	} else {
+		snap, err = fetchMetrics(ctx, row.Host, row.Port, string(token))
+	}
 	if err != nil {
 		out.Error = err.Error()
 		out.Outdated = true
@@ -93,7 +98,8 @@ func (s *Service) AgentStatus(ctx context.Context, actor authz.Actor, serverID u
 		return out, nil
 	}
 	applySnapshot(&out, snap)
-	if identity, healthErr := s.verifiedAgentBinaryIdentity(ctx, actor, row, string(token)); healthErr == nil {
+	identity, healthErr := s.agentBinaryIdentity(ctx, actor, row, string(token))
+	if healthErr == nil {
 		out.BinaryObserved = &identity
 		status := classifyAgentBinaryStatus(true, out.BinaryAvailable, out.BinaryObserved, false)
 		out.BinaryStatus, out.BinaryOutdated, out.BinaryUpgradeAvailable = status.Status, status.Outdated, status.UpgradeAvailable
@@ -144,6 +150,15 @@ func (s *Service) UpdateAgent(ctx context.Context, actor authz.Actor, serverID u
 		}
 		time.Sleep(time.Second)
 	}
+}
+
+// agentBinaryIdentity reads the identity the running agent reports: through its base URL when it has
+// one, otherwise over the HTTPS listener configured for its host.
+func (s *Service) agentBinaryIdentity(ctx context.Context, actor authz.Actor, row db.ServerAgent, token string) (agent.BinaryIdentity, error) {
+	if row.BaseUrl != "" {
+		return s.fetchEndpointIdentity(ctx, actor, row.ServerID)
+	}
+	return s.verifiedAgentBinaryIdentity(ctx, actor, row, token)
 }
 
 func (s *Service) agentRow(ctx context.Context, actor authz.Actor, serverID uuid.UUID) (db.ServerAgent, error) {
