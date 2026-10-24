@@ -90,7 +90,25 @@ func main() {
 	}
 	healthHandler := newAgentHealthHandler(secret, currentAgentHealthInfo(variant))
 	lprReceiver := provisionlpr.NewReceiver(provisionlpr.DefaultConfig(), log)
+	capture, err := parseCaptureMode(os.Getenv("OPENVMS_AGENT_PROVISION_CAPTURE"))
+	if err != nil {
+		log.Error("invalid Provision-ISR capture configuration", "error", err)
+		os.Exit(1)
+	}
+	if capture != captureOff {
+		store, err := provisionlpr.NewCaptureStore(captureDir(env("OPENVMS_AGENT_STATE_DIR", "/var/lib/openvms-agent")), 0, 0)
+		if err != nil {
+			// Captures are a diagnostic aid: failing to keep them must not stop the receiver.
+			log.Warn("Provision-ISR captures disabled", "error", err)
+		} else {
+			lprReceiver.SetCaptures(store, capture == captureEverything)
+		}
+	}
 	mux := buildMux(secret, variant, sampler, discoveryHandler, probeHandler, opsHandler, lprReceiver, replaceBinary, func() { go restart() })
+	if capture == captureEverything {
+		log.Warn("Provision-ISR capture-all is on: POSTs on any path are accepted and kept; turn it off once the camera protocol is known")
+		mux.Handle("/", postsAnywhere(lprReceiver))
+	}
 	addr := env("OPENVMS_AGENT_LISTEN", "0.0.0.0:7419")
 	srv := &http.Server{Addr: addr, Handler: mux, ReadHeaderTimeout: 5 * time.Second}
 	log.Info("listening", "addr", addr, "version", agent.Version)
@@ -314,6 +332,9 @@ func buildMux(secret, variant string, sampler *agent.Sampler, discoveryHandler, 
 		mux.Handle("/SendLPR", lprHandler)
 		mux.Handle("/LPR", lprHandler)
 		mux.Handle("/Notification/LPR", lprHandler)
+		// Captured requests can hold plates and images: only the agent token reads them.
+		mux.Handle("GET /v1/provision-lpr/captures", requireBearer(secret, lprHandler))
+		mux.Handle("GET /v1/provision-lpr/captures/", requireBearer(secret, lprHandler))
 	}
 	configurator := provisionlpr.NewConfigurator()
 	mux.HandleFunc("POST /v1/provision-lpr/configure", func(w http.ResponseWriter, r *http.Request) {
