@@ -25,7 +25,7 @@ func (q *Queries) DeleteServerAgent(ctx context.Context, serverID uuid.UUID) (in
 }
 
 const getServerAgent = `-- name: GetServerAgent :one
-SELECT server_id, tenant_id, host, port, variant, token_sealed, version, updated_at
+SELECT server_id, tenant_id, host, port, variant, token_sealed, version, updated_at, base_url
 FROM server_agents
 WHERE server_id = $1
 `
@@ -42,12 +42,13 @@ func (q *Queries) GetServerAgent(ctx context.Context, serverID uuid.UUID) (Serve
 		&i.TokenSealed,
 		&i.Version,
 		&i.UpdatedAt,
+		&i.BaseUrl,
 	)
 	return i, err
 }
 
 const getServerAgentForUpdate = `-- name: GetServerAgentForUpdate :one
-SELECT server_id, tenant_id, host, port, variant, token_sealed, version, updated_at
+SELECT server_id, tenant_id, host, port, variant, token_sealed, version, updated_at, base_url
 FROM server_agents
 WHERE server_id = $1
 FOR UPDATE
@@ -65,6 +66,7 @@ func (q *Queries) GetServerAgentForUpdate(ctx context.Context, serverID uuid.UUI
 		&i.TokenSealed,
 		&i.Version,
 		&i.UpdatedAt,
+		&i.BaseUrl,
 	)
 	return i, err
 }

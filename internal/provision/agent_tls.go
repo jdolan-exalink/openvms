@@ -26,17 +26,16 @@ type VerifiedAgentHTTPClient struct {
 // NewVerifiedAgentHTTPClient builds an HTTPS-only client for a registered agent.
 // Set useSystemRoots explicitly to use the host root store; otherwise caPEM must
 // contain a non-empty bundle of trusted CA certificates.
-func NewVerifiedAgentHTTPClient(registeredIPv4 string, securePort uint16, caPEM []byte, useSystemRoots bool, timeout time.Duration) (*VerifiedAgentHTTPClient, error) {
-	return newVerifiedAgentHTTPClient(registeredIPv4, securePort, caPEM, useSystemRoots, timeout, nil, nil)
+func NewVerifiedAgentHTTPClient(registeredHost string, securePort uint16, caPEM []byte, useSystemRoots bool, timeout time.Duration) (*VerifiedAgentHTTPClient, error) {
+	return newVerifiedAgentHTTPClient(registeredHost, securePort, caPEM, useSystemRoots, timeout, nil, nil)
 }
 
-func newVerifiedAgentHTTPClient(registeredIPv4 string, securePort uint16, caPEM []byte, useSystemRoots bool, timeout time.Duration, base *http.Client, testTransport http.RoundTripper) (*VerifiedAgentHTTPClient, error) {
-	ip := net.ParseIP(registeredIPv4)
-	if ip == nil || ip.To4() == nil || securePort == 0 || timeout <= 0 {
+func newVerifiedAgentHTTPClient(registeredHost string, securePort uint16, caPEM []byte, useSystemRoots bool, timeout time.Duration, base *http.Client, testTransport http.RoundTripper) (*VerifiedAgentHTTPClient, error) {
+	host := strings.ToLower(registeredHost)
+	if !validAgentHost(host) || securePort == 0 || timeout <= 0 {
 		return nil, errors.New("invalid registered agent TLS configuration")
 	}
-	ipv4 := ip.To4().String()
-	tlsConfig, err := buildAgentTLSConfig(ipv4, caPEM, useSystemRoots)
+	tlsConfig, err := buildAgentTLSConfig(host, caPEM, useSystemRoots)
 	if err != nil {
 		return nil, err
 	}
@@ -58,15 +57,17 @@ func newVerifiedAgentHTTPClient(registeredIPv4 string, securePort uint16, caPEM 
 	client.Transport = roundTripper
 	client.CheckRedirect = func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }
 	return &VerifiedAgentHTTPClient{
-		baseURL: "https://" + net.JoinHostPort(ipv4, strconv.Itoa(int(securePort))),
+		baseURL: "https://" + net.JoinHostPort(host, strconv.Itoa(int(securePort))),
 		client:  client,
 	}, nil
 }
 
-func buildAgentTLSConfig(registeredIPv4 string, caPEM []byte, useSystemRoots bool) (*tls.Config, error) {
-	ip := net.ParseIP(registeredIPv4)
-	if ip == nil || ip.To4() == nil {
-		return nil, errors.New("registered agent must be an IPv4 literal")
+// buildAgentTLSConfig verifies the peer against the registered host only: an IPv4 literal (IP SAN)
+// or a DNS name (DNS SAN). Whatever name the server answers to is never trusted.
+func buildAgentTLSConfig(registeredHost string, caPEM []byte, useSystemRoots bool) (*tls.Config, error) {
+	host := strings.ToLower(registeredHost)
+	if !validAgentHost(host) {
+		return nil, errors.New("registered agent must be an IPv4 literal or a DNS name")
 	}
 	var roots *x509.CertPool
 	if useSystemRoots {
@@ -88,10 +89,9 @@ func buildAgentTLSConfig(registeredIPv4 string, caPEM []byte, useSystemRoots boo
 			return nil, err
 		}
 	}
-	ipv4 := ip.To4().String()
-	config := &tls.Config{MinVersion: tls.VersionTLS12, RootCAs: roots, ServerName: ipv4}
+	config := &tls.Config{MinVersion: tls.VersionTLS12, RootCAs: roots, ServerName: host}
 	config.VerifyConnection = func(state tls.ConnectionState) error {
-		return verifyAgentPeer(roots, ipv4, state)
+		return verifyAgentPeer(roots, host, state)
 	}
 	return config, nil
 }
@@ -123,7 +123,7 @@ func parseAgentRoots(data []byte) (*x509.CertPool, error) {
 	return pool, nil
 }
 
-func verifyAgentPeer(roots *x509.CertPool, registeredIPv4 string, state tls.ConnectionState) error {
+func verifyAgentPeer(roots *x509.CertPool, registeredHost string, state tls.ConnectionState) error {
 	if len(state.PeerCertificates) == 0 {
 		return errors.New("agent TLS peer did not provide a certificate")
 	}
@@ -134,7 +134,7 @@ func verifyAgentPeer(roots *x509.CertPool, registeredIPv4 string, state tls.Conn
 	_, err := state.PeerCertificates[0].Verify(x509.VerifyOptions{
 		Roots:         roots,
 		Intermediates: intermediates,
-		DNSName:       registeredIPv4,
+		DNSName:       registeredHost,
 		KeyUsages:     []x509.ExtKeyUsage{x509.ExtKeyUsageServerAuth},
 	})
 	return err
