@@ -4032,8 +4032,22 @@ export interface components {
             has_media1?: boolean;
             has_imaging?: boolean;
             services?: components["schemas"]["OnvifProbeService"][];
+            /**
+             * @description Analytics the camera advertises over ONVIF events, read from its event topics. Advertised
+             *     means the camera lists the topic; it is not proof that it fires it.
+             */
+            analytics?: components["schemas"]["CameraAnalyticsCapability"][];
         } & {
             [key: string]: unknown;
+        };
+        CameraAnalyticsCapability: {
+            /** @enum {string} */
+            id: "lpr" | "face" | "person" | "vehicle" | "line_crossing" | "intrusion" | "motion" | "tamper";
+            /** @enum {string} */
+            source: "onvif_events";
+            /** @enum {string} */
+            status: "advertised";
+            topics: string[];
         };
         CameraOnvifCheckRequest: {
             endpoint?: string;

@@ -112,6 +112,11 @@ func parseOnvifProbeCapabilities(res provision.OnvifProbeResult) (string, string
 	}
 	if len(res.Analytics.SupportedTopics) > 0 {
 		caps.Set("supported_analytics", res.Analytics.SupportedTopics)
+		// The analytics the camera advertises, as OpenVMS understands them. They are advertised,
+		// not proven: a topic only counts as working once a real event has arrived.
+		if detected := onvif.DetectAnalytics(res.Analytics.SupportedTopics); len(detected) > 0 {
+			caps.Set("analytics", detected)
+		}
 	}
 	if len(res.PTZ.Presets) > 0 {
 		caps.Set("ptz_presets", res.PTZ.Presets)

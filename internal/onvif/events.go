@@ -7,6 +7,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"sort"
 	"strings"
 	"time"
 )
@@ -25,6 +26,9 @@ type EventsClient struct {
 func NewEventsClient(client *Client, endpoint Endpoint) *EventsClient {
 	return &EventsClient{client: client, endpoint: endpoint}
 }
+
+// maxEventTopics bounds how many topics one device may list; a longer list is cut, not an error.
+const maxEventTopics = 200
 
 type EventProperties struct {
 	TopicSet []string `json:"topic_set"`
@@ -47,21 +51,73 @@ func (e *EventsClient) GetEventProperties(ctx context.Context) (EventProperties,
 	if err != nil {
 		return EventProperties{}, err
 	}
-	var props EventProperties
-	// Collect all topic elements inside TopicSet
+	return EventProperties{TopicSet: parseTopicSet(data)}, nil
+}
+
+// wstopNamespace is where the topic marker attribute lives.
+const wstopNamespace = "http://docs.oasis-open.org/wsn/t-1"
+
+// parseTopicSet lists the topics a device advertises as full paths (for example
+// RuleEngine/LineDetector/Crossed), sorted, without duplicates and at most maxEventTopics of them.
+// In a TopicSet only the elements marked wstop:topic="true" are topics; the rest are namespaces of
+// the tree, and what sits inside a topic (its message description) is never a topic.
+func parseTopicSet(data []byte) []string {
 	decoder := xml.NewDecoder(bytes.NewReader(data))
+	var (
+		path     []string
+		inSet    bool
+		setDepth int
+		depth    int
+		seen     = map[string]bool{}
+		topics   []string
+	)
 	for {
 		token, err := decoder.Token()
 		if err != nil {
 			break
 		}
-		if start, ok := token.(xml.StartElement); ok {
-			if strings.EqualFold(start.Name.Local, "Topic") || strings.Contains(strings.ToLower(start.Name.Local), "motion") || strings.Contains(strings.ToLower(start.Name.Local), "line") {
-				props.TopicSet = append(props.TopicSet, start.Name.Local)
+		switch t := token.(type) {
+		case xml.StartElement:
+			depth++
+			if !inSet {
+				if t.Name.Local == "TopicSet" {
+					inSet, setDepth = true, depth
+				}
+				continue
 			}
+			path = append(path, t.Name.Local)
+			if !isTopicElement(t) {
+				continue
+			}
+			topic := strings.Join(path, "/")
+			if len(topic) <= 200 && !seen[topic] && len(topics) < maxEventTopics {
+				seen[topic] = true
+				topics = append(topics, topic)
+			}
+			// What a topic contains describes its messages; none of it is a topic.
+			_ = decoder.Skip()
+			path = path[:len(path)-1]
+			depth--
+		case xml.EndElement:
+			if inSet && depth == setDepth {
+				inSet, path = false, nil
+			} else if inSet && len(path) > 0 {
+				path = path[:len(path)-1]
+			}
+			depth--
 		}
 	}
-	return props, nil
+	sort.Strings(topics)
+	return topics
+}
+
+func isTopicElement(el xml.StartElement) bool {
+	for _, attr := range el.Attr {
+		if attr.Name.Local == "topic" && attr.Name.Space == wstopNamespace && strings.EqualFold(attr.Value, "true") {
+			return true
+		}
+	}
+	return false
 }
 
 func (e *EventsClient) CreatePullPointSubscription(ctx context.Context, initialTermination string) (PullPointSubscription, error) {

@@ -5214,6 +5214,22 @@ components:
         services:
           type: array
           items: { $ref: "#/components/schemas/OnvifProbeService" }
+        analytics:
+          type: array
+          description: |
+            Analytics the camera advertises over ONVIF events, read from its event topics. Advertised
+            means the camera lists the topic; it is not proof that it fires it.
+          items: { $ref: "#/components/schemas/CameraAnalyticsCapability" }
+    CameraAnalyticsCapability:
+      type: object
+      required: [id, source, status, topics]
+      properties:
+        id:
+          type: string
+          enum: [lpr, face, person, vehicle, line_crossing, intrusion, motion, tamper]
+        source: { type: string, enum: [onvif_events] }
+        status: { type: string, enum: [advertised] }
+        topics: { type: array, items: { type: string } }
     CameraOnvifCheckRequest:
       type: object
       additionalProperties: false
