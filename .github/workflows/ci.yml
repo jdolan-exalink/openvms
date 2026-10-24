@@ -36,12 +36,15 @@ jobs:
   integration:
     name: Go integration (containers)
     runs-on: ubuntu-latest
+    timeout-minutes: 45
     steps:
       - uses: actions/checkout@v7
       - uses: actions/setup-go@v7
         with:
           go-version-file: go.mod
-      - run: go test -race -tags integration ./...
+      # internal/api alone takes about ten minutes with the race detector on a hosted runner, which is
+      # go test's default per-package limit: the job timed out at random. 25 minutes leaves room.
+      - run: go test -race -timeout 25m -tags integration ./...
 
   web:
     name: Web (lint, typecheck, tests, build)
