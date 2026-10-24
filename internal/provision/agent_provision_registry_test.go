@@ -16,7 +16,7 @@ import (
 
 const registryJSON = `{"enforce":true,"cameras":[{"camera_id":"cam-a","ip":"10.0.15.107"}],"unregistered_seen":[{"ip":"10.0.15.200","first_seen":"2026-10-24T10:00:00Z","last_seen":"2026-10-24T10:05:00Z","requests":3,"last_path":"/Vendor/Event","rejected":true}]}`
 
-func TestRegisterLPRCameraSendsTheCameraAndItsAddressToTheAgent(t *testing.T) {
+func TestRegisterProvisionLPRCameraSendsTheCameraAndItsAddressToTheAgent(t *testing.T) {
 	var seen *http.Request
 	var sent LPRCamera
 	svc := videoEncodingService(func(r *http.Request) (*http.Response, error) {
@@ -26,7 +26,7 @@ func TestRegisterLPRCameraSendsTheCameraAndItsAddressToTheAgent(t *testing.T) {
 		return agentReply(200, registryJSON)(r)
 	})
 	cameraID := uuid.New()
-	reg, err := svc.RegisterLPRCamera(context.Background(), authz.Actor{}, uuid.New(), cameraID, "10.0.15.107")
+	reg, err := svc.RegisterProvisionLPRCamera(context.Background(), authz.Actor{}, uuid.New(), cameraID, "10.0.15.107")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -52,7 +52,7 @@ func TestLPRRegistryRoutesUseTheRightMethodAndPath(t *testing.T) {
 	}{
 		"unregister": {
 			call: func(s *Service) error {
-				return s.UnregisterLPRCamera(context.Background(), authz.Actor{}, uuid.New(), cameraID)
+				return s.UnregisterProvisionLPRCamera(context.Background(), authz.Actor{}, uuid.New(), cameraID)
 			},
 			method: http.MethodDelete, path: "/v1/provision-lpr/registry/cameras/" + cameraID.String(), answerStatus: 204,
 		},
@@ -65,7 +65,7 @@ func TestLPRRegistryRoutesUseTheRightMethodAndPath(t *testing.T) {
 		},
 		"read": {
 			call: func(s *Service) error {
-				_, err := s.GetLPRRegistry(context.Background(), authz.Actor{}, uuid.New())
+				_, err := s.GetProvisionLPRRegistry(context.Background(), authz.Actor{}, uuid.New())
 				return err
 			},
 			method: http.MethodGet, path: "/v1/provision-lpr/registry", answerStatus: 200, answerBody: registryJSON,
@@ -95,19 +95,19 @@ func TestLPRRegistryRoutesUseTheRightMethodAndPath(t *testing.T) {
 
 func TestLPRRegistryTellsAnOldAgentFromAFailure(t *testing.T) {
 	old := videoEncodingService(agentReply(404, "404 page not found"))
-	if _, err := old.GetLPRRegistry(context.Background(), authz.Actor{}, uuid.New()); !errors.Is(err, ErrAgentRegistryUnsupported) {
+	if _, err := old.GetProvisionLPRRegistry(context.Background(), authz.Actor{}, uuid.New()); !errors.Is(err, ErrAgentRegistryUnsupported) {
 		t.Fatalf("err = %v, want ErrAgentRegistryUnsupported for an agent without the routes", err)
 	}
 
 	conflict := videoEncodingService(agentReply(409, "another camera is registered with that address\n"))
-	_, err := conflict.RegisterLPRCamera(context.Background(), authz.Actor{}, uuid.New(), uuid.New(), "10.0.15.107")
+	_, err := conflict.RegisterProvisionLPRCamera(context.Background(), authz.Actor{}, uuid.New(), uuid.New(), "10.0.15.107")
 	var statusErr *AgentStatusError
 	if !errors.As(err, &statusErr) || statusErr.Status != 409 || !strings.Contains(statusErr.Message, "another camera") {
 		t.Fatalf("err = %v, want the agent's 409 and what it said", err)
 	}
 
 	garbled := videoEncodingService(agentReply(200, "not json"))
-	if _, err := garbled.GetLPRRegistry(context.Background(), authz.Actor{}, uuid.New()); !errors.Is(err, ErrAgentProbeFailed) {
+	if _, err := garbled.GetProvisionLPRRegistry(context.Background(), authz.Actor{}, uuid.New()); !errors.Is(err, ErrAgentProbeFailed) {
 		t.Fatalf("err = %v, want ErrAgentProbeFailed for an unreadable answer", err)
 	}
 }

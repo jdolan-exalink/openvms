@@ -55,15 +55,15 @@ type LPRRegistry struct {
 
 const provisionRegistryPath = "/v1/provision-lpr/registry"
 
-// RegisterLPRCamera tells the server's agent which address a camera connects from, so the
+// RegisterProvisionLPRCamera tells the server's agent which address a camera connects from, so the
 // agent can identify it and, once enforcement is on, accept it.
-func (s *Service) RegisterLPRCamera(ctx context.Context, actor authz.Actor, serverID, cameraID uuid.UUID, ip string) (LPRRegistry, error) {
+func (s *Service) RegisterProvisionLPRCamera(ctx context.Context, actor authz.Actor, serverID, cameraID uuid.UUID, ip string) (LPRRegistry, error) {
 	body := LPRCamera{CameraID: cameraID.String(), IP: ip}
 	return s.registryCall(ctx, actor, serverID, http.MethodPost, provisionRegistryPath+"/cameras", body)
 }
 
-// UnregisterLPRCamera removes a camera from the server's agent registry.
-func (s *Service) UnregisterLPRCamera(ctx context.Context, actor authz.Actor, serverID, cameraID uuid.UUID) error {
+// UnregisterProvisionLPRCamera removes a camera from the server's agent registry.
+func (s *Service) UnregisterProvisionLPRCamera(ctx context.Context, actor authz.Actor, serverID, cameraID uuid.UUID) error {
 	_, err := s.registryCall(ctx, actor, serverID, http.MethodDelete, provisionRegistryPath+"/cameras/"+cameraID.String(), nil)
 	return err
 }
@@ -73,8 +73,8 @@ func (s *Service) SetProvisionLPREnforce(ctx context.Context, actor authz.Actor,
 	return s.registryCall(ctx, actor, serverID, http.MethodPut, provisionRegistryPath+"/enforce", map[string]bool{"enforce": enforce})
 }
 
-// GetLPRRegistry reads the registry and the unregistered sources the agent has seen.
-func (s *Service) GetLPRRegistry(ctx context.Context, actor authz.Actor, serverID uuid.UUID) (LPRRegistry, error) {
+// GetProvisionLPRRegistry reads the registry and the unregistered sources the agent has seen.
+func (s *Service) GetProvisionLPRRegistry(ctx context.Context, actor authz.Actor, serverID uuid.UUID) (LPRRegistry, error) {
 	return s.registryCall(ctx, actor, serverID, http.MethodGet, provisionRegistryPath, nil)
 }
 
