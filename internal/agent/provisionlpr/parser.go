@@ -10,7 +10,9 @@ import (
 	"io"
 	"mime"
 	"mime/multipart"
+	"net"
 	"net/http"
+	"net/netip"
 	"net/url"
 	"regexp"
 	"strconv"
@@ -433,28 +435,24 @@ func looksLikeXML(b []byte) bool {
 	return len(t) > 1 && t[0] == '<' && t[len(t)-1] == '>'
 }
 
+// extractClientIP is the address of the connection's peer, nothing else. Cameras connect to the
+// agent directly, so a forwarding header can only come from whoever sent the request: trusting
+// X-Forwarded-For would let any host claim to be a registered camera.
 func extractClientIP(r *http.Request) string {
-	if xff := r.Header.Get("X-Forwarded-For"); xff != "" {
-		parts := strings.Split(xff, ",")
-		return strings.TrimSpace(parts[0])
+	host, _, err := net.SplitHostPort(r.RemoteAddr)
+	if err != nil {
+		host = strings.TrimSpace(r.RemoteAddr)
 	}
-	host := r.RemoteAddr
-	if strings.Contains(host, ":") {
-		h, _, err := netSplitHostPort(host)
-		if err == nil {
-			return h
-		}
+	if addr, err := netip.ParseAddr(host); err == nil {
+		return canonicalAddr(addr)
 	}
 	return host
 }
 
-func netSplitHostPort(hostport string) (string, string, error) {
-	colon := strings.LastIndex(hostport, ":")
-	if colon < 0 {
-		return hostport, "", nil
-	}
-	return hostport[:colon], hostport[colon+1:], nil
-}
+// canonicalAddr is the one spelling of an address used to identify cameras: an IPv4-mapped IPv6
+// address is its IPv4 form and an IPv6 zone (fe80::1%eth0) is dropped, since the zone names the
+// agent's own interface, not the camera.
+func canonicalAddr(a netip.Addr) string { return a.Unmap().WithZone("").String() }
 
 func parseTime(raw string) (time.Time, error) {
 	formats := []string{

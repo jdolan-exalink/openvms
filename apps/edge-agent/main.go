@@ -13,6 +13,7 @@ import (
 	"os"
 	"os/exec"
 	"os/signal"
+	"path/filepath"
 	"strconv"
 	"strings"
 	"syscall"
@@ -90,13 +91,23 @@ func main() {
 	}
 	healthHandler := newAgentHealthHandler(secret, currentAgentHealthInfo(variant))
 	lprReceiver := provisionlpr.NewReceiver(provisionlpr.DefaultConfig(), log)
+	stateDir := env("OPENVMS_AGENT_STATE_DIR", "/var/lib/openvms-agent")
+	if err := os.MkdirAll(stateDir, 0o700); err != nil {
+		log.Warn("agent state directory unavailable: Provision-ISR registrations and captures will not be saved", "dir", stateDir, "error", err)
+	}
+	registry, err := provisionlpr.LoadRegistry(filepath.Join(stateDir, "provision-registry.json"))
+	if err != nil {
+		// The registry then refuses every camera until it is repaired on the host.
+		log.Error("Provision-ISR camera registry is unreadable: every camera is refused until it is repaired", "error", err)
+	}
+	lprReceiver.SetRegistry(registry)
 	capture, err := parseCaptureMode(os.Getenv("OPENVMS_AGENT_PROVISION_CAPTURE"))
 	if err != nil {
 		log.Error("invalid Provision-ISR capture configuration", "error", err)
 		os.Exit(1)
 	}
 	if capture != captureOff {
-		store, err := provisionlpr.NewCaptureStore(captureDir(env("OPENVMS_AGENT_STATE_DIR", "/var/lib/openvms-agent")), 0, 0)
+		store, err := provisionlpr.NewCaptureStore(captureDir(stateDir), 0, 0)
 		if err != nil {
 			// Captures are a diagnostic aid: failing to keep them must not stop the receiver.
 			log.Warn("Provision-ISR captures disabled", "error", err)
@@ -335,6 +346,11 @@ func buildMux(secret, variant string, sampler *agent.Sampler, discoveryHandler, 
 		// Captured requests can hold plates and images: only the agent token reads them.
 		mux.Handle("GET /v1/provision-lpr/captures", requireBearer(secret, lprHandler))
 		mux.Handle("GET /v1/provision-lpr/captures/", requireBearer(secret, lprHandler))
+		// The status lists camera addresses and plates, and the registry decides which cameras are
+		// trusted: both are agent-token routes. Only the camera-facing routes above stay open.
+		mux.Handle("GET /v1/provision-lpr/status", requireBearer(secret, lprHandler))
+		mux.Handle("/v1/provision-lpr/registry", requireBearer(secret, lprHandler))
+		mux.Handle("/v1/provision-lpr/registry/", requireBearer(secret, lprHandler))
 	}
 	configurator := provisionlpr.NewConfigurator()
 	mux.HandleFunc("POST /v1/provision-lpr/configure", func(w http.ResponseWriter, r *http.Request) {

@@ -25,6 +25,8 @@ const (
 	// Capture reasons.
 	CaptureUnparsed = "unparsed"    // the parser could not read the request
 	CaptureAll      = "capture_all" // the operator asked to keep every event request
+	// CaptureUnregistered is a request an enforcing registry turned away; it is kept as evidence.
+	CaptureUnregistered = "unregistered"
 )
 
 // captureIDPattern is the only shape of ID the store reads from disk, so a crafted ID can never
