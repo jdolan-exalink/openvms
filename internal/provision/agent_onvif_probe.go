@@ -161,6 +161,12 @@ func (s *Service) ProbeOnvif(ctx context.Context, actor authz.Actor, serverID uu
 }
 
 func (s *Service) getAgentClientAndToken(ctx context.Context, actor authz.Actor, serverID uuid.UUID) (AgentProbeDoer, string, error) {
+	return s.getAgentClientAndTokenWithTimeout(ctx, actor, serverID, onvifProbeTimeout)
+}
+
+// getAgentClientAndTokenWithTimeout is getAgentClientAndToken with the client's whole-request timeout
+// chosen by the caller: an agent update uploads tens of megabytes and cannot use the probe's.
+func (s *Service) getAgentClientAndTokenWithTimeout(ctx context.Context, actor authz.Actor, serverID uuid.UUID, timeout time.Duration) (AgentProbeDoer, string, error) {
 	var host string
 	var port int32
 	var token string
@@ -185,7 +191,7 @@ func (s *Service) getAgentClientAndToken(ctx context.Context, actor authz.Actor,
 		return nil, "", ErrAgentProbeFailed
 	}
 	if baseURL != "" {
-		client, err := s.endpointClient(endpoint, config)
+		client, err := s.endpointClient(endpoint, config, timeout)
 		if err != nil {
 			return nil, "", ErrAgentProbeFailed
 		}
@@ -194,7 +200,7 @@ func (s *Service) getAgentClientAndToken(ctx context.Context, actor authz.Actor,
 	var client AgentProbeDoer
 	if config.TrustMode == AgentTLSTrustPlaintext {
 		// #nosec G115 -- AgentEndpointFromRow constrains the port to 1..65535.
-		plainClient, err := newPlainAgentHTTPClient(endpoint.Host, uint16(endpoint.Port), onvifProbeTimeout, s.probeRoundTripper)
+		plainClient, err := newPlainAgentHTTPClient(endpoint.Host, uint16(endpoint.Port), timeout, s.probeRoundTripper)
 		if err != nil {
 			return nil, "", ErrAgentProbeFailed
 		}
@@ -205,7 +211,7 @@ func (s *Service) getAgentClientAndToken(ctx context.Context, actor authz.Actor,
 		}
 		useSystemRoots := config.TrustMode == AgentTLSTrustSystem
 		// #nosec G115 -- validateAgentTLSConfig constrains the port to 1..65535 above.
-		httpsClient, err := newVerifiedAgentHTTPClient(endpoint.Host, uint16(config.SecurePort), config.CAPEM, useSystemRoots, onvifProbeTimeout, nil, s.probeRoundTripper)
+		httpsClient, err := newVerifiedAgentHTTPClient(endpoint.Host, uint16(config.SecurePort), config.CAPEM, useSystemRoots, timeout, nil, s.probeRoundTripper)
 		if err != nil {
 			return nil, "", ErrAgentProbeFailed
 		}
@@ -217,11 +223,11 @@ func (s *Service) getAgentClientAndToken(ctx context.Context, actor authz.Actor,
 // endpointClient builds the client of an agent that has a stored base URL. HTTPS verifies the host
 // name with the system roots unless the server has its own CA configured; plain HTTP is for a
 // private address (LAN or VPN). Either way the destination is checked when the connection is made.
-func (s *Service) endpointClient(endpoint AgentEndpoint, config AgentTLSConfig) (AgentProbeDoer, error) {
+func (s *Service) endpointClient(endpoint AgentEndpoint, config AgentTLSConfig, timeout time.Duration) (AgentProbeDoer, error) {
 	// #nosec G115 -- ParseAgentEndpoint constrains the port to 1..65535.
 	port := uint16(endpoint.Port)
 	if endpoint.Scheme == "http" {
-		client, err := newPlainAgentHTTPClient(endpoint.Host, port, onvifProbeTimeout, s.probeRoundTripper)
+		client, err := newPlainAgentHTTPClient(endpoint.Host, port, timeout, s.probeRoundTripper)
 		if err == nil && s.probeRoundTripper == nil {
 			err = guardAgentTransport(client.client, "http")
 		}
@@ -230,9 +236,9 @@ func (s *Service) endpointClient(endpoint AgentEndpoint, config AgentTLSConfig) 
 	var client *VerifiedAgentHTTPClient
 	var err error
 	if config.TrustMode == AgentTLSTrustCustom && len(config.CAPEM) != 0 {
-		client, err = newVerifiedAgentHTTPClient(endpoint.Host, port, config.CAPEM, false, onvifProbeTimeout, nil, s.probeRoundTripper)
+		client, err = newVerifiedAgentHTTPClient(endpoint.Host, port, config.CAPEM, false, timeout, nil, s.probeRoundTripper)
 	} else {
-		client, err = newVerifiedAgentHTTPClient(endpoint.Host, port, nil, true, onvifProbeTimeout, nil, s.probeRoundTripper)
+		client, err = newVerifiedAgentHTTPClient(endpoint.Host, port, nil, true, timeout, nil, s.probeRoundTripper)
 	}
 	if err == nil && s.probeRoundTripper == nil {
 		err = guardAgentTransport(client.client, "https")
