@@ -75,7 +75,7 @@ func TestAgentTLSHealthRequiresBearerAndExposesBuildMetadata(t *testing.T) {
 		Variant: "openvino",
 	}
 	health := newAgentHealthHandler("agent-secret", info)
-	mux := buildTLSMux(health, nil, nil, nil)
+	mux := buildTLSMux(&authenticator{secret: "agent-secret"}, health, nil, nil, nil)
 	for _, token := range []string{"", "wrong-token"} {
 		r := httptest.NewRequest(http.MethodGet, "/v1/health", nil)
 		if token != "" {
@@ -147,7 +147,7 @@ func TestCurrentAgentHealthInfoUsesBuiltMetadata(t *testing.T) {
 
 func TestAgentTLSHealthBoundsMetadataResponse(t *testing.T) {
 	info := currentAgentHealthInfo(strings.Repeat("x", 4096))
-	mux := buildTLSMux(newAgentHealthHandler("agent-secret", info), nil, nil, nil)
+	mux := buildTLSMux(&authenticator{secret: "agent-secret"}, newAgentHealthHandler("agent-secret", info), nil, nil, nil)
 	r := httptest.NewRequest(http.MethodGet, "/v1/health", nil)
 	r.Header.Set("Authorization", "Bearer agent-secret")
 	w := httptest.NewRecorder()
@@ -175,7 +175,7 @@ func TestAgentTLSHealthRejectsPayloadAtLimitWhenNewlineExceedsLimit(t *testing.T
 		t.Fatalf("JSON payload length = %d, want exact limit %d", len(payload), agentHealthMaxResponseBytes)
 	}
 
-	mux := buildTLSMux(newAgentHealthHandler("agent-secret", info), nil, nil, nil)
+	mux := buildTLSMux(&authenticator{secret: "agent-secret"}, newAgentHealthHandler("agent-secret", info), nil, nil, nil)
 	r := httptest.NewRequest(http.MethodGet, "/v1/health", nil)
 	r.Header.Set("Authorization", "Bearer agent-secret")
 	w := httptest.NewRecorder()
@@ -191,7 +191,7 @@ func TestAgentTLSHealthRejectsPayloadAtLimitWhenNewlineExceedsLimit(t *testing.T
 func TestAgentTLSMuxExposesProbeWithoutChangingHTTPMux(t *testing.T) {
 	discovery := http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) { w.WriteHeader(http.StatusNoContent) })
 	probe := http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) { w.WriteHeader(http.StatusAccepted) })
-	mux := buildTLSMux(nil, discovery, probe, nil)
+	mux := buildTLSMux(&authenticator{secret: "agent-secret"}, nil, discovery, probe, nil)
 	for _, path := range []string{"/v1/metrics", "/v1/update"} {
 		r := httptest.NewRequest("POST", path, nil)
 		w := httptest.NewRecorder()
@@ -201,12 +201,14 @@ func TestAgentTLSMuxExposesProbeWithoutChangingHTTPMux(t *testing.T) {
 		}
 	}
 	r := httptest.NewRequest("POST", "/v1/onvif/discover", nil)
+	r.Header.Set("Authorization", "Bearer agent-secret")
 	w := httptest.NewRecorder()
 	mux.ServeHTTP(w, r)
 	if w.Code != http.StatusNoContent {
 		t.Fatalf("discovery status = %d, want 204", w.Code)
 	}
 	r = httptest.NewRequest("POST", "/v1/onvif/probe", nil)
+	r.Header.Set("Authorization", "Bearer agent-secret")
 	w = httptest.NewRecorder()
 	mux.ServeHTTP(w, r)
 	if w.Code != http.StatusAccepted {
@@ -228,7 +230,7 @@ func TestAgentTLSServerRequiresTLS12(t *testing.T) {
 	if err != nil || !enabled {
 		t.Fatalf("load config: enabled=%v err=%v", enabled, err)
 	}
-	server := newAgentTLSServer(cfg, nil, nil, nil, nil)
+	server := newAgentTLSServer(cfg, &authenticator{secret: "agent-secret"}, nil, nil, nil, nil)
 	if server.TLSConfig.MinVersion != tls.VersionTLS12 {
 		t.Fatalf("MinVersion = %x, want TLS 1.2", server.TLSConfig.MinVersion)
 	}

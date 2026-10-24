@@ -9,6 +9,8 @@ import (
 	"strconv"
 	"strings"
 	"time"
+
+	"github.com/jdolan-exalink/openvms/internal/agent/tokens"
 )
 
 type agentTLSConfig struct {
@@ -39,32 +41,27 @@ func loadAgentTLSConfig(listen, certFile, keyFile string) (*agentTLSConfig, bool
 	return &agentTLSConfig{Addr: listen, Certificates: []tls.Certificate{cert}}, true, nil
 }
 
-func buildTLSMux(healthHandler, discoveryHandler, probeHandler, lprHandler http.Handler) *http.ServeMux {
+func buildTLSMux(auth *authenticator, healthHandler, discoveryHandler, probeHandler, lprHandler http.Handler) *http.ServeMux {
 	mux := http.NewServeMux()
 	if healthHandler != nil {
-		mux.Handle("GET /v1/health", healthHandler)
+		mux.Handle("GET /v1/health", auth.scoped(tokens.ScopeRead, healthHandler))
 	}
 	if discoveryHandler != nil {
-		mux.Handle("POST /v1/onvif/discover", discoveryHandler)
+		mux.Handle("POST /v1/onvif/discover", auth.scoped(tokens.ScopeControl, discoveryHandler))
 	}
 	if probeHandler != nil {
-		mux.Handle("POST /v1/onvif/probe", probeHandler)
+		mux.Handle("POST /v1/onvif/probe", auth.scoped(tokens.ScopeControl, probeHandler))
 	}
 	if lprHandler != nil {
-		mux.Handle("/SendKeepalive", lprHandler)
-		mux.Handle("/v1/provision-lpr/", lprHandler)
-		mux.Handle("/v1/provision-lpr/event", lprHandler)
-		mux.Handle("/SendLPR", lprHandler)
-		mux.Handle("/LPR", lprHandler)
-		mux.Handle("/Notification/LPR", lprHandler)
+		mountProvisionLPR(mux, auth, lprHandler)
 	}
 	return mux
 }
 
-func newAgentTLSServer(cfg *agentTLSConfig, healthHandler, discoveryHandler, probeHandler, lprHandler http.Handler) *http.Server {
+func newAgentTLSServer(cfg *agentTLSConfig, auth *authenticator, healthHandler, discoveryHandler, probeHandler, lprHandler http.Handler) *http.Server {
 	return &http.Server{
 		Addr:              cfg.Addr,
-		Handler:           buildTLSMux(healthHandler, discoveryHandler, probeHandler, lprHandler),
+		Handler:           buildTLSMux(auth, healthHandler, discoveryHandler, probeHandler, lprHandler),
 		ReadHeaderTimeout: 5 * time.Second,
 		TLSConfig:         &tls.Config{MinVersion: tls.VersionTLS12, Certificates: cfg.Certificates},
 	}
