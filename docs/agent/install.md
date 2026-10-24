@@ -63,8 +63,7 @@ Publishing the agent is up to you; the agent and its token are the only thing ex
 scopes decide what it may do (`docs/agent/tokens.md`). Use `https://` for any address that is not
 private: OpenVMS refuses plain HTTP to a public address.
 
-> OpenVMS registering this address and token for a server is the "connect" step of the 0.4.0 work; until
-> it lands, the SSH install from the server screen remains the way to register an agent.
+Registering the printed address and token in OpenVMS is the next step: `docs/agent/connect.md`.
 
 ## Releasing an agent version (maintainers)
 

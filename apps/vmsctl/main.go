@@ -39,6 +39,7 @@ const usage = `usage: vmsctl <command> [flags]
 commands:
   migrate      apply database migrations
   agent-register  register the local Compose agent with an authenticated operator session
+  agent-connect   register an agent that already runs at an address OpenVMS can reach (LAN, VPN or tunnel)
   bootstrap    create the platform administrator and print its API token
   reset-admin-password  reset an existing platform admin password (stdin only; forces change)
   sync-admin-permissions  add missing catalog permissions to an existing platform user
@@ -70,6 +71,8 @@ func run(ctx context.Context, cmd string, args []string, out io.Writer) error {
 	switch cmd {
 	case "agent-register":
 		return runLocalAgentRegister(ctx, args, dbURL, out)
+	case "agent-connect":
+		return runAgentConnect(ctx, args, dbURL, out)
 	case "migrate":
 		v, err := postgres.Migrate(ctx, dbURL, migrations.FS, log)
 		if err != nil {
