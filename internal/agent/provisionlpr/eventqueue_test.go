@@ -1,6 +1,7 @@
 package provisionlpr
 
 import (
+	"errors"
 	"os"
 	"path/filepath"
 	"testing"
@@ -169,5 +170,60 @@ func TestEventQueueFileIsPrivateAndHoldsNoImages(t *testing.T) {
 	}
 	if info.Mode().Perm() != 0o600 {
 		t.Fatalf("queue file mode = %v, want 0600", info.Mode().Perm())
+	}
+}
+
+// A queue that is full by bytes must drop what it needs to, not everything it holds.
+func TestEventQueueByteBoundDropsOnlyWhatIsNeeded(t *testing.T) {
+	probe := openQueue(t, t.TempDir(), 100)
+	_, _ = probe.Append(queueEvent("A1"))
+	line := probe.bytes
+
+	q, err := OpenEventQueue(t.TempDir(), 100, line*3+line/2)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, p := range []string{"A1", "B2", "C3", "D4"} {
+		if _, err := q.Append(queueEvent(p)); err != nil {
+			t.Fatal(err)
+		}
+	}
+	st := q.Stats()
+	if st.Depth != 3 || st.Lost != 1 {
+		t.Fatalf("depth=%d lost=%d; want 3 kept and only 1 dropped", st.Depth, st.Lost)
+	}
+	if got := q.After(0, 10); got[0].Event.Plate != "B2" || got[2].Event.Plate != "D4" {
+		t.Fatalf("kept the wrong events: %+v", got)
+	}
+}
+
+// A write that fails half way must not leave bytes that glue themselves to the next record.
+func TestEventQueueRecoversFromAPartialWrite(t *testing.T) {
+	dir := t.TempDir()
+	q := openQueue(t, dir, 100)
+	if _, err := q.Append(queueEvent("A1")); err != nil {
+		t.Fatal(err)
+	}
+
+	realWrite := q.writeLine
+	q.writeLine = func(f *os.File, data []byte) error {
+		_, _ = f.Write(data[:len(data)/2]) // the disk fills up mid-record
+		return errors.New("no space left on device")
+	}
+	if _, err := q.Append(queueEvent("LOST")); err == nil {
+		t.Fatal("expected the failed write to be reported")
+	}
+	q.writeLine = realWrite
+	if _, err := q.Append(queueEvent("C3")); err != nil {
+		t.Fatal(err)
+	}
+
+	again := openQueue(t, dir, 100)
+	got := again.After(0, 10)
+	if len(got) != 2 || got[0].Event.Plate != "A1" || got[1].Event.Plate != "C3" {
+		t.Fatalf("a partial write corrupted the next record: %+v", got)
+	}
+	if got[1].Seq != 2 {
+		t.Fatalf("the failed event must not consume a sequence: %+v", got[1])
 	}
 }

@@ -70,6 +70,18 @@ type EventQueue struct {
 	bytes     int64
 	nextSeq   uint64
 	lost      uint64
+	// damaged is set when an append failed: the file may end in a partial record that the next write
+	// would glue itself to, so the file is rewritten from memory before anything else is appended.
+	damaged bool
+	// writeLine appends one record to the open file; tests replace it to simulate a failing disk.
+	writeLine func(f *os.File, data []byte) error
+}
+
+func writeAndSync(f *os.File, data []byte) error {
+	if _, err := f.Write(data); err != nil {
+		return err
+	}
+	return f.Sync()
 }
 
 // OpenEventQueue loads the queue stored in dir, creating it when absent.
@@ -80,7 +92,7 @@ func OpenEventQueue(dir string, maxEvents int, maxBytes int64) (*EventQueue, err
 	if maxBytes <= 0 {
 		maxBytes = DefaultEventQueueMaxBytes
 	}
-	q := &EventQueue{path: filepath.Join(dir, eventQueueFile), maxEvents: maxEvents, maxBytes: maxBytes, nextSeq: 1}
+	q := &EventQueue{path: filepath.Join(dir, eventQueueFile), maxEvents: maxEvents, maxBytes: maxBytes, nextSeq: 1, writeLine: writeAndSync}
 	dirty, err := q.load()
 	if err != nil {
 		return nil, err
@@ -167,34 +179,40 @@ func (q *EventQueue) Append(ev LPREvent) (QueuedEvent, error) {
 	}
 
 	if len(q.items) >= q.maxEvents || q.bytes+int64(len(data)) > q.maxBytes {
-		// Drop a tenth at once so a full queue does not rewrite its file for every new event.
-		drop := max(1, q.maxEvents/10)
-		for q.bytes+int64(len(data)) > q.maxBytes && drop < len(q.items) {
+		// Drop a tenth at once so a full queue does not rewrite its file for every new event, and
+		// more only if the bytes still do not fit.
+		drop := max(1, len(q.items)/10)
+		var freed int64
+		for i := 0; i < drop && i < len(q.items); i++ {
+			freed += int64(q.items[i].size)
+		}
+		for drop < len(q.items) && q.bytes-freed+int64(len(data)) > q.maxBytes {
+			freed += int64(q.items[drop].size)
 			drop++
 		}
 		drop = min(drop, len(q.items))
-		for _, it := range q.items[:drop] {
-			q.bytes -= int64(it.size)
-		}
+		q.bytes -= freed
 		q.items = append([]queuedLine(nil), q.items[drop:]...)
 		q.lost += uint64(drop)
+		q.damaged = true // compacting below clears it; if that fails the file is still suspect
+	}
+	if q.damaged {
 		if err := q.compactLocked(); err != nil {
 			return QueuedEvent{}, err
 		}
+		q.damaged = false
 	}
 
 	f, err := os.OpenFile(q.path, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0o600) //nolint:gosec // path is the agent's own state file
 	if err != nil {
 		return QueuedEvent{}, fmt.Errorf("open event queue: %w", err)
 	}
-	_, werr := f.Write(data)
-	if werr == nil {
-		werr = f.Sync()
-	}
+	werr := q.writeLine(f, data)
 	if cerr := f.Close(); werr == nil {
 		werr = cerr
 	}
 	if werr != nil {
+		q.damaged = true
 		return QueuedEvent{}, fmt.Errorf("write event queue: %w", werr)
 	}
 
