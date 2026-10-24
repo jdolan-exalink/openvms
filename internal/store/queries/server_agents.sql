@@ -11,12 +11,12 @@ ON CONFLICT (server_id) DO UPDATE SET
     updated_at = now();
 
 -- name: GetServerAgent :one
-SELECT server_id, tenant_id, host, port, variant, token_sealed, version, updated_at, base_url
+SELECT server_id, tenant_id, host, port, variant, token_sealed, version, updated_at, base_url, request_headers_sealed
 FROM server_agents
 WHERE server_id = @server_id;
 
 -- name: GetServerAgentForUpdate :one
-SELECT server_id, tenant_id, host, port, variant, token_sealed, version, updated_at, base_url
+SELECT server_id, tenant_id, host, port, variant, token_sealed, version, updated_at, base_url, request_headers_sealed
 FROM server_agents
 WHERE server_id = @server_id
 FOR UPDATE;
@@ -35,3 +35,7 @@ ON CONFLICT (server_id) DO NOTHING;
 DELETE FROM server_agents
 WHERE server_id = @server_id;
 
+
+-- name: UpdateServerAgentRequestHeaders :execrows
+UPDATE server_agents SET request_headers_sealed = @request_headers_sealed, updated_at = now()
+WHERE server_id = @server_id;

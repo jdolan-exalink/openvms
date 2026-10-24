@@ -174,7 +174,7 @@ func (s *Service) getAgentClientAndToken(ctx context.Context, actor authz.Actor,
 	if err != nil {
 		return nil, "", err
 	}
-	baseURL, err := s.agentBaseURL(ctx, actor, serverID)
+	baseURL, gatewayHeaders, err := s.agentConnection(ctx, actor, serverID)
 	if err != nil {
 		return nil, "", ErrAgentProbeFailed
 	}
@@ -187,7 +187,7 @@ func (s *Service) getAgentClientAndToken(ctx context.Context, actor authz.Actor,
 		if err != nil {
 			return nil, "", ErrAgentProbeFailed
 		}
-		return client, token, nil
+		return withAgentRequestHeaders(client, gatewayHeaders), token, nil
 	}
 	var client AgentProbeDoer
 	if config.TrustMode == AgentTLSTrustPlaintext {
@@ -214,35 +214,62 @@ func (s *Service) getAgentClientAndToken(ctx context.Context, actor authz.Actor,
 
 // endpointClient builds the client of an agent that has a stored base URL. HTTPS verifies the host
 // name with the system roots unless the server has its own CA configured; plain HTTP is for a
-// private address (LAN or VPN) and is the operator's explicit choice.
+// private address (LAN or VPN). Either way the destination is checked when the connection is made.
 func (s *Service) endpointClient(endpoint AgentEndpoint, config AgentTLSConfig) (AgentProbeDoer, error) {
 	// #nosec G115 -- ParseAgentEndpoint constrains the port to 1..65535.
 	port := uint16(endpoint.Port)
 	if endpoint.Scheme == "http" {
-		return newPlainAgentHTTPClient(endpoint.Host, port, onvifProbeTimeout, s.probeRoundTripper)
+		client, err := newPlainAgentHTTPClient(endpoint.Host, port, onvifProbeTimeout, s.probeRoundTripper)
+		if err == nil && s.probeRoundTripper == nil {
+			guardAgentTransport(client.client, "http")
+		}
+		return client, err
 	}
+	var client *VerifiedAgentHTTPClient
+	var err error
 	if config.TrustMode == AgentTLSTrustCustom && len(config.CAPEM) != 0 {
-		return newVerifiedAgentHTTPClient(endpoint.Host, port, config.CAPEM, false, onvifProbeTimeout, nil, s.probeRoundTripper)
+		client, err = newVerifiedAgentHTTPClient(endpoint.Host, port, config.CAPEM, false, onvifProbeTimeout, nil, s.probeRoundTripper)
+	} else {
+		client, err = newVerifiedAgentHTTPClient(endpoint.Host, port, nil, true, onvifProbeTimeout, nil, s.probeRoundTripper)
 	}
-	return newVerifiedAgentHTTPClient(endpoint.Host, port, nil, true, onvifProbeTimeout, nil, s.probeRoundTripper)
+	if err == nil && s.probeRoundTripper == nil {
+		guardAgentTransport(client.client, "https")
+	}
+	return client, err
 }
 
-// agentBaseURL returns the stored base URL of the server's agent, empty when it uses host and port.
-func (s *Service) agentBaseURL(ctx context.Context, actor authz.Actor, serverID uuid.UUID) (string, error) {
-	if s.loadAgentBaseURL != nil {
-		return s.loadAgentBaseURL(ctx, actor, serverID)
+// guardAgentTransport makes the client connect only to approved destinations (see agent_dial_guard.go).
+func guardAgentTransport(client *http.Client, scheme string) {
+	if transport, ok := client.Transport.(*http.Transport); ok {
+		dialer := &net.Dialer{Timeout: 5 * time.Second}
+		transport.DialContext = guardedDialContext(scheme, systemLookup, dialer.DialContext)
+	}
+}
+
+// agentConnection returns the stored base URL of the server's agent (empty when it uses host and
+// port) and the gateway headers sealed with it.
+func (s *Service) agentConnection(ctx context.Context, actor authz.Actor, serverID uuid.UUID) (string, map[string]string, error) {
+	if s.loadAgentConnection != nil {
+		return s.loadAgentConnection(ctx, actor, serverID)
 	}
 	if s.Store == nil {
-		return "", nil
+		return "", nil, nil
 	}
 	row, err := s.agentRow(ctx, actor, serverID)
 	if errors.Is(err, store.ErrNotFound) {
-		return "", nil
+		return "", nil, nil
 	}
 	if err != nil {
-		return "", err
+		return "", nil, err
 	}
-	return row.BaseUrl, nil
+	if row.BaseUrl == "" {
+		return "", nil, nil
+	}
+	headers, err := openAgentRequestHeaders(s.Sealer, serverID, row.RequestHeadersSealed)
+	if err != nil {
+		return "", nil, err
+	}
+	return row.BaseUrl, headers, nil
 }
 
 func validateOnvifProbeRequest(in OnvifProbeRequest) error {

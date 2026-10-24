@@ -25,7 +25,7 @@ func (q *Queries) DeleteServerAgent(ctx context.Context, serverID uuid.UUID) (in
 }
 
 const getServerAgent = `-- name: GetServerAgent :one
-SELECT server_id, tenant_id, host, port, variant, token_sealed, version, updated_at, base_url
+SELECT server_id, tenant_id, host, port, variant, token_sealed, version, updated_at, base_url, request_headers_sealed
 FROM server_agents
 WHERE server_id = $1
 `
@@ -43,12 +43,13 @@ func (q *Queries) GetServerAgent(ctx context.Context, serverID uuid.UUID) (Serve
 		&i.Version,
 		&i.UpdatedAt,
 		&i.BaseUrl,
+		&i.RequestHeadersSealed,
 	)
 	return i, err
 }
 
 const getServerAgentForUpdate = `-- name: GetServerAgentForUpdate :one
-SELECT server_id, tenant_id, host, port, variant, token_sealed, version, updated_at, base_url
+SELECT server_id, tenant_id, host, port, variant, token_sealed, version, updated_at, base_url, request_headers_sealed
 FROM server_agents
 WHERE server_id = $1
 FOR UPDATE
@@ -67,6 +68,7 @@ func (q *Queries) GetServerAgentForUpdate(ctx context.Context, serverID uuid.UUI
 		&i.Version,
 		&i.UpdatedAt,
 		&i.BaseUrl,
+		&i.RequestHeadersSealed,
 	)
 	return i, err
 }
@@ -98,6 +100,24 @@ func (q *Queries) RegisterServerAgentIfAbsent(ctx context.Context, arg RegisterS
 		arg.TokenSealed,
 		arg.Version,
 	)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected(), nil
+}
+
+const updateServerAgentRequestHeaders = `-- name: UpdateServerAgentRequestHeaders :execrows
+UPDATE server_agents SET request_headers_sealed = $1, updated_at = now()
+WHERE server_id = $2
+`
+
+type UpdateServerAgentRequestHeadersParams struct {
+	RequestHeadersSealed []byte
+	ServerID             uuid.UUID
+}
+
+func (q *Queries) UpdateServerAgentRequestHeaders(ctx context.Context, arg UpdateServerAgentRequestHeadersParams) (int64, error) {
+	result, err := q.db.Exec(ctx, updateServerAgentRequestHeaders, arg.RequestHeadersSealed, arg.ServerID)
 	if err != nil {
 		return 0, err
 	}

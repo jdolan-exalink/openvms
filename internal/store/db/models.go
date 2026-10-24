@@ -877,15 +877,16 @@ type RuleVersion struct {
 }
 
 type ServerAgent struct {
-	ServerID    uuid.UUID
-	TenantID    uuid.UUID
-	Host        string
-	Port        int32
-	Variant     string
-	TokenSealed []byte
-	Version     string
-	UpdatedAt   time.Time
-	BaseUrl     string
+	ServerID             uuid.UUID
+	TenantID             uuid.UUID
+	Host                 string
+	Port                 int32
+	Variant              string
+	TokenSealed          []byte
+	Version              string
+	UpdatedAt            time.Time
+	BaseUrl              string
+	RequestHeadersSealed []byte
 }
 
 type ServerAgentEventCursor struct {
