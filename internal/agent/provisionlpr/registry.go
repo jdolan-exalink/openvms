@@ -24,6 +24,9 @@ var (
 	ErrInvalidCamera = errors.New("invalid camera registration")
 	// ErrRegistryFull means the registry holds as many cameras as it may.
 	ErrRegistryFull = errors.New("too many registered cameras")
+	// ErrRegistryLocked means the stored registry could not be read. It refuses every request and
+	// cannot be changed until it is repaired on the host, so the damaged file is not overwritten.
+	ErrRegistryLocked = errors.New("registry unreadable")
 
 	cameraIDPattern = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$`)
 )
@@ -142,6 +145,9 @@ func (r *Registry) addLocked(c RegisteredCamera) error {
 func (r *Registry) Upsert(c RegisteredCamera) error {
 	r.mu.Lock()
 	defer r.mu.Unlock()
+	if r.loadError != "" {
+		return fmt.Errorf("%w: %s", ErrRegistryLocked, r.loadError)
+	}
 	before := r.cloneLocked()
 	if err := r.addLocked(c); err != nil {
 		return err
@@ -157,6 +163,9 @@ func (r *Registry) Upsert(c RegisteredCamera) error {
 func (r *Registry) Remove(cameraID string) error {
 	r.mu.Lock()
 	defer r.mu.Unlock()
+	if r.loadError != "" {
+		return fmt.Errorf("%w: %s", ErrRegistryLocked, r.loadError)
+	}
 	c, ok := r.cameras[cameraID]
 	if !ok {
 		return nil
@@ -177,7 +186,7 @@ func (r *Registry) SetEnforce(on bool) error {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	if r.loadError != "" {
-		return fmt.Errorf("registry unreadable: %s", r.loadError)
+		return fmt.Errorf("%w: %s", ErrRegistryLocked, r.loadError)
 	}
 	before := r.cloneLocked()
 	r.enforce = on

@@ -25,6 +25,7 @@ type Receiver struct {
 	eventsQueue chan LPREvent
 	captures    *CaptureStore
 	captureAll  bool
+	registry    *Registry
 }
 
 // NewReceiver creates a new Receiver with the given config and dependencies.
@@ -63,6 +64,11 @@ func (r *Receiver) SetCaptures(store *CaptureStore, all bool) {
 	r.captureAll = all && store != nil
 }
 
+// SetRegistry makes the receiver identify cameras by the address they connect from and, once the
+// registry enforces, refuse the ones that are not registered. Without a registry every request is
+// accepted, as before. Call it before serving.
+func (r *Receiver) SetRegistry(reg *Registry) { r.registry = reg }
+
 // Subscribe registers a callback to receive normalized LPR events.
 func (r *Receiver) Subscribe(sub EventSubscriber) {
 	if sub == nil {
@@ -89,6 +95,8 @@ func (r *Receiver) ServeHTTP(w http.ResponseWriter, req *http.Request) {
 		r.handleStatus(w, req)
 	case path == "/v1/provision-lpr/captures" || strings.HasPrefix(path, "/v1/provision-lpr/captures/"):
 		r.handleCaptures(w, req)
+	case path == "/v1/provision-lpr/registry" || strings.HasPrefix(path, "/v1/provision-lpr/registry/"):
+		r.handleRegistry(w, req)
 	case req.Method == http.MethodPost:
 		r.handleEvent(w, req)
 	default:
@@ -105,9 +113,16 @@ func (r *Receiver) handleKeepalive(w http.ResponseWriter, req *http.Request) {
 
 	now := time.Now()
 	clientIP := extractClientIP(req)
+	registered, ok := r.admit(w, req, nil, now)
+	if !ok {
+		return
+	}
 	camID := req.URL.Query().Get("camera_id")
 	if camID == "" {
 		camID = req.URL.Query().Get("dev_id")
+	}
+	if registered != nil {
+		camID = registered.CameraID
 	}
 
 	r.heartbeat.RecordKeepalive(camID, clientIP, now)
@@ -127,6 +142,11 @@ func (r *Receiver) handleEvent(w http.ResponseWriter, req *http.Request) {
 		return
 	}
 
+	registered, ok := r.admit(w, req, body, now)
+	if !ok {
+		return
+	}
+
 	// Always reply HTTP 200 quickly to Provision camera to prevent retry storms
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(http.StatusOK)
@@ -138,8 +158,18 @@ func (r *Receiver) handleEvent(w http.ResponseWriter, req *http.Request) {
 		r.log.Warn("provision-isr payload unparseable", "error", err, "path", req.URL.Path, "size", len(body))
 		r.capture(req, body, CaptureUnparsed, err.Error(), now)
 		// Still record keepalive from the camera IP
-		r.heartbeat.RecordKeepalive("", extractClientIP(req), now)
+		keepaliveID := ""
+		if registered != nil {
+			keepaliveID = registered.CameraID
+		}
+		r.heartbeat.RecordKeepalive(keepaliveID, extractClientIP(req), now)
 		return
+	}
+	if registered != nil && event.CameraID != registered.CameraID {
+		// The registered ID is the identity; what the payload claimed is kept for audit only.
+		reported := event.CameraID
+		event.ReportedCameraID = &reported
+		event.CameraID = registered.CameraID
 	}
 
 	if r.captureAll {
@@ -162,6 +192,34 @@ func (r *Receiver) handleEvent(w http.ResponseWriter, req *http.Request) {
 	default:
 		r.log.Warn("provision-isr events queue full; dropping event", "camera_id", event.CameraID, "plate", event.Plate)
 	}
+}
+
+// admit decides whether the peer of a request may feed the receiver and which registered camera it
+// is. Without a registry everyone is admitted and nobody is identified. With one, a registered address
+// is identified by its registered ID; an unregistered one is noted so an operator can see it, and is
+// turned away with 403 once the registry enforces (the request is kept as evidence when captures
+// are on). The peer address is the only identity used: the registry cannot be fooled by headers.
+func (r *Receiver) admit(w http.ResponseWriter, req *http.Request, body []byte, now time.Time) (*RegisteredCamera, bool) {
+	if r.registry == nil {
+		return nil, true
+	}
+	ip := extractClientIP(req)
+	if cam, known := r.registry.Identify(ip); known {
+		return &cam, true
+	}
+	enforcing := r.registry.Enforcing()
+	r.registry.NoteUnregistered(ip, req.URL.Path, enforcing, now)
+	if !enforcing {
+		return nil, true
+	}
+	if body != nil {
+		r.capture(req, body, CaptureUnregistered, "source address is not a registered camera", now)
+	}
+	r.log.Warn("provision-isr request from an unregistered address refused", "ip", ip, "path", req.URL.Path)
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(http.StatusForbidden)
+	_, _ = w.Write([]byte(`{"error":"camera not registered"}`))
+	return nil, false
 }
 
 // capture keeps a request when a store is configured. A failure to store never affects the reply
@@ -223,10 +281,12 @@ func (r *Receiver) handleStatus(w http.ResponseWriter, req *http.Request) {
 	}
 
 	statuses := r.heartbeat.AllStatuses(time.Now())
+	out := map[string]any{"cameras": statuses}
+	if r.registry != nil {
+		out["registry"] = r.registry.Snapshot()
+	}
 	w.Header().Set("Content-Type", "application/json")
-	_ = json.NewEncoder(w).Encode(map[string]any{
-		"cameras": statuses,
-	})
+	_ = json.NewEncoder(w).Encode(out)
 }
 
 func (r *Receiver) processEvents() {

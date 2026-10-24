@@ -8,26 +8,29 @@ import (
 // LPREvent is the normalized representation of a license plate reading from
 // Provision-ISR cameras according to the plugin specification.
 type LPREvent struct {
-	EventType       string    `json:"event_type"` // "lpr"
-	Source          string    `json:"source"`     // "provision_isr"
-	CameraID        string    `json:"camera_id"`
-	CameraIP        string    `json:"camera_ip"`
-	Plate           string    `json:"plate"`
-	EventTime       time.Time `json:"event_time"`
-	ReceivedTime    time.Time `json:"received_time"`
-	CountryOrRegion *string   `json:"country_or_region,omitempty"`
-	Confidence      *float64  `json:"confidence,omitempty"`
-	ListStatus      *string   `json:"list_status,omitempty"`
-	PanoramicImage  *string   `json:"panoramic_image,omitempty"`
-	PlateCrop       *string   `json:"plate_crop,omitempty"`
-	RawEndpoint     *string   `json:"raw_endpoint,omitempty"`
-	RawPayloadRef   *string   `json:"raw_payload_ref,omitempty"`
-	VehicleColor    *string   `json:"vehicle_color,omitempty"`
-	VehicleBrand    *string   `json:"vehicle_brand,omitempty"`
-	VehicleModel    *string   `json:"vehicle_model,omitempty"`
-	VehicleType     *string   `json:"vehicle_type,omitempty"`
-	Speed           *float64  `json:"speed,omitempty"`
-	Direction       *string   `json:"direction,omitempty"`
+	EventType string `json:"event_type"` // "lpr"
+	Source    string `json:"source"`     // "provision_isr"
+	CameraID  string `json:"camera_id"`
+	// ReportedCameraID is the camera ID the payload itself carried when it differs from the
+	// registered one; the original is kept for audit, never used to identify the camera.
+	ReportedCameraID *string   `json:"reported_camera_id,omitempty"`
+	CameraIP         string    `json:"camera_ip"`
+	Plate            string    `json:"plate"`
+	EventTime        time.Time `json:"event_time"`
+	ReceivedTime     time.Time `json:"received_time"`
+	CountryOrRegion  *string   `json:"country_or_region,omitempty"`
+	Confidence       *float64  `json:"confidence,omitempty"`
+	ListStatus       *string   `json:"list_status,omitempty"`
+	PanoramicImage   *string   `json:"panoramic_image,omitempty"`
+	PlateCrop        *string   `json:"plate_crop,omitempty"`
+	RawEndpoint      *string   `json:"raw_endpoint,omitempty"`
+	RawPayloadRef    *string   `json:"raw_payload_ref,omitempty"`
+	VehicleColor     *string   `json:"vehicle_color,omitempty"`
+	VehicleBrand     *string   `json:"vehicle_brand,omitempty"`
+	VehicleModel     *string   `json:"vehicle_model,omitempty"`
+	VehicleType      *string   `json:"vehicle_type,omitempty"`
+	Speed            *float64  `json:"speed,omitempty"`
+	Direction        *string   `json:"direction,omitempty"`
 }
 
 // CameraStatus tracks the health and heartbeat of a Provision-ISR camera.
