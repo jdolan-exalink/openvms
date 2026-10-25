@@ -663,6 +663,36 @@ describe("Servers", () => {
       expect(screen.queryByRole("button", { name: /Actualizar agente y configurar HTTPS/i })).not.toBeInTheDocument();
     });
 
+    describe("agent version colour", () => {
+      const sha = (c: string) => c.repeat(64);
+      const tone = async () => (await screen.findByText(/Agente OpenVMS:/i, { selector: "[data-version-tone]" })).getAttribute("data-version-tone");
+
+      it("is green for a verified current agent", async () => {
+        setup(undefined, undefined, grants, undefined, { installed: true, version: "0.4.0", binary_status: "current", binary_outdated: false, binary_upgrade_available: false, binary_observed: { sha256: sha("a"), architecture: "amd64", version: "0.4.0" }, binary_available: { sha256: sha("a"), architecture: "amd64", version: "0.4.0" } });
+        renderPage(Servers);
+        expect(await tone()).toBe("ok");
+      });
+
+      it("is green for a host running a newer agent than the bundled one", async () => {
+        setup(undefined, undefined, grants, undefined, { installed: true, version: "0.4.3", binary_status: "current", binary_outdated: false, binary_upgrade_available: false, binary_observed: { sha256: sha("b"), architecture: "amd64", version: "0.4.3" }, binary_available: { sha256: sha("a"), architecture: "amd64", version: "0.4.0" } });
+        renderPage(Servers);
+        expect(await tone()).toBe("ok");
+      });
+
+      it("is yellow only when an update is available", async () => {
+        setup(undefined, undefined, grants, undefined, { installed: true, version: "0.1.0", binary_status: "update_available", binary_outdated: true, binary_upgrade_available: true, binary_observed: { sha256: sha("1"), architecture: "amd64", version: "0.1.0" }, binary_available: { sha256: sha("2"), architecture: "amd64", version: "0.1.1" } });
+        renderPage(Servers);
+        expect(await screen.findByRole("status", { name: /desactualizado/i })).toHaveClass("text-warn");
+      });
+
+      it("is neither green nor yellow when the state could not be verified", async () => {
+        setup(undefined, undefined, grants, undefined, { installed: true, version: "0.4.0", binary_status: "unreachable", binary_upgrade_available: true });
+        renderPage(Servers);
+        expect(await tone()).toBe("muted");
+        expect(screen.queryByRole("status", { name: /desactualizado/i })).not.toBeInTheDocument();
+      });
+    });
+
     it("does not trust a current label when the observed and available digests disagree", async () => {
       setup(undefined, undefined, grants, undefined, { installed: true, binary_status: "current", binary_outdated: false, binary_upgrade_available: false, binary_observed: { sha256: "a".repeat(64), architecture: "amd64" }, binary_available: { sha256: "b".repeat(64), architecture: "amd64" } });
       renderPage(Servers);
