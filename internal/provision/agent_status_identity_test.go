@@ -195,3 +195,39 @@ func TestLegacyUpdatePayloadFailsClosedWhenTrustedArtifactUnavailable(t *testing
 		t.Fatal("legacy update invoked untrusted fallback")
 	}
 }
+
+// A host that runs a newer agent than the one this OpenVMS ships is not outdated: offering the
+// bundled binary would downgrade it.
+func TestClassifyAgentBinaryStatusNeverCallsANewerHostOutdated(t *testing.T) {
+	digestA := sha256.Sum256([]byte("bundled"))
+	digestB := sha256.Sum256([]byte("host"))
+	bundled := func(version string) *agent.BinaryIdentity {
+		return &agent.BinaryIdentity{SHA256: hex.EncodeToString(digestA[:]), Architecture: "amd64", Version: version}
+	}
+	host := func(version string) *agent.BinaryIdentity {
+		return &agent.BinaryIdentity{SHA256: hex.EncodeToString(digestB[:]), Architecture: "amd64", Version: version}
+	}
+	tests := []struct {
+		name             string
+		available, host  string
+		wantState        AgentBinaryStatus
+		wantOutdated     bool
+		wantUpgradeOffer bool
+	}{
+		{"host is newer", "0.4.0", "0.4.3", AgentBinaryCurrent, false, false},
+		{"host is newer in a higher component", "0.4.9", "0.10.0", AgentBinaryCurrent, false, false},
+		{"host is older", "0.4.3", "0.4.0", AgentBinaryUpdateAvailable, true, true},
+		{"same version, different build", "0.4.3", "0.4.3", AgentBinaryUpdateAvailable, true, true},
+		{"v prefix is ignored", "v0.4.0", "0.4.3", AgentBinaryCurrent, false, false},
+		{"host version is not semver", "0.4.0", "dev", AgentBinaryUpdateAvailable, true, true},
+		{"bundled version is not semver", "dev", "0.4.3", AgentBinaryUpdateAvailable, true, true},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := classifyAgentBinaryStatus(true, bundled(tt.available), host(tt.host), false)
+			if got.Status != tt.wantState || got.Outdated == nil || *got.Outdated != tt.wantOutdated || got.UpgradeAvailable != tt.wantUpgradeOffer {
+				t.Fatalf("status = %#v, want state=%q outdated=%v upgrade=%v", got, tt.wantState, tt.wantOutdated, tt.wantUpgradeOffer)
+			}
+		})
+	}
+}
