@@ -1,6 +1,7 @@
 package main
 
 import (
+	"errors"
 	"flag"
 	"fmt"
 	"io"
@@ -112,6 +113,9 @@ func runTokenCommand(args []string, stdout, stderr io.Writer, now func() time.Ti
 			return 1
 		}
 		fmt.Fprintf(stderr, "Created token %q (%s). Copy it now; it will not be shown again.\n", tok.Name, tok.ID)
+		if tok.Name == openvmsTokenName {
+			refreshKeyFile(*file, secret, stderr)
+		}
 		fmt.Fprintln(stdout, secret)
 		return 0
 	case "list":
@@ -153,11 +157,19 @@ func runTokenCommand(args []string, stdout, stderr io.Writer, now func() time.Ti
 		}
 		store := openTokens(*file)
 		if sub == "revoke" {
+			revokesOpenVMS := isOpenVMSToken(store, positional[0])
 			if err := store.Revoke(positional[0]); err != nil {
 				fmt.Fprintln(stderr, "token revoke:", err)
 				return 1
 			}
 			fmt.Fprintf(stderr, "Revoked %q.\n", positional[0])
+			if revokesOpenVMS {
+				// The saved key must never keep a secret that no longer works.
+				path := openvmsKeyFile(*file)
+				if err := os.Remove(path); err != nil && !errors.Is(err, os.ErrNotExist) {
+					fmt.Fprintf(stderr, "could not remove the old key %s: %v\n", path, err)
+				}
+			}
 			return 0
 		}
 		secret, tok, err := store.Rotate(positional[0], now())
@@ -167,13 +179,7 @@ func runTokenCommand(args []string, stdout, stderr io.Writer, now func() time.Ti
 		}
 		fmt.Fprintf(stderr, "Rotated token %q (%s). The old secret stopped working; copy the new one now.\n", tok.Name, tok.ID)
 		if tok.Name == openvmsTokenName {
-			// The saved key must never keep a secret that no longer works.
-			path := openvmsKeyFile(*file)
-			if err := saveKeyFile(path, secret); err != nil {
-				fmt.Fprintf(stderr, "could not save the new key to %s: %v\n", path, err)
-			} else {
-				fmt.Fprintf(stderr, "The key in %s was updated.\n", path)
-			}
+			refreshKeyFile(*file, secret, stderr)
 		}
 		fmt.Fprintln(stdout, secret)
 		return 0
@@ -184,6 +190,31 @@ func runTokenCommand(args []string, stdout, stderr io.Writer, now func() time.Ti
 
 // openvmsTokenName is the token OpenVMS uses to reach this agent.
 const openvmsTokenName = "openvms"
+
+// isOpenVMSToken reports whether ref (an ID or a name) points at the OpenVMS token.
+func isOpenVMSToken(store *tokens.Store, ref string) bool {
+	list, err := store.List()
+	if err != nil {
+		return false
+	}
+	for _, t := range list {
+		if t.ID == ref || t.Name == ref {
+			return t.Name == openvmsTokenName
+		}
+	}
+	return false
+}
+
+// refreshKeyFile keeps the saved key equal to the secret that works: the file must never hold a
+// secret that no longer works.
+func refreshKeyFile(tokensPath, secret string, stderr io.Writer) {
+	path := openvmsKeyFile(tokensPath)
+	if err := saveKeyFile(path, secret); err != nil {
+		fmt.Fprintf(stderr, "could not save the new key to %s: %v\n", path, err)
+		return
+	}
+	fmt.Fprintf(stderr, "The key in %s was updated.\n", path)
+}
 
 // openvmsKeyFile is where the OpenVMS key is kept on the host: next to the tokens file, readable by
 // root only. It lets the operator read the key again instead of rotating it when it is lost.

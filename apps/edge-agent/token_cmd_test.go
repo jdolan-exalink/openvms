@@ -213,3 +213,46 @@ func TestRotatingAnotherTokenNeverCreatesTheKeyFile(t *testing.T) {
 		t.Fatal("a key file appeared for a token that is not the OpenVMS one")
 	}
 }
+
+func TestRevokingTheOpenVMSTokenRemovesItsSavedKey(t *testing.T) {
+	for _, ref := range []string{"openvms", ""} { // by name, then by ID
+		file := filepath.Join(t.TempDir(), "agent.tokens.json")
+		runCmd(t, file, "connection")
+		if ref == "" {
+			list, _ := tokens.Open(file).List()
+			ref = list[0].ID
+		}
+		if code, _, errOut := runCmd(t, file, "token", "revoke", ref); code != 0 {
+			t.Fatalf("revoke %s: %s", ref, errOut)
+		}
+		if _, err := os.Stat(keyFileOf(file)); err == nil {
+			t.Fatalf("revoking %q left a saved key that no longer works", ref)
+		}
+	}
+}
+
+func TestRevokingAnotherTokenKeepsTheSavedKey(t *testing.T) {
+	file := filepath.Join(t.TempDir(), "agent.tokens.json")
+	runCmd(t, file, "connection")
+	runCmd(t, file, "token", "create", "--name", "central", "--scopes", "read")
+	if code, _, errOut := runCmd(t, file, "token", "revoke", "central"); code != 0 {
+		t.Fatalf("revoke: %s", errOut)
+	}
+	if _, err := os.Stat(keyFileOf(file)); err != nil {
+		t.Fatalf("the saved key went away with an unrelated token: %v", err)
+	}
+}
+
+func TestCreatingTheOpenVMSTokenByHandSavesItsKey(t *testing.T) {
+	file := filepath.Join(t.TempDir(), "agent.tokens.json")
+	runCmd(t, file, "connection")
+	runCmd(t, file, "token", "revoke", "openvms")
+	code, out, errOut := runCmd(t, file, "token", "create", "--name", "openvms", "--scopes", "all")
+	if code != 0 {
+		t.Fatalf("exit %d: %s", code, errOut)
+	}
+	saved, err := os.ReadFile(keyFileOf(file))
+	if err != nil || strings.TrimSpace(string(saved)) != strings.TrimSpace(out) {
+		t.Fatalf("saved %q (%v), printed %q: the file must hold the key that works", saved, err, out)
+	}
+}
