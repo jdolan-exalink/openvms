@@ -24,6 +24,20 @@ func (q *Queries) DeleteServerAgent(ctx context.Context, serverID uuid.UUID) (in
 	return result.RowsAffected(), nil
 }
 
+const deleteServerAgentConnection = `-- name: DeleteServerAgentConnection :execrows
+DELETE FROM server_agents
+WHERE server_id = $1 AND base_url <> ''
+`
+
+// Forgets an agent that was connected by address. An agent installed over SSH is not touched here.
+func (q *Queries) DeleteServerAgentConnection(ctx context.Context, serverID uuid.UUID) (int64, error) {
+	result, err := q.db.Exec(ctx, deleteServerAgentConnection, serverID)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected(), nil
+}
+
 const getServerAgent = `-- name: GetServerAgent :one
 SELECT server_id, tenant_id, host, port, variant, token_sealed, version, updated_at, base_url, request_headers_sealed
 FROM server_agents
@@ -171,6 +185,49 @@ func (q *Queries) UpsertServerAgent(ctx context.Context, arg UpsertServerAgentPa
 		arg.Variant,
 		arg.TokenSealed,
 		arg.Version,
+	)
+	return err
+}
+
+const upsertServerAgentConnection = `-- name: UpsertServerAgentConnection :exec
+INSERT INTO server_agents (server_id, tenant_id, host, port, variant, token_sealed, version, base_url, request_headers_sealed)
+VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
+ON CONFLICT (server_id) DO UPDATE SET
+    tenant_id = EXCLUDED.tenant_id,
+    host = EXCLUDED.host,
+    port = EXCLUDED.port,
+    variant = EXCLUDED.variant,
+    token_sealed = EXCLUDED.token_sealed,
+    version = EXCLUDED.version,
+    base_url = EXCLUDED.base_url,
+    request_headers_sealed = EXCLUDED.request_headers_sealed,
+    updated_at = now()
+`
+
+type UpsertServerAgentConnectionParams struct {
+	ServerID             uuid.UUID
+	TenantID             uuid.UUID
+	Host                 string
+	Port                 int32
+	Variant              string
+	TokenSealed          []byte
+	Version              string
+	BaseUrl              string
+	RequestHeadersSealed []byte
+}
+
+// Registers or replaces an agent that OpenVMS reaches at a stored address (edge agent 0.4.0).
+func (q *Queries) UpsertServerAgentConnection(ctx context.Context, arg UpsertServerAgentConnectionParams) error {
+	_, err := q.db.Exec(ctx, upsertServerAgentConnection,
+		arg.ServerID,
+		arg.TenantID,
+		arg.Host,
+		arg.Port,
+		arg.Variant,
+		arg.TokenSealed,
+		arg.Version,
+		arg.BaseUrl,
+		arg.RequestHeadersSealed,
 	)
 	return err
 }

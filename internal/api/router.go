@@ -71,7 +71,7 @@ func NewRouter(h *Handlers, log *slog.Logger, opts Options) (http.Handler, error
 
 	r := chi.NewRouter()
 	r.Use(credentialInstallHTTPS(opts.CredentialTrustedProxyCIDRs), httpx.RequestID, httpx.ClientAddr(opts.TrustForwardedFor), httpx.Recover(log), httpx.AccessLog(log), httpx.SecurityHeaders, withRequestInfo)
-	r.Use(validateOnvifDiscoveryBody, validateOnvifProbeBody, validateAgentTLSConfigBody, validateAgentInstallBody, validateAgentUpdateBody, limitAgentEnroll(enrollLimiter), limitAgentEnrollBody, limitPasswordRecovery(recoveryLimiter))
+	r.Use(validateOnvifDiscoveryBody, validateOnvifProbeBody, validateAgentTLSConfigBody, limitAgentConnectionBody, validateAgentInstallBody, validateAgentUpdateBody, limitAgentEnroll(enrollLimiter), limitAgentEnrollBody, limitPasswordRecovery(recoveryLimiter))
 	if opts.Queries != nil {
 		r.Use(Authenticate(opts.Queries, AuthOptions{IdleTimeout: opts.SessionIdle}))
 	}
@@ -390,6 +390,22 @@ func validateAgentInstallBody(next http.Handler) http.Handler {
 			return
 		}
 		r.Body = io.NopCloser(bytes.NewReader(limited))
+		next.ServeHTTP(w, r)
+	})
+}
+
+// agentConnectionRequestMaxBytes covers a token, a few gateway headers and a certificate bundle of
+// up to 64 KiB, with room for the JSON around them.
+const agentConnectionRequestMaxBytes = 128 << 10
+
+// limitAgentConnectionBody bounds the request that carries the agent token. The strict handler would
+// otherwise decode a body of any size before the service could look at it.
+func limitAgentConnectionBody(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		parts := strings.Split(strings.Trim(r.URL.Path, "/"), "/")
+		if r.Method == http.MethodPut && len(parts) == 6 && parts[0] == "api" && parts[1] == "v1" && parts[2] == "servers" && parts[4] == "agent" && parts[5] == "connection" {
+			r.Body = http.MaxBytesReader(w, r.Body, agentConnectionRequestMaxBytes)
+		}
 		next.ServeHTTP(w, r)
 	})
 }

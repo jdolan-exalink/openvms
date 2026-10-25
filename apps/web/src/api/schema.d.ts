@@ -545,6 +545,36 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/servers/{serverId}/agent/connection": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                serverId: string;
+            };
+            cookie?: never;
+        };
+        /**
+         * How the server's agent is connected
+         * @description Requires servers.manage. Says whether the agent was connected by address and at which one; never returns the token, the headers or the certificate.
+         */
+        get: operations["getServerAgentConnection"];
+        /**
+         * Connect an agent that already runs at an address OpenVMS can reach
+         * @description Requires servers.manage and servers.config.secrets. OpenVMS calls the address with the token before storing anything, so a mistake cannot replace a working registration. The token and the headers are stored sealed and never returned. The address may be a LAN or VPN address, or a name published through a tunnel; OpenVMS never connects to this host, link-local or multicast addresses, and uses https for public ones.
+         */
+        put: operations["connectServerAgent"];
+        post?: never;
+        /**
+         * Forget an agent that was connected by address
+         * @description Requires servers.manage and servers.config.secrets. An agent installed over SSH is not affected; remove it with the uninstall flow.
+         */
+        delete: operations["disconnectServerAgent"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/servers/{serverId}/agent/install": {
         parameters: {
             query?: never;
@@ -4001,6 +4031,39 @@ export interface components {
              */
             version_state?: "up_to_date" | "outdated" | "unknown";
         };
+        ServerAgentConnectRequest: {
+            /** @description Where OpenVMS reaches the agent: http://host:port on a LAN or VPN, or https://name for a published agent. No path, user or query. */
+            url: string;
+            /** @description A token created on the agent (openvms-agent connection). Stored sealed. */
+            token: string;
+            /** @description Extra headers a gateway in front of the agent asks for (a Zero Trust service token). Stored sealed. Authorization and Host cannot be set. */
+            headers?: {
+                [key: string]: string;
+            };
+            /** @description Public certificate authority of a private https agent. Applies to this address only. */
+            ca_pem?: string;
+            /** @description Confirms replacing an agent that is already registered for the server. */
+            replace_existing?: boolean;
+        };
+        ServerAgentConnectResult: {
+            base_url: string;
+            version: string;
+            /** @description What the token may do on the agent, as far as OpenVMS could tell without changing anything. update cannot be probed. */
+            scopes: {
+                read: boolean;
+                /** @description Collecting plate readings. */
+                events: boolean;
+                /** @description ONVIF operations and the camera registry. */
+                control: boolean;
+            };
+        };
+        ServerAgentConnection: {
+            /** @description True when the agent was connected by address. */
+            connected: boolean;
+            base_url?: string;
+            has_headers: boolean;
+            has_custom_ca: boolean;
+        };
         ServerAgentTLSConfig: {
             secure_port: number;
             /** @enum {string} */
@@ -6526,6 +6589,15 @@ export interface components {
                 "application/json": components["schemas"]["Error"];
             };
         };
+        /** @description The agent could not be reached (502) or did not accept the connection (422); the code says which */
+        AgentConnectFailed: {
+            headers: {
+                [name: string]: unknown;
+            };
+            content: {
+                "application/json": components["schemas"]["Error"];
+            };
+        };
         /** @description The internal WhatsApp service (WAHA) could not be reached */
         WahaUnavailable: {
             headers: {
@@ -7522,6 +7594,87 @@ export interface operations {
         requestBody?: never;
         responses: {
             /** @description TLS configuration deleted */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+        };
+    };
+    getServerAgentConnection: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                serverId: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Connection state */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ServerAgentConnection"];
+                };
+            };
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+        };
+    };
+    connectServerAgent: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                serverId: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ServerAgentConnectRequest"];
+            };
+        };
+        responses: {
+            /** @description The agent answered and was registered */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ServerAgentConnectResult"];
+                };
+            };
+            400: components["responses"]["BadRequest"];
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+            409: components["responses"]["Conflict"];
+            422: components["responses"]["AgentConnectFailed"];
+            502: components["responses"]["AgentConnectFailed"];
+        };
+    };
+    disconnectServerAgent: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                serverId: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The registration was removed */
             204: {
                 headers: {
                     [name: string]: unknown;

@@ -10,6 +10,7 @@ import { BodyClassifySwitch } from "@/components/BodyClassifySwitch";
 import { ConfirmDialog } from "@/components/ConfirmDialog";
 import { Icon } from "@/components/Icon";
 import { Modal } from "@/components/Modal";
+import { ConnectAgentControls } from "@/components/servers/ConnectAgentControls";
 import { ServerFrigateConfigModal } from "@/components/servers/ServerFrigateConfigModal";
 import { calculateAttainableDays, calculateUsableStorage, formatBytes } from "@/components/servers/storageRetention";
 import { Button, Empty, ErrorNote, Field, PageHeader, Pill, Select, StatusBadge, Summary, Switch, TextInput } from "@/components/ui";
@@ -149,6 +150,7 @@ export function Servers() {
               </dl>
               <div className="flex flex-wrap items-start justify-end gap-2">
                 {canInstallAgent(me.data, s) && <AgentSSHControls key={s.id} server={s} />}
+                {canInstallAgent(me.data, s) && <ConnectAgentControls key={`connect-${s.id}`} server={s} />}
                 {hasServerInstallPermission(me.data, "servers.manage", s) && !hasServerInstallPermission(me.data, "servers.config.secrets", s) && (
                   <span role="note" className="text-xs text-muted">{t("servers.agentInstallPermissionRequired")}</span>
                 )}

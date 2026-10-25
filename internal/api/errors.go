@@ -73,6 +73,14 @@ func statusFor(err error) (int, string, string) {
 		return http.StatusConflict, "conflict", "agent TLS configuration changed; refresh server state before retrying"
 	case errors.Is(err, provision.ErrAgentUnprovisioned):
 		return http.StatusNotFound, "agent_unprovisioned", "server has no registered agent"
+	case errors.Is(err, provision.ErrAgentConnectUnreachable):
+		return http.StatusBadGateway, "agent_unreachable", "OpenVMS could not reach the agent at that address"
+	case errors.Is(err, provision.ErrAgentConnectUnauthorized):
+		return http.StatusUnprocessableEntity, "agent_token_rejected", "the agent refused the token"
+	case errors.Is(err, provision.ErrAgentConnectForbidden):
+		return http.StatusUnprocessableEntity, "agent_token_scope", "the token is valid but does not have the read scope"
+	case errors.Is(err, provision.ErrAgentConnectNotAnAgent):
+		return http.StatusUnprocessableEntity, "not_an_agent", "that address answered but it is not an OpenVMS agent"
 	case errors.Is(err, provision.ErrAgentDiscoveryUnsupported):
 		return http.StatusConflict, "discovery_unsupported", "agent discovery is unsupported or the interface is not allowed"
 	case errors.Is(err, provision.ErrAgentDiscoveryUnknown):

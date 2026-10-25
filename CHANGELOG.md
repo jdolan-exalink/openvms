@@ -23,6 +23,9 @@ The version of OpenVMS lives in `VERSION` and the version of the edge agent in
   when the new one does not confirm; API tokens with scopes created from the agent console; agents
   reachable through a stored base URL (VPN or tunnel) with a guard on where OpenVMS may connect; agents
   that cannot call OpenVMS (NAT) install and are polled.
+- Agent 0.4.0: connect an agent that already runs at an address OpenVMS can reach (LAN, VPN or a tunnel)
+  from the server row, the API or `vmsctl agent-connect`: OpenVMS checks the address and the token first,
+  seals them, and says what the token allows.
 - `make install` takes the first administrator password from `OPENVMS_ADMIN_PASSWORD`
   (`OPENVMS_ADMIN_PASSWORD='...' make install`) and writes it to the new `.env` without
   printing it. It validates the password up front: one shorter than 8 characters aborts before
