@@ -1,5 +1,7 @@
 # Testing the agent installer on a real host
 
+Spanish version: [real-host-test.es.md](real-host-test.es.md).
+
 A checklist for the first run of agent 0.4.0 on a real machine (a Frigate host, ideally behind NAT).
 Nothing here has been run on a real host yet: record what you see, especially where it differs.
 
