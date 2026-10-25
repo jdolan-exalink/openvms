@@ -2,6 +2,7 @@ package main
 
 import (
 	"bytes"
+	"os"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -138,5 +139,77 @@ func TestTokenFlagsMayComeBeforeOrAfterTheName(t *testing.T) {
 	}
 	if list, _ := tokens.Open(file).List(); len(list) != 1 || list[0].Name != "a" {
 		t.Fatalf("tokens = %+v", list)
+	}
+}
+
+func keyFileOf(tokensFile string) string {
+	return filepath.Join(filepath.Dir(tokensFile), "openvms.apikey")
+}
+
+func TestConnectionKeepsTheKeyInAPrivateFileNextToTheTokens(t *testing.T) {
+	file := filepath.Join(t.TempDir(), "agent.tokens.json")
+	listLANAddresses = func() []string { return []string{"10.8.0.5", "192.168.1.20"} }
+	t.Cleanup(func() { listLANAddresses = lanAddresses })
+
+	code, out, errOut := runCmd(t, file, "connection", "--port", "7419")
+	if code != 0 {
+		t.Fatalf("exit %d: %s", code, errOut)
+	}
+	saved, err := os.ReadFile(keyFileOf(file))
+	if err != nil {
+		t.Fatalf("the key was not saved: %v", err)
+	}
+	key := strings.TrimSpace(string(saved))
+	if !strings.HasPrefix(key, "ovmsa_") || !strings.Contains(out, key) {
+		t.Fatalf("saved %q, printed %q: they must be the same key", key, out)
+	}
+	if info, _ := os.Stat(keyFileOf(file)); info.Mode().Perm() != 0o600 {
+		t.Fatalf("key file mode = %v, want 0600", info.Mode().Perm())
+	}
+	if _, ok := tokens.Open(file).Authenticate(key, tokens.ScopeRead, cmdNow()); !ok {
+		t.Fatal("the saved key does not authenticate")
+	}
+	for _, want := range []string{"http://10.8.0.5:7419", "http://192.168.1.20:7419", keyFileOf(file), "Conectar agente", "openvms-agent token rotate openvms"} {
+		if !strings.Contains(out, want) {
+			t.Errorf("output lacks %q:\n%s", want, out)
+		}
+	}
+}
+
+func TestConnectionStillPrintsTheKeyWhenItCannotBeSaved(t *testing.T) {
+	dir := t.TempDir()
+	file := filepath.Join(dir, "agent.tokens.json")
+	if err := os.Mkdir(keyFileOf(file), 0o700); err != nil { // a directory where the file should go
+		t.Fatal(err)
+	}
+	code, out, errOut := runCmd(t, file, "connection")
+	if code != 0 || !strings.Contains(out, "ovmsa_") {
+		t.Fatalf("exit %d, out %q: the token exists, so the key must still reach the operator", code, out)
+	}
+	if !strings.Contains(errOut, "could not save") {
+		t.Fatalf("stderr = %q, want a warning that the key was not saved", errOut)
+	}
+}
+
+func TestRotatingTheOpenVMSTokenRefreshesItsSavedKey(t *testing.T) {
+	file := filepath.Join(t.TempDir(), "agent.tokens.json")
+	runCmd(t, file, "connection")
+	before, _ := os.ReadFile(keyFileOf(file))
+	code, out, errOut := runCmd(t, file, "token", "rotate", "openvms")
+	if code != 0 {
+		t.Fatalf("exit %d: %s", code, errOut)
+	}
+	after, _ := os.ReadFile(keyFileOf(file))
+	if string(after) == string(before) || strings.TrimSpace(string(after)) != strings.TrimSpace(out) {
+		t.Fatalf("saved key not refreshed: before %q after %q printed %q", before, after, out)
+	}
+}
+
+func TestRotatingAnotherTokenNeverCreatesTheKeyFile(t *testing.T) {
+	file := filepath.Join(t.TempDir(), "agent.tokens.json")
+	runCmd(t, file, "token", "create", "--name", "central", "--scopes", "read")
+	runCmd(t, file, "token", "rotate", "central")
+	if _, err := os.Stat(keyFileOf(file)); err == nil {
+		t.Fatal("a key file appeared for a token that is not the OpenVMS one")
 	}
 }

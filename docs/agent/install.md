@@ -31,16 +31,30 @@ curl -fsSL <release>/install-agent.sh | sudo bash -s -- --port 7419
 3. Creates `/etc/openvms/agent.token` the first time (random, `0600`, never printed and never replaced),
    `/etc/openvms/agent.env`, `/var/lib/openvms-agent`, and the `openvms-agent` systemd unit; starts it
    and waits for it to answer.
-4. Creates the console token named `openvms` and prints what to enter in OpenVMS:
+4. Creates the console token named `openvms`, keeps its key in `/etc/openvms/openvms.apikey` (root only,
+   mode `0600`) and prints what to enter in OpenVMS:
 
 ```text
 OpenVMS agent connection
-  Agent version  0.4.0
-  Address        http://10.0.15.2:7419
-                 (use the address OpenVMS reaches: a VPN address, or https://name if you publish it through a tunnel)
-  Token          ovmsa_...
-Copy the token now; it will not be shown again.
+  Agent version  0.4.2
+  Key            ovmsa_...
+  Key saved in   /etc/openvms/openvms.apikey (readable by root only)
+  Addresses      this host answers on:
+                   http://10.8.0.5:7419
+                   http://192.168.1.20:7419
+
+Next steps, in OpenVMS
+  1. Servers > the server > "Conectar agente".
+  2. Address: the one OpenVMS reaches (a VPN address, or https://name if you publish the port through a tunnel).
+  3. Key: the one above. OpenVMS checks the address and the key before saving and shows what the key allows.
+
+This host never calls OpenVMS: only port 7419 has to be reachable from OpenVMS.
+Lost the key?  cat /etc/openvms/openvms.apikey     New key?  openvms-agent token rotate openvms
 ```
+
+The key file is the only place the key is readable again; the agent keeps just a hash of it. Rotating the
+`openvms` token (`openvms-agent token rotate openvms`) rewrites the file, so it never holds a key that no
+longer works. An agent installed from OpenVMS over SSH is connected automatically and needs none of this.
 
 Running it again is an **upgrade in place**: same tokens, same configuration. If the new version does not
 answer within 30 seconds the script puts the previous binary back and says so; only a healthy upgrade

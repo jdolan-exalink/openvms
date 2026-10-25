@@ -46,6 +46,10 @@ grep -q 'ovmsa_' <<<"$out" || fail "the OpenVMS token was not printed: $out"
 secret=$(grep -o 'ovmsa_[0-9a-f_]*' <<<"$out" | head -1)
 [[ -n "$secret" ]] || fail "no token in the output"
 if grep -q "$(cat "$p1/etc/openvms/agent.token")" <<<"$out"; then fail "the legacy agent token must never be printed"; fi
+keyfile="$p1/etc/openvms/openvms.apikey"
+[[ "$(cat "$keyfile" 2>/dev/null)" == "$secret" ]] || fail "the printed key was not saved in $keyfile"
+[[ $(stat -c %a "$keyfile") == 600 ]] || fail "the key file must be 0600"
+grep -q 'Conectar agente' <<<"$out" || fail "the output does not say where to enter the key: $out"
 
 # 2. Re-running is an upgrade in place: the same token file, the same OpenVMS token, no second one.
 legacy_before=$(cat "$p1/etc/openvms/agent.token")
@@ -53,6 +57,8 @@ out2=$(run "$p1" --version "$version" 2>&1) || fail "second run failed: $out2"
 [[ "$(cat "$p1/etc/openvms/agent.token")" == "$legacy_before" ]] || fail "re-running changed the agent token"
 if grep -q 'ovmsa_[0-9a-f]\{12\}_[0-9a-f]\{64\}' <<<"$out2"; then fail "re-running printed a new OpenVMS token"; fi
 grep -qi 'token rotate openvms' <<<"$out2" || fail "re-running should say how to get a new token: $out2"
+grep -q 'openvms.apikey' <<<"$out2" || fail "re-running should say where the saved key is: $out2"
+[[ "$(cat "$keyfile")" == "$secret" ]] || fail "re-running changed the saved key"
 n=$("$bin" token list --file "$p1/etc/openvms/agent.tokens.json" | grep -c ' openvms ')
 [[ "$n" == 1 ]] || fail "expected exactly one openvms token, found $n"
 
