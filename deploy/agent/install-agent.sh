@@ -228,10 +228,13 @@ if ((upgrading)); then say "Upgraded to $VERSION (the previous binary is kept as
 if conn=$("$BIN" connection --port "$PORT" --file "$CONF_DIR/agent.tokens.json" 2>&1); then
   say ""
   say "$conn"
+elif [[ -s "$CONF_DIR/openvms.apikey" ]]; then
   say ""
-  say "In OpenVMS, add this agent to the server (address and token above)."
+  say "The OpenVMS key already exists on this host: sudo cat $CONF_DIR/openvms.apikey"
+  say "In OpenVMS: Servers > the server > \"Conectar agente\" (address of this host, port $PORT, and that key)."
+  say "To replace it: sudo openvms-agent token rotate openvms"
 else
   say ""
-  say "An OpenVMS token already exists on this host and is not shown again."
-  say "To get a new one: openvms-agent token rotate openvms"
+  say "An OpenVMS token already exists on this host and its key was not saved here."
+  say "To get a new one: sudo openvms-agent token rotate openvms"
 fi

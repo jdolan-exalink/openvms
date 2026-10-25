@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"io"
 	"net"
+	"os"
 	"path/filepath"
 	"strings"
 	"text/tabwriter"
@@ -165,6 +166,15 @@ func runTokenCommand(args []string, stdout, stderr io.Writer, now func() time.Ti
 			return 1
 		}
 		fmt.Fprintf(stderr, "Rotated token %q (%s). The old secret stopped working; copy the new one now.\n", tok.Name, tok.ID)
+		if tok.Name == openvmsTokenName {
+			// The saved key must never keep a secret that no longer works.
+			path := openvmsKeyFile(*file)
+			if err := saveKeyFile(path, secret); err != nil {
+				fmt.Fprintf(stderr, "could not save the new key to %s: %v\n", path, err)
+			} else {
+				fmt.Fprintf(stderr, "The key in %s was updated.\n", path)
+			}
+		}
 		fmt.Fprintln(stdout, secret)
 		return 0
 	}
@@ -172,39 +182,96 @@ func runTokenCommand(args []string, stdout, stderr io.Writer, now func() time.Ti
 	return 2
 }
 
-// runConnectionCommand creates the token OpenVMS uses to reach this agent and prints what to enter
-// in OpenVMS. It never replaces an existing one: a second run points at `token rotate`.
+// openvmsTokenName is the token OpenVMS uses to reach this agent.
+const openvmsTokenName = "openvms"
+
+// openvmsKeyFile is where the OpenVMS key is kept on the host: next to the tokens file, readable by
+// root only. It lets the operator read the key again instead of rotating it when it is lost.
+func openvmsKeyFile(tokensPath string) string {
+	if tokensPath == "" {
+		tokensPath = tokensFile()
+	}
+	return filepath.Join(filepath.Dir(tokensPath), "openvms.apikey")
+}
+
+// saveKeyFile writes the key with mode 0600 through a temporary file, so a failure never leaves a
+// half-written or world-readable key behind.
+func saveKeyFile(path, secret string) error {
+	tmp, err := os.CreateTemp(filepath.Dir(path), ".openvms.apikey.*")
+	if err != nil {
+		return err
+	}
+	defer os.Remove(tmp.Name()) //nolint:errcheck // best effort; a successful rename already moved it
+	if err := tmp.Chmod(0o600); err != nil {
+		_ = tmp.Close()
+		return err
+	}
+	if _, err := tmp.WriteString(secret + "\n"); err != nil {
+		_ = tmp.Close()
+		return err
+	}
+	if err := tmp.Close(); err != nil {
+		return err
+	}
+	return os.Rename(tmp.Name(), path)
+}
+
+// runConnectionCommand creates the token OpenVMS uses to reach this agent, keeps its key in a private
+// file and prints what to enter in OpenVMS. It never replaces an existing one: a second run points at
+// `token rotate`.
 func runConnectionCommand(args []string, stdout, stderr io.Writer, now func() time.Time) int {
 	fs, file := newConsoleFlags("connection", stderr)
 	port := fs.Int("port", 7419, "port the agent listens on")
 	if err := fs.Parse(args); err != nil {
 		return 2
 	}
-	secret, _, err := openTokens(*file).Create("openvms", tokens.AllScopes, 0, now())
+	secret, _, err := openTokens(*file).Create(openvmsTokenName, tokens.AllScopes, 0, now())
 	if err != nil {
 		fmt.Fprintln(stderr, "connection:", err)
-		fmt.Fprintln(stderr, `If the "openvms" token exists, replace its secret with: openvms-agent token rotate openvms`)
+		fmt.Fprintln(stderr, `If the "openvms" token exists, its key is in `+openvmsKeyFile(*file)+`; to replace it: openvms-agent token rotate openvms`)
 		return 1
 	}
-	host := firstLANAddress()
+	keyPath := openvmsKeyFile(*file)
+	saveErr := saveKeyFile(keyPath, secret)
+	if saveErr != nil {
+		// The token exists now: the operator must still get the key.
+		fmt.Fprintf(stderr, "could not save the key to %s: %v\n", keyPath, saveErr)
+	}
+	addrs := listLANAddresses()
 	fmt.Fprintf(stdout, "OpenVMS agent connection\n")
 	fmt.Fprintf(stdout, "  Agent version  %s\n", agent.Version)
-	fmt.Fprintf(stdout, "  Address        http://%s\n", net.JoinHostPort(host, fmt.Sprint(*port)))
-	fmt.Fprintf(stdout, "                 (use the address OpenVMS reaches: a VPN address, or https://name if you publish it through a tunnel)\n")
-	fmt.Fprintf(stdout, "  Token          %s\n", secret)
-	fmt.Fprintf(stdout, "Copy the token now; it will not be shown again.\n")
+	fmt.Fprintf(stdout, "  Key            %s\n", secret)
+	if saveErr == nil {
+		fmt.Fprintf(stdout, "  Key saved in   %s (readable by root only)\n", keyPath)
+	}
+	fmt.Fprintf(stdout, "  Addresses      this host answers on:\n")
+	for _, a := range addrs {
+		fmt.Fprintf(stdout, "                   http://%s\n", net.JoinHostPort(a, fmt.Sprint(*port)))
+	}
+	fmt.Fprintf(stdout, "\nNext steps, in OpenVMS\n")
+	fmt.Fprintf(stdout, "  1. Servers > the server > \"Conectar agente\".\n")
+	fmt.Fprintf(stdout, "  2. Address: the one OpenVMS reaches (a VPN address, or https://name if you publish the port through a tunnel).\n")
+	fmt.Fprintf(stdout, "  3. Key: the one above. OpenVMS checks the address and the key before saving and shows what the key allows.\n")
+	fmt.Fprintf(stdout, "\nThis host never calls OpenVMS: only port %d has to be reachable from OpenVMS.\n", *port)
+	fmt.Fprintf(stdout, "Lost the key?  cat %s     New key?  openvms-agent token rotate openvms\n", keyPath)
 	return 0
 }
 
-// firstLANAddress returns this host's first non-loopback IPv4 address, or a placeholder.
-func firstLANAddress() string {
-	addrs, err := net.InterfaceAddrs()
-	if err == nil {
+// listLANAddresses is replaced in tests.
+var listLANAddresses = lanAddresses
+
+// lanAddresses returns this host's non-loopback IPv4 addresses, or a placeholder when there is none.
+func lanAddresses() []string {
+	var out []string
+	if addrs, err := net.InterfaceAddrs(); err == nil {
 		for _, a := range addrs {
 			if ipnet, ok := a.(*net.IPNet); ok && !ipnet.IP.IsLoopback() && ipnet.IP.To4() != nil {
-				return ipnet.IP.String()
+				out = append(out, ipnet.IP.String())
 			}
 		}
 	}
-	return "<this-host>"
+	if len(out) == 0 {
+		return []string{"<this-host>"}
+	}
+	return out
 }
