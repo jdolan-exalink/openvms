@@ -20,6 +20,12 @@ import (
 // already used or has expired (the API answers all three the same way).
 var ErrTokenRejected = errors.New("the API rejected the enrollment token: it is invalid, already used or expired")
 
+// ErrEnrollUnavailable marks an enrollment that failed for a reason that may pass by itself: the
+// API cannot be reached (an agent behind NAT, a VPN that is down) or answered with a server error.
+// Anything the operator has to fix (a refused token, a rejected request, an unusable reply) is not
+// wrapped in it.
+var ErrEnrollUnavailable = errors.New("the OpenVMS API is not reachable for enrollment")
+
 const (
 	enrollPath       = "/api/v1/agent/enroll"
 	maxEnrollReply   = 1 << 20
@@ -92,18 +98,20 @@ func Enroll(ctx context.Context, hc *http.Client, enrollURL, token string) (*Cre
 	req.Header.Set("Content-Type", "application/json")
 	resp, err := hc.Do(req)
 	if err != nil {
-		return nil, fmt.Errorf("reach the enrollment endpoint: %w", redactURLError(err))
+		return nil, fmt.Errorf("reach the enrollment endpoint: %w: %w", ErrEnrollUnavailable, redactURLError(err))
 	}
 	defer resp.Body.Close()
 	reply, err := io.ReadAll(io.LimitReader(resp.Body, maxEnrollReply))
 	if err != nil {
-		return nil, fmt.Errorf("read the enrollment reply: %w", err)
+		return nil, fmt.Errorf("read the enrollment reply: %w: %w", ErrEnrollUnavailable, err)
 	}
 	switch {
 	case resp.StatusCode == http.StatusUnauthorized:
 		return nil, ErrTokenRejected
 	case resp.StatusCode >= 300 && resp.StatusCode < 400:
 		return nil, fmt.Errorf("the enrollment endpoint redirected (HTTP %d); the token is not sent to redirect targets, so set the API URL to the final address", resp.StatusCode)
+	case resp.StatusCode >= 500:
+		return nil, fmt.Errorf("enrollment failed: %w: HTTP %d: %s", ErrEnrollUnavailable, resp.StatusCode, echo(reply))
 	case resp.StatusCode != http.StatusOK:
 		return nil, fmt.Errorf("enrollment failed: HTTP %d: %s", resp.StatusCode, echo(reply))
 	}

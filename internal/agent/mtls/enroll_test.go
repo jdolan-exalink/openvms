@@ -416,3 +416,47 @@ func TestErrTokenRejectedIsLibraryNeutral(t *testing.T) {
 		t.Fatalf("the library error hardcodes deployment details: %q", msg)
 	}
 }
+
+// Only a failure that may pass by itself is "unavailable": an unreachable API or a server error.
+// A refused token, a rejected request or an unusable reply will not get better by waiting.
+func TestEnrollSeparatesWhatMayPassFromWhatNeedsTheOperator(t *testing.T) {
+	status := func(code int) *httptest.Server {
+		return httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+			http.Error(w, "x", code)
+		}))
+	}
+	closed := httptest.NewTLSServer(http.HandlerFunc(func(http.ResponseWriter, *http.Request) {}))
+	closedURL, closedClient := closed.URL, closed.Client()
+	closed.Close() // connection refused
+
+	cases := []struct {
+		name        string
+		url         string
+		client      *http.Client
+		unavailable bool
+	}{
+		{"nothing listening", closedURL, closedClient, true},
+		{"server error", "", nil, true},
+		{"bad gateway", "", nil, true},
+		{"token refused", "", nil, false},
+		{"bad request", "", nil, false},
+	}
+	codes := map[string]int{"server error": 500, "bad gateway": 502, "token refused": 401, "bad request": 400}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			url, client := tc.url, tc.client
+			if url == "" {
+				srv := status(codes[tc.name])
+				defer srv.Close()
+				url, client = srv.URL, srv.Client()
+			}
+			_, err := Enroll(context.Background(), client, url, "tok")
+			if err == nil {
+				t.Fatal("enrolled")
+			}
+			if got := errors.Is(err, ErrEnrollUnavailable); got != tc.unavailable {
+				t.Fatalf("errors.Is(err, ErrEnrollUnavailable) = %v, want %v (err: %v)", got, tc.unavailable, err)
+			}
+		})
+	}
+}
