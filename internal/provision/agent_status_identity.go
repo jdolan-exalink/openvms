@@ -50,7 +50,27 @@ func classifyAgentBinaryStatus(installed bool, available, observed *agent.Binary
 	if strings.EqualFold(available.SHA256, observed.SHA256) {
 		return agentBinaryStatusResult{Status: AgentBinaryCurrent, Outdated: boolPointer(false)}
 	}
+	if agentVersionIsNewer(observed.Version, available.Version) {
+		// The bundled binary would be a downgrade, so there is nothing to update.
+		return agentBinaryStatusResult{Status: AgentBinaryCurrent, Outdated: boolPointer(false)}
+	}
 	return agentBinaryStatusResult{Status: AgentBinaryUpdateAvailable, Outdated: boolPointer(true), UpgradeAvailable: true}
+}
+
+// agentVersionIsNewer reports whether version is strictly newer than other; both must be
+// MAJOR.MINOR.PATCH, otherwise it is false and the digest mismatch decides.
+func agentVersionIsNewer(version, other string) bool {
+	v, ok := parseAgentSemver(version)
+	o, okOther := parseAgentSemver(other)
+	if !ok || !okOther {
+		return false
+	}
+	for i := range v {
+		if v[i] != o[i] {
+			return v[i] > o[i]
+		}
+	}
+	return false
 }
 
 func boolPointer(value bool) *bool { return &value }
