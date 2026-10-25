@@ -1,5 +1,6 @@
 import { useT } from "@/i18n";
 import { agentInstallFailureText, safeAgentVersion } from "@/lib/agentJobs/failureText";
+import { isNewerAgentVersion } from "@/lib/agentVersion";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Activity, AlertTriangle, ArrowDown, ArrowUp, Camera, Check, Copy, Pencil, Plus, RefreshCw, RotateCcw, Settings, Terminal, Trash2 } from "lucide-react";
 import { Link, useSearch } from "@tanstack/react-router";
@@ -1606,13 +1607,14 @@ function AgentMonitor({ serverId }: { serverId: string }) {
 
   const currentVersion = metrics.binary_observed?.version || metrics.version || "—";
   const newVersion = metrics.binary_available?.version;
-  const hasUpdate = Boolean(metrics.binary_upgrade_available || metrics.binary_outdated);
+  // Green only for a verified current agent, yellow only for a known newer bundled version.
+  const versionTone = isAgentBinaryCurrent(metrics) ? "ok" : metrics.binary_status === "update_available" || metrics.binary_outdated === true ? "warn" : "muted";
 
   return (
     <div className="mt-2 flex min-w-48 flex-col gap-1 whitespace-normal text-xs">
       {!metrics.installed ? (
         <span className="font-sans text-muted">{t("servers.agentMissing")}</span>
-      ) : hasUpdate ? (
+      ) : versionTone === "warn" ? (
         <span
           role="status"
           aria-label={t("servers.agentBinaryOutdatedStatus")}
@@ -1629,7 +1631,7 @@ function AgentMonitor({ serverId }: { serverId: string }) {
           )}
         </span>
       ) : (
-        <span className="font-sans text-muted">
+        <span className={cn("font-sans", versionTone === "ok" ? "font-semibold text-ok" : "text-muted")} data-version-tone={versionTone}>
           {t("servers.agent")}: {currentVersion}
         </span>
       )}
@@ -2037,7 +2039,8 @@ function isAgentBinaryCurrent(agent: Schemas["ServerAgent"]) {
   const availableArchitecture = agent.binary_available?.architecture;
   const supportedArchitecture = (architecture: string | undefined) => architecture === "amd64" || architecture === "arm64";
   return agent.installed && agent.binary_status === "current" && agent.binary_outdated === false &&
-    !!observed && !!available && /^[a-f0-9]{64}$/i.test(observed) && observed.toLowerCase() === available.toLowerCase() &&
+    !!observed && !!available && /^[a-f0-9]{64}$/i.test(observed) &&
+    (observed.toLowerCase() === available.toLowerCase() || isNewerAgentVersion(agent.binary_observed?.version, agent.binary_available?.version)) &&
     supportedArchitecture(observedArchitecture) && supportedArchitecture(availableArchitecture) && observedArchitecture === availableArchitecture;
 }
 
