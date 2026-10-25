@@ -32,7 +32,8 @@ curl -fsSL <release>/install-agent.sh | sudo bash -s -- --port 7419
    `/etc/openvms/agent.env`, `/var/lib/openvms-agent`, and the `openvms-agent` systemd unit; starts it
    and waits for it to answer.
 4. Creates the console token named `openvms`, keeps its key in `/etc/openvms/openvms.apikey` (root only,
-   mode `0600`) and prints what to enter in OpenVMS:
+   mode `0600`; `token rotate`, `token revoke` and `token create` of that name keep the file in step) and
+   prints what to enter in OpenVMS:
 
 ```text
 OpenVMS agent connection
