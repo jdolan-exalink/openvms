@@ -34,6 +34,7 @@ The version of OpenVMS lives in `VERSION` and the version of the edge agent in
 
 ### Changed
 
+- Agent 0.4.1: The agent keeps serving its API and retries when it cannot reach OpenVMS to enroll, instead of exiting in a restart loop
 - The simulated Frigates (`frigate-helvecia`, `frigate-cayasta`, with their demo passwords)
   moved from `docker-compose.yml` to the development-only `docker-compose.dev.yml`, so a
   production install no longer contains mock data; `make dev` uses the dev file.

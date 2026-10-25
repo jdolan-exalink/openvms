@@ -20,6 +20,7 @@ import (
 	"time"
 
 	"github.com/jdolan-exalink/openvms/internal/agent"
+	"github.com/jdolan-exalink/openvms/internal/agent/mtls"
 	"github.com/jdolan-exalink/openvms/internal/agent/onvifdiscover"
 	"github.com/jdolan-exalink/openvms/internal/agent/provisionlpr"
 	"github.com/jdolan-exalink/openvms/internal/agent/tokens"
@@ -163,29 +164,35 @@ func main() {
 
 	// Mutual TLS is opt-in (OPENVMS_AGENT_GRPC_ADDR). When on, the worker dials the agent
 	// listener with the enrolled certificate instead of the control address below.
-	mtlsCfg, err := loadMTLS(ctx, os.Getenv, log, time.Now)
-	if err != nil {
+	// The first attempt is short: the API is served only after this point, and an agent that cannot
+	// reach OpenVMS must not wait a full enrollment timeout before answering OpenVMS.
+	firstTry, cancelFirstTry := context.WithTimeout(ctx, mtlsFirstTry)
+	mtlsCfg, err := loadMTLS(firstTry, os.Getenv, log, time.Now)
+	cancelFirstTry()
+	mtlsPending := errors.Is(err, mtls.ErrEnrollUnavailable)
+	if err != nil && !mtlsPending {
 		log.Error("invalid agent mTLS configuration", "error", err)
 		os.Exit(1)
 	}
 	serverAddr := env("OPENVMS_SERVER_ADDR", env("OPENVMS_CONTROL_ADDR", ""))
-	if mtlsCfg != nil {
+	if mtlsPending {
+		// An agent that cannot reach OpenVMS (behind NAT) must still serve its API: OpenVMS is the one
+		// that connects. The enrollment is retried in the background.
+		log.Warn("cannot enroll with the OpenVMS API yet; serving the agent API and retrying", "error", err)
+		go func() {
+			cfg, err := retryMTLS(ctx, func() (*mtlsSettings, error) { return loadMTLS(ctx, os.Getenv, log, time.Now) }, log, sleepContext)
+			switch {
+			case err == nil:
+				startMTLSWorker(ctx, cfg, sampler, log)
+			case !errors.Is(err, context.Canceled):
+				log.Error("mTLS enrollment stopped; fix the configuration and restart the agent", "error", err)
+			}
+		}()
+	} else if mtlsCfg != nil {
 		if serverAddr != "" {
 			log.Warn("OPENVMS_AGENT_GRPC_ADDR is set: ignoring OPENVMS_SERVER_ADDR / OPENVMS_CONTROL_ADDR", "ignored", serverAddr)
 		}
-		worker := agent.NewWorker(agent.WorkerConfig{
-			ControlGRPCAddr: mtlsCfg.Addr,
-			Sampler:         sampler,
-			Log:             log,
-			TLSCAFile:       mtlsCfg.CAFile,
-			TLSServerName:   mtlsCfg.ServerName,
-			MTLS:            mtlsCfg.Manager,
-		})
-		go func() {
-			if err := worker.Run(ctx); err != nil && !errors.Is(err, context.Canceled) {
-				log.Warn("heartbeat worker stopped", "error", err)
-			}
-		}()
+		startMTLSWorker(ctx, mtlsCfg, sampler, log)
 	} else if serverAddr != "" {
 		nodeID := env("OPENVMS_NODE_ID", "node-auto")
 		controlTLS, controlCA, controlServerName, err := controlTLSFromEnv(os.Getenv)
@@ -468,4 +475,21 @@ func mountProvisionLPR(mux *http.ServeMux, auth *authenticator, lprHandler http.
 	mux.Handle("GET /v1/provision-lpr/status", events)
 	mux.Handle("/v1/provision-lpr/events", events)
 	mux.Handle("/v1/provision-lpr/events/", events)
+}
+
+// startMTLSWorker runs the heartbeat worker over the enrolled mutual-TLS channel.
+func startMTLSWorker(ctx context.Context, cfg *mtlsSettings, sampler *agent.Sampler, log *slog.Logger) {
+	worker := agent.NewWorker(agent.WorkerConfig{
+		ControlGRPCAddr: cfg.Addr,
+		Sampler:         sampler,
+		Log:             log,
+		TLSCAFile:       cfg.CAFile,
+		TLSServerName:   cfg.ServerName,
+		MTLS:            cfg.Manager,
+	})
+	go func() {
+		if err := worker.Run(ctx); err != nil && !errors.Is(err, context.Canceled) {
+			log.Warn("heartbeat worker stopped", "error", err)
+		}
+	}()
 }

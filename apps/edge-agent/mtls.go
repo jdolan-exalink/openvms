@@ -131,3 +131,51 @@ func enrollToken(get func(string) string) (string, error) {
 	}
 	return token, nil
 }
+
+const (
+	mtlsFirstTry  = 3 * time.Second
+	mtlsRetryBase = 15 * time.Second
+	mtlsRetryMax  = 5 * time.Minute
+)
+
+// mtlsRetryDelay is the wait before retry number attempt (0 is the first): it doubles up to
+// mtlsRetryMax so an agent that cannot reach OpenVMS does not hammer it.
+func mtlsRetryDelay(attempt int) time.Duration {
+	d := mtlsRetryBase
+	for i := 0; i < attempt && d < mtlsRetryMax; i++ {
+		d *= 2
+	}
+	return min(d, mtlsRetryMax)
+}
+
+// retryMTLS calls load until the API answers. It returns the settings on success, the error as soon
+// as it is one the operator must fix, and context.Canceled when wait reports the agent is stopping.
+// load is loadMTLS bound to the agent's environment; wait sleeps and returns false when cancelled.
+func retryMTLS(ctx context.Context, load func() (*mtlsSettings, error), log *slog.Logger, wait func(context.Context, time.Duration) bool) (*mtlsSettings, error) {
+	for attempt := 0; ; attempt++ {
+		s, err := load()
+		if err == nil {
+			return s, nil
+		}
+		if !errors.Is(err, mtls.ErrEnrollUnavailable) {
+			return nil, err
+		}
+		d := mtlsRetryDelay(attempt)
+		log.Warn("the OpenVMS API is not reachable to enroll; the agent keeps serving and will retry", "error", err, "retry_in", d.String())
+		if !wait(ctx, d) {
+			return nil, context.Canceled
+		}
+	}
+}
+
+// sleepContext waits d and reports whether the context was still live afterwards.
+func sleepContext(ctx context.Context, d time.Duration) bool {
+	t := time.NewTimer(d)
+	defer t.Stop()
+	select {
+	case <-ctx.Done():
+		return false
+	case <-t.C:
+		return true
+	}
+}

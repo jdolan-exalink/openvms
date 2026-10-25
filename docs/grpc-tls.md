@@ -143,6 +143,8 @@ Stored credentials always win: a token left in the environment after enrollment 
 
 The agent then dials `OPENVMS_AGENT_GRPC_ADDR` with its certificate and heartbeats with the server id from that certificate (the configured `OPENVMS_NODE_ID` is ignored).
 
+If the agent cannot reach the API to enroll (it is behind NAT, the VPN is down, the API answers 5xx), it does not exit: from 0.4.1 it keeps serving its own API, so OpenVMS can still connect to it, and retries the enrollment with a growing wait (15 s up to 5 min). A refused token, a rejected request or a bad setting still stops it at startup, and a refusal found while retrying is logged and ends the retries until the agent is restarted.
+
 ### Renewal
 
 The agent renews once two thirds of the certificate's lifetime have passed (about day 20 of 30; the server accepts renewals from half, so the agent never trips the minimum age), over mTLS with `RenewCertificate`, using a fresh key. A `FailedPrecondition` answer (too early, for example after a clock correction) is not an error: the agent logs it and retries later with the same backoff. The new certificate is verified (same identity, matches the new key, chains to the CA) and persisted before the agent starts using it. The old certificate stays valid until the new one is first used, so there is no deadline to switch: the worker reconnects on its next heartbeat tick (10 seconds by default), and that first call revokes the old certificate. If the response is lost, the agent still has its old certificate, keeps heartbeating with it and renews again after the usual backoff; the server replaces the unused successor of the first attempt. Only if the old certificate itself expires without a successful renewal is a new enrollment token needed.

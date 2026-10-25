@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"encoding/pem"
 	"errors"
+	"fmt"
 	"log/slog"
 	"net/http"
 	"net/http/httptest"
@@ -199,5 +200,106 @@ func TestLoadMTLSConfigurationErrors(t *testing.T) {
 				t.Fatal("enrolled despite the configuration error")
 			}
 		})
+	}
+}
+
+// An API that cannot be reached (an agent behind NAT) is not a configuration error: loadMTLS says so
+// with an error the caller can tell apart, so the agent keeps serving instead of exiting.
+func TestLoadMTLSReportsAnUnreachableAPIAsRetryable(t *testing.T) {
+	api := newEnrollAPI(t)
+	env := api.env(t, map[string]string{"OPENVMS_ENROLL_TOKEN": "one-time"})
+	api.srv.Close()
+	_, err := loadMTLS(context.Background(), getenvFrom(env), quiet, time.Now)
+	if !errors.Is(err, mtls.ErrEnrollUnavailable) {
+		t.Fatalf("err = %v, want ErrEnrollUnavailable", err)
+	}
+}
+
+// Whatever the operator has to fix stays a hard error: the previous tests already pin the token and
+// configuration cases; this one pins that they are not mistaken for "try again later".
+func TestLoadMTLSConfigurationAndTokenErrorsAreNotRetryable(t *testing.T) {
+	api := newEnrollAPI(t)
+	for name, extra := range map[string]map[string]string{
+		"bad token":      {"OPENVMS_ENROLL_TOKEN": "expired-or-used"},
+		"plain http URL": {"OPENVMS_ENROLL_TOKEN": "one-time", "OPENVMS_API_URL": "http://api.example"},
+		"no credentials": nil,
+	} {
+		t.Run(name, func(t *testing.T) {
+			_, err := loadMTLS(context.Background(), getenvFrom(api.env(t, extra)), quiet, time.Now)
+			if err == nil || errors.Is(err, mtls.ErrEnrollUnavailable) {
+				t.Fatalf("err = %v, want a non-retryable error", err)
+			}
+		})
+	}
+}
+
+// retryMTLS keeps asking until the API answers, backing off between tries, and gives up on anything
+// the operator has to fix.
+func TestRetryMTLSKeepsTryingWhileTheAPIIsUnreachableThenSucceeds(t *testing.T) {
+	calls := 0
+	want := &mtlsSettings{Addr: "api.example:9443"}
+	load := func() (*mtlsSettings, error) {
+		calls++
+		if calls < 3 {
+			return nil, fmt.Errorf("enroll: %w", mtls.ErrEnrollUnavailable)
+		}
+		return want, nil
+	}
+	var waits []time.Duration
+	got, err := retryMTLS(context.Background(), load, quiet, func(_ context.Context, d time.Duration) bool { waits = append(waits, d); return true })
+	if err != nil || got != want || calls != 3 {
+		t.Fatalf("got %v, %v after %d calls", got, err, calls)
+	}
+	if len(waits) != 2 || waits[1] <= waits[0] {
+		t.Fatalf("waits = %v, want two growing waits", waits)
+	}
+}
+
+func TestRetryMTLSStopsOnAnErrorTheOperatorMustFix(t *testing.T) {
+	calls := 0
+	load := func() (*mtlsSettings, error) { calls++; return nil, mtls.ErrTokenRejected }
+	_, err := retryMTLS(context.Background(), load, quiet, func(context.Context, time.Duration) bool { return true })
+	if !errors.Is(err, mtls.ErrTokenRejected) || calls != 1 {
+		t.Fatalf("err = %v after %d calls, want ErrTokenRejected after 1", err, calls)
+	}
+}
+
+func TestRetryMTLSStopsWhenTheAgentIsStopped(t *testing.T) {
+	load := func() (*mtlsSettings, error) { return nil, mtls.ErrEnrollUnavailable }
+	_, err := retryMTLS(context.Background(), load, quiet, func(context.Context, time.Duration) bool { return false })
+	if !errors.Is(err, context.Canceled) {
+		t.Fatalf("err = %v, want context.Canceled", err)
+	}
+}
+
+func TestRetryMTLSBackoffIsBounded(t *testing.T) {
+	var last time.Duration
+	for i := 0; i < 50; i++ {
+		last = mtlsRetryDelay(i)
+	}
+	if last != mtlsRetryMax || mtlsRetryDelay(0) <= 0 {
+		t.Fatalf("delay(0)=%v delay(49)=%v, want >0 and capped at %v", mtlsRetryDelay(0), last, mtlsRetryMax)
+	}
+}
+
+// An API that accepts the connection and never answers (traffic dropped by a NAT) is the same case:
+// the caller bounds the attempt with its context and gets the retryable error back.
+func TestLoadMTLSReportsAnAPIThatNeverAnswersAsRetryable(t *testing.T) {
+	api := newEnrollAPI(t)
+	release := make(chan struct{})
+	hang := httptest.NewTLSServer(http.HandlerFunc(func(http.ResponseWriter, *http.Request) { <-release }))
+	t.Cleanup(func() { close(release); hang.Close() })
+	env := api.env(t, map[string]string{"OPENVMS_ENROLL_TOKEN": "one-time", "OPENVMS_API_URL": hang.URL})
+	env["OPENVMS_API_CA_FILE"] = ""
+	caFile := filepath.Join(t.TempDir(), "hang-ca.pem")
+	if err := os.WriteFile(caFile, pem.EncodeToMemory(&pem.Block{Type: "CERTIFICATE", Bytes: hang.Certificate().Raw}), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	env["OPENVMS_API_CA_FILE"] = caFile
+	ctx, cancel := context.WithTimeout(context.Background(), 200*time.Millisecond)
+	defer cancel()
+	_, err := loadMTLS(ctx, getenvFrom(env), quiet, time.Now)
+	if !errors.Is(err, mtls.ErrEnrollUnavailable) {
+		t.Fatalf("err = %v, want ErrEnrollUnavailable", err)
 	}
 }
