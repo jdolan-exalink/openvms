@@ -70,6 +70,10 @@ vigente no tenga tag, los cambios se suman a ella.
   el mismo commit cuando hace falta (`check --fix`).
 - `make agent-bump LEVEL=minor NOTE="qué cambió"` sube la versión a mano.
 - El job de CI «Agent version» corre la regla en cada PR contra `main`, también en PRs apilados.
+- Publicar el agente: tag `agent-vX.Y.Z` sobre un commit de `main`. El workflow «Release agent»
+  verifica que el tag coincida con `deploy/agent/VERSION`, compila amd64 y arm64 y publica los
+  binarios, `SHA256SUMS` e `install-agent.sh` (ver `docs/agent/install.md`). Desde el tag la versión
+  cuenta como publicada.
 - La versión sale de un solo archivo: `deploy/agent/VERSION` se incrusta en el binario de OpenVMS
   (la que espera la API) y se inyecta en el agente al compilar (la que reporta).
 

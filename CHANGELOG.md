@@ -16,6 +16,13 @@ The version of OpenVMS lives in `VERSION` and the version of the edge agent in
   the API as the version it expects (it used to be a second string stuck at 0.2.1), and a check
   (`tools/agent_version.sh`, `make hooks`, CI job "Agent version") requires a new version for any
   agent change once the current one is released.
+- Agent 0.4.0: install and upgrade from a GitHub release with one command
+  (`deploy/agent/install-agent.sh`, workflow "Release agent" on tags `agent-vX.Y.Z`): checksum-verified
+  binaries for amd64 and arm64, systemd unit, tokens, and the address and token to enter in OpenVMS.
+- Agent 0.4.0: updates over the API check the binary, keep the previous one and roll back by themselves
+  when the new one does not confirm; API tokens with scopes created from the agent console; agents
+  reachable through a stored base URL (VPN or tunnel) with a guard on where OpenVMS may connect; agents
+  that cannot call OpenVMS (NAT) install and are polled.
 - `make install` takes the first administrator password from `OPENVMS_ADMIN_PASSWORD`
   (`OPENVMS_ADMIN_PASSWORD='...' make install`) and writes it to the new `.env` without
   printing it. It validates the password up front: one shorter than 8 characters aborts before
