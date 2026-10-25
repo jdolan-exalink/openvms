@@ -113,7 +113,13 @@ export function Servers() {
                 </div>
                 <div className="flex flex-col items-end gap-1">
                   <StatusBadge status={s.status} />
-                  {s.last_error && <div role="alert" className="max-w-56 text-xs break-words text-bad">{s.last_error}</div>}
+                  {s.problems?.length ? (
+                    <ul aria-label={t("servers.problemsLabel")} className="flex max-w-56 flex-col items-end gap-0.5 text-xs break-words text-warn">
+                      {s.problems.map((problem) => (
+                        <li key={problem.code}>{problemText(problem, t)}</li>
+                      ))}
+                    </ul>
+                  ) : s.last_error ? <div role="alert" className="max-w-56 text-xs break-words text-bad">{s.last_error}</div> : null}
                 </div>
               </div>
               <dl className="grid grid-cols-2 gap-3 text-sm md:grid-cols-4">
@@ -2031,6 +2037,17 @@ function LanInterfaceCard({
   );
 }
 
+
+function problemText(problem: Schemas["ServerProblem"], t: ReturnType<typeof useT>) {
+  switch (problem.code) {
+    case "cameras_offline":
+      return t("servers.problemCamerasOffline", { cameras: (problem.cameras ?? []).join(", ") });
+    case "storage_high":
+      return t("servers.problemStorageHigh", { percent: String(problem.used_percent ?? "") });
+    default:
+      return t("servers.problemDetectionStalled");
+  }
+}
 
 function isAgentBinaryCurrent(agent: Schemas["ServerAgent"]) {
   const observed = agent.binary_observed?.sha256;

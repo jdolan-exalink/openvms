@@ -38,6 +38,42 @@ describe("Servers", () => {
     expect((await screen.findAllByRole("link", { name: "4" }))[0]).toHaveAttribute("href", "/cameras?server_id=a");
   });
 
+  it("explains in the server summary why a server is degraded", async () => {
+    vi.stubGlobal("fetch", vi.fn(stubApi({
+      "/api/v1/servers": () => json({ items: [server("a", "frigate-h01", "s1", {
+        status: "degraded",
+        last_error: "Frigate is streaming but not detecting: no camera has reported detections",
+        problems: [
+          { code: "cameras_offline", cameras: ["Escuela422", "Banco"] },
+          { code: "storage_high", used_percent: 95 },
+          { code: "detection_stalled" },
+        ],
+      })] }),
+      "/api/v1/sites": () => json({ items: [{ id: "s1", name: "Helvecia" }] }),
+      "/api/v1/me": () => json({ id: "u", tenant_id: "t", grants: [] }),
+      "/api/v1/servers/a/agent": () => json({ installed: false, binary_status: "not_installed", binary_upgrade_available: false }),
+    })));
+    renderPage(Servers);
+    const list = await screen.findByRole("list", { name: /Motivos/i });
+    expect(within(list).getByText("Sin señal: Escuela422, Banco")).toBeInTheDocument();
+    expect(within(list).getByText("Disco de grabación al 95 %")).toBeInTheDocument();
+    expect(within(list).getByText("Frigate transmite pero no detecta")).toBeInTheDocument();
+    // The raw English last_error would repeat the same reason.
+    expect(screen.queryByText(/Frigate is streaming but not detecting/)).not.toBeInTheDocument();
+  });
+
+  it("keeps showing last_error when the server reports no problem list", async () => {
+    vi.stubGlobal("fetch", vi.fn(stubApi({
+      "/api/v1/servers": () => json({ items: [server("a", "frigate-h01", "s1", { status: "offline", last_error: "dial tcp: i/o timeout" })] }),
+      "/api/v1/sites": () => json({ items: [{ id: "s1", name: "Helvecia" }] }),
+      "/api/v1/me": () => json({ id: "u", tenant_id: "t", grants: [] }),
+      "/api/v1/servers/a/agent": () => json({ installed: false, binary_status: "not_installed", binary_upgrade_available: false }),
+    })));
+    renderPage(Servers);
+    expect(await screen.findByText("dial tcp: i/o timeout")).toBeInTheDocument();
+    expect(screen.queryByRole("list", { name: /Motivos/i })).not.toBeInTheDocument();
+  });
+
   it("narrows to the site carried in the URL and lets the user clear it", async () => {
     stub();
     renderPage(Servers, "/?site_id=s1");

@@ -3828,6 +3828,14 @@ export interface components {
             capabilities: components["schemas"]["Capabilities"];
             cameras: components["schemas"]["DiscoveredCamera"][];
         };
+        ServerProblem: {
+            /** @enum {string} */
+            code: "cameras_offline" | "storage_high" | "detection_stalled";
+            /** @description Names of the enabled cameras without signal (cameras_offline). */
+            cameras?: string[];
+            /** @description Share of the recordings disk in use (storage_high). */
+            used_percent?: number;
+        };
         ServerStorage: {
             total_mb: number;
             used_mb: number;
@@ -3857,6 +3865,8 @@ export interface components {
             uptime_seconds?: number | null;
             storage?: components["schemas"]["ServerStorage"];
             camera_count: number;
+            /** @description Why the server is degraded; empty while it is healthy. */
+            problems?: components["schemas"]["ServerProblem"][];
             /**
              * Format: date-time
              * @description When an enrolled edge agent last sent a heartbeat to the agent listener (database clock). Absent until the first heartbeat; compare with the current time to decide whether the agent is still reporting.

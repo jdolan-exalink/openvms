@@ -188,7 +188,7 @@ func (p *HealthPoller) check(ctx context.Context, srv db.FrigateServer) {
 		if err != nil {
 			return err
 		}
-		degraded := false
+		var offlineCameras []string
 		var liveStats []frigate.CameraStats
 		for _, cam := range cams {
 			cs, reported := stats.Cameras[cam.RemoteName]
@@ -213,8 +213,8 @@ func (p *HealthPoller) check(ctx context.Context, srv db.FrigateServer) {
 					p.Svc.Log.InfoContext(ctx, "camera video signal restored at frigate", "camera_id", cam.ID, "server_id", srv.ID, "camera", cam.RemoteName)
 				}
 			}
-			if cam.Enabled && camStatus == "offline" && cam.MissingSince == nil {
-				degraded = true
+			if cam.Enabled && camStatus == "offline" && cam.MissingSince == nil && !isVirtualCamera(cam.RemoteName) {
+				offlineCameras = append(offlineCameras, cam.RemoteName)
 			}
 			var fps *float32
 			if reported {
@@ -235,19 +235,18 @@ func (p *HealthPoller) check(ctx context.Context, srv db.FrigateServer) {
 				})
 			}
 		}
-		if r := stats.Recordings; r != nil && r.TotalMB > 0 && r.UsedMB/r.TotalMB > storageDegradedRatio {
-			degraded = true
-		}
 		health := HealthStats{UptimeSeconds: stats.UptimeSeconds, Recordings: stats.Recordings}
+		stalled := false
 		if ds := p.detectionTracker().Observe(srv.ID, liveStats, now); ds.Stalled {
-			degraded = true
+			stalled = true
 			health.DetectionStalledSince = &ds.Since
 			errMsg = DetectionStalledMessage
 			if srv.Status != "degraded" {
 				p.Svc.Log.WarnContext(ctx, "frigate is streaming but not detecting", "server_id", srv.ID, "since", ds.Since)
 			}
 		}
-		if degraded {
+		health.Problems = healthProblems(offlineCameras, stats.Recordings, stalled)
+		if len(health.Problems) > 0 {
 			status = "degraded"
 		}
 		raw, _ := json.Marshal(health)

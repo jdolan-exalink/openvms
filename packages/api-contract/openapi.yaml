@@ -5036,6 +5036,13 @@ components:
         cameras:
           type: array
           items: { $ref: "#/components/schemas/DiscoveredCamera" }
+    ServerProblem:
+      type: object
+      required: [code]
+      properties:
+        code: { type: string, enum: [cameras_offline, storage_high, detection_stalled] }
+        cameras: { type: array, items: { type: string }, description: Names of the enabled cameras without signal (cameras_offline). }
+        used_percent: { type: integer, description: Share of the recordings disk in use (storage_high). }
     ServerStorage:
       type: object
       required: [total_mb, used_mb, free_mb]
@@ -5065,6 +5072,10 @@ components:
         uptime_seconds: { type: integer, nullable: true }
         storage: { $ref: "#/components/schemas/ServerStorage" }
         camera_count: { type: integer }
+        problems:
+          type: array
+          description: Why the server is degraded; empty while it is healthy.
+          items: { $ref: "#/components/schemas/ServerProblem" }
         agent_last_seen_at:
           type: string
           format: date-time

@@ -159,6 +159,8 @@ type HealthStats struct {
 	Recordings    *frigate.Storage `json:"recordings,omitempty"`
 	// DetectionStalledSince is set while Frigate streams but no camera detects anything.
 	DetectionStalledSince *time.Time `json:"detection_stalled_since,omitempty"`
+	// Problems lists why the server is degraded; empty while it is healthy.
+	Problems []HealthProblem `json:"problems,omitempty"`
 }
 
 func (v ServerView) HealthStats() HealthStats {

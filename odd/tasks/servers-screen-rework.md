@@ -15,7 +15,7 @@ Assumptions (not asked by the user; confirm or drop):
 
 ## Tasks
 - [x] T1 (S1, A3) Version colour from `binary_status`: green current, yellow update_available, neutral otherwise. Route: inline.
-- [ ] T2 (S2, A2) Persist the list of degraded reasons and show it in the server summary. Route: inline.
+- [x] T2 (S2, A2) Persist the list of degraded reasons and show it in the server summary. Route: inline.
 - [ ] T3 (S3) Show only the LAN and CCTV interfaces using the agent's `role`. Route: inline.
 - [ ] T4 (S4, A1) Row actions reduced to: update agent (HTTP), uninstall agent, backup, edit server. Route: inline.
 - [ ] T5 (S4) Backup of agent and Frigate configuration. Route: inline. Needs scope decision.
@@ -29,3 +29,4 @@ L2 (2026-10-25, explorer map, evidence):
 - NIC `role` (cameras|monitoring|lan) is computed in internal/agent/interfaces.go:232-253 and carried in `network_interfaces`; UI ignores it (`isLanInterfaceName`, Servers.tsx:1699).
 - UI update goes over SSH (`updateServerAgentOverSSH`); HTTP `updateServerAgent` (POST /api/v1/servers/{id}/agent/update, provision_handlers.go:228) already exists and is unused by the UI. Agent `/v1/update` needs scope `update`, verifies ELF, SHA-256 and version, and arms a rollback.
 - Uninstall exists only over SSH; no agent or Frigate config backup/download exists; `ServerFrigateConfigModal` is the real config editor, `EditServerModal` (:2084) is a plain form.
+L3 (2026-10-25, T2 done): the health poll now stores `problems` (cameras_offline with names, storage_high with used percent, detection_stalled) in the server stats and exposes them as `Server.problems`; BirdEye no longer counts as an offline camera (A2 applied); the Servers row lists the reasons instead of the raw `last_error` when `problems` is present. UI tests were written after the render code, so their RED was not observed; the Go helper tests were observed RED (undefined symbols) before the implementation.
