@@ -115,6 +115,8 @@ func (s *Service) AgentStatus(ctx context.Context, actor authz.Actor, serverID u
 	return out, nil
 }
 
+const agentUpdateUploadTimeout = 3 * time.Minute
+
 // UpdateAgent sends the current binary to the host and waits until it reports this version.
 func (s *Service) UpdateAgent(ctx context.Context, actor authz.Actor, serverID uuid.UUID) (AgentView, error) {
 	if _, err := s.Inv.RequireServerManage(ctx, actor, serverID); err != nil {
@@ -132,10 +134,21 @@ func (s *Service) UpdateAgent(ctx context.Context, actor authz.Actor, serverID u
 	if err != nil {
 		return AgentView{}, err
 	}
-	if err := pushUpdate(ctx, row.Host, row.Port, string(token), binary); err != nil {
+	version := s.bundledAgentVersion()
+	if row.BaseUrl != "" {
+		client, clientToken, err := s.getAgentClientAndTokenWithTimeout(ctx, actor, serverID, agentUpdateUploadTimeout)
+		if err != nil {
+			return AgentView{}, err
+		}
+		if err := pushUpdateVia(ctx, client, clientToken, binary, version); err != nil {
+			return AgentView{}, err
+		}
+	} else if err := pushUpdate(ctx, row.Host, row.Port, string(token), binary, version); err != nil {
 		return AgentView{}, err
 	}
-	deadline := time.Now().Add(20 * time.Second)
+	// The agent checks the binary, restarts and has to confirm itself; if it cannot, it puts the
+	// previous one back, so this can end with the old version.
+	deadline := time.Now().Add(45 * time.Second)
 	var last AgentView
 	for {
 		last, err = s.AgentStatus(ctx, actor, serverID)

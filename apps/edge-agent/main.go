@@ -46,6 +46,9 @@ func main() {
 	if len(os.Args) > 1 && (os.Args[1] == "token" || os.Args[1] == "connection") {
 		os.Exit(runConsoleCommand(os.Args[1:], os.Stdout, os.Stderr, time.Now))
 	}
+	if len(os.Args) > 1 && os.Args[1] == "rollback-apply" {
+		os.Exit(runRollbackApply(os.Args[2:], os.Stdout, os.Stderr))
+	}
 	log := slog.New(slog.NewJSONHandler(os.Stdout, nil))
 	token, err := os.ReadFile(env("OPENVMS_AGENT_TOKEN_FILE", "/etc/openvms/agent.token"))
 	if err != nil {
@@ -127,7 +130,23 @@ func main() {
 			lprReceiver.SetCaptures(store, capture == captureEverything)
 		}
 	}
-	mux := buildMuxWithAuth(auth, variant, sampler, discoveryHandler, probeHandler, opsHandler, lprReceiver, replaceBinary, func() { go restart() })
+	updater, err := newUpdater(stateDir)
+	if err != nil {
+		log.Error("agent updater unavailable: updates over the API are disabled", "error", err)
+	}
+	replace := func(*http.Request) error { return errors.New("agent updates are unavailable on this host") }
+	if updater != nil {
+		if rolled, err := updater.NoteStart(context.Background()); err != nil {
+			log.Error("pending agent update record unreadable", "error", err)
+		} else if rolled {
+			log.Error("the new agent binary kept failing before it was confirmed; the previous binary is back")
+			restart()
+			time.Sleep(5 * time.Second)
+			os.Exit(1)
+		}
+		replace = newUpdateReplacer(updater)
+	}
+	mux := buildMuxWithAuth(auth, variant, sampler, discoveryHandler, probeHandler, opsHandler, lprReceiver, replace, func() { go restart() })
 	if capture == captureEverything {
 		log.Warn("Provision-ISR capture-all is on: POSTs on any path are accepted and kept; turn it off once the camera protocol is known")
 		mux.Handle("/", postsAnywhere(lprReceiver))
@@ -135,6 +154,9 @@ func main() {
 	addr := env("OPENVMS_AGENT_LISTEN", "0.0.0.0:7419")
 	srv := &http.Server{Addr: addr, Handler: mux, ReadHeaderTimeout: 5 * time.Second}
 	log.Info("listening", "addr", addr, "version", agent.Version)
+	if updater != nil {
+		go confirmUpdateWhenHealthy(updater, addr, secret, log)
+	}
 
 	ctx, cancel := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer cancel()
@@ -327,7 +349,7 @@ func buildMuxWithAuth(auth *authenticator, variant string, sampler *agent.Sample
 	})))
 	mux.Handle("POST /v1/update", auth.scoped(tokens.ScopeUpdate, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if err := replace(r); err != nil {
-			http.Error(w, err.Error(), http.StatusBadRequest)
+			http.Error(w, err.Error(), updateStatus(err))
 			return
 		}
 		w.WriteHeader(http.StatusAccepted)
@@ -372,26 +394,6 @@ func bearer(r *http.Request, secret string) bool {
 		return false
 	}
 	return subtle.ConstantTimeCompare([]byte(strings.TrimPrefix(got, prefix)), []byte(secret)) == 1
-}
-
-func replaceBinary(r *http.Request) error {
-	data, err := io.ReadAll(io.LimitReader(r.Body, 80<<20))
-	if err != nil {
-		return err
-	}
-	if len(data) < 4 || string(data[:4]) != "\x7fELF" {
-		return errors.New("update payload is not an executable")
-	}
-	exe, err := os.Executable()
-	if err != nil {
-		return err
-	}
-	next := exe + ".new"
-	// #nosec G306 -- the staged binary must retain executable permissions after replacement.
-	if err := os.WriteFile(next, data, 0o755); err != nil {
-		return err
-	}
-	return os.Rename(next, exe)
 }
 
 func restart() {
