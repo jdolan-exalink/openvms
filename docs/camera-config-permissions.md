@@ -10,7 +10,7 @@ Migration `00078_camera_config_permissions.sql` and `internal/authz/camera_confi
 | `cameras.config.recording` | patch section `recording` | `servers.config` |
 | `cameras.config.analytics` | patch section `analytics` | `servers.config` |
 | `cameras.config.ptz` | PTZ control and tours | `cameras.manage` |
-| `cameras.web.access` | camera web session (`/cameras/{id}/web-session`) | `servers.manage` + `servers.config.secrets` |
+| `cameras.web.access` | camera web session (`POST /api/v1/cameras/{id}/web/session`) | `servers.manage` + `servers.config.secrets` |
 | `cameras.config.advanced` | catalog only (U10) | `servers.config` |
 | `cameras.config.yaml` | catalog only (U10; raw YAML keeps `servers.config` + `servers.config.secrets`) | same pair |
 | `cameras.restart` | catalog only (server restart keeps `servers.restart`) | `servers.restart` |
