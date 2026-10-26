@@ -166,6 +166,58 @@ export const objectCatalogQuery = (engine: "frigate" = "frigate", serverId?: str
     staleTime: 5 * 60_000,
   });
 
+/** YAML of one top-level section of the camera's Frigate configuration (Advanced → Editar YAML). */
+export const cameraFrigateYamlQuery = (cameraId: string, section: string) =>
+  queryOptions({
+    queryKey: ["cameras", cameraId, "frigate-yaml", section],
+    queryFn: async () =>
+      unwrap(
+        await api.GET("/api/v1/cameras/{cameraId}/frigate-yaml", {
+          params: { path: { cameraId }, query: { section } },
+        }),
+      ),
+    // The text is the user's working copy once loaded; a refetch must not overwrite an edit.
+    staleTime: Infinity,
+  });
+
+/** Checks an edited section: syntax (line/column), schema, diff and the parameters OpenVMS manages. */
+export const validateCameraFrigateYaml = async (cameraId: string, body: { section: string; yaml: string }) =>
+  unwrap(
+    await api.POST("/api/v1/cameras/{cameraId}/frigate-yaml/validate", { params: { path: { cameraId } }, body }),
+  );
+
+/** Saves an edited section; 409 `managed_conflict` until confirm_managed_conflicts is true. */
+export const applyCameraFrigateYaml = async (
+  cameraId: string,
+  body: { section: string; yaml: string; expected_revision: number; confirm_managed_conflicts?: boolean },
+) =>
+  unwrap(await api.POST("/api/v1/cameras/{cameraId}/frigate-yaml/apply", { params: { path: { cameraId } }, body }));
+
+/** Recent configuration changes of a camera, with whether each can be rolled back. */
+export const cameraConfigHistoryQuery = (cameraId: string, limit = 20) =>
+  queryOptions({
+    queryKey: ["cameras", cameraId, "config-history", limit],
+    queryFn: async () =>
+      unwrap(
+        await api.GET("/api/v1/cameras/{cameraId}/normalized-config/history", {
+          params: { path: { cameraId }, query: { limit } },
+        }),
+      ),
+  });
+
+/** "Restaurar configuración anterior": audit_id omitted means the latest change that can be undone. */
+export const rollbackCameraConfig = async (cameraId: string, body: { expected_revision: number; audit_id?: number }) =>
+  unwrap(
+    await api.POST("/api/v1/cameras/{cameraId}/normalized-config/rollback", { params: { path: { cameraId } }, body }),
+  );
+
+/** Read-only technical panels per backend (Frigate, ONVIF, Provision). */
+export const cameraAdvancedQuery = (cameraId: string) =>
+  queryOptions({
+    queryKey: ["cameras", cameraId, "advanced"],
+    queryFn: async () => unwrap(await api.GET("/api/v1/cameras/{cameraId}/advanced", { params: { path: { cameraId } } })),
+  });
+
 /** Video values the camera itself supports, per stream (needs the ONVIF credential permissions). */
 export const cameraVideoOptionsQuery = (cameraId: string) =>
   queryOptions({
