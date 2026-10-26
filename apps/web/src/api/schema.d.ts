@@ -1091,6 +1091,60 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/cameras/{cameraId}/normalized-config/review": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                cameraId: string;
+            };
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Review a change of the normalized configuration before applying it
+         * @description Requires the permission the Frigate config PATCH needs (servers.config on the camera's
+         *     server). Compares the patch with the camera's current configuration and returns the
+         *     changes (path, label, from, to) and their impact. It has no side effects: nothing is
+         *     written to the engine or the database. Fields the model cannot represent or translate
+         *     are rejected with 400, never ignored.
+         */
+        post: operations["reviewCameraConfig"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/cameras/{cameraId}/normalized-config/apply": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                cameraId: string;
+            };
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Apply a change of the normalized configuration
+         * @description Requires the permission the Frigate config PATCH needs (servers.config on the camera's
+         *     server). Records the desired state, translates it to the engine, reads the camera back
+         *     and stores the verified state. `expected_revision` is the `state.desired_revision` the
+         *     caller last read; a different value answers 409. An engine failure answers 200 with
+         *     `result: error` and a sanitized `state.last_error`; a failed apply never leaves the
+         *     state `synced`. Every apply is audited (CAMERA_CONFIG_CHANGED) with previous and new
+         *     values, origin and result.
+         */
+        post: operations["applyCameraConfig"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/cameras/{cameraId}/onvif/check": {
         parameters: {
             query?: never;
@@ -4748,6 +4802,7 @@ export interface components {
         };
         /** @description Engine-agnostic configuration model of one camera. */
         CameraConfig: {
+            state: components["schemas"]["CameraConfigState"];
             identity: {
                 camera_id: string;
                 name: string;
@@ -4818,6 +4873,80 @@ export interface components {
                 detail?: string;
             }[];
             warnings: string[];
+        };
+        /**
+         * @description Where a configuration change comes from. Defaults to ui.
+         * @enum {string}
+         */
+        CameraConfigOrigin: "ui" | "profile" | "group" | "api" | "sync" | "yaml" | "external_device";
+        /**
+         * @description Sparse change to the normalized model; omitted fields stay as they are. The fields that can
+         *     be changed today are `detection.enabled` (boolean), `detection.objects` (raw engine object
+         *     labels until the object catalog lands), `recording.enabled` (boolean) and `analytics.lpr`
+         *     (boolean). The schema is deliberately open so the server can reject every other field,
+         *     nested ones included, with 400 instead of dropping it silently.
+         * @example {
+         *       "detection": {
+         *         "enabled": true,
+         *         "objects": [
+         *           "person",
+         *           "car"
+         *         ]
+         *       },
+         *       "recording": {
+         *         "enabled": true
+         *       },
+         *       "analytics": {
+         *         "lpr": false
+         *       }
+         *     }
+         */
+        CameraConfigPatch: {
+            [key: string]: unknown;
+        };
+        CameraConfigReview: {
+            changes: {
+                /** @example detection.enabled */
+                path: string;
+                /** @example detección de objetos */
+                label: string;
+                /** @description Current value; null when the engine did not report it */
+                from?: unknown;
+                to?: unknown;
+            }[];
+            impact: {
+                /** @enum {string} */
+                code: "engine_reload" | "engine_restart" | "recording_interruption";
+                /** @example Frigate recargará configuración; */
+                message: string;
+            }[];
+            /** @description Fields of the request the engine cannot apply (never silently dropped) */
+            unsupported: string[];
+        };
+        /** @description Desired state against the effective state reported by the engine. */
+        CameraConfigState: {
+            /** Format: int64 */
+            desired_revision: number;
+            /** Format: int64 */
+            applied_revision: number;
+            /**
+             * @description synced = Sincronizado, pending = Cambios pendientes, drift = Diferencia detectada, error = Error, unverifiable = No verificable
+             * @enum {string}
+             */
+            sync_state: "synced" | "pending" | "drift" | "error" | "unverifiable";
+            /** @description Sanitized; never carries credentials */
+            last_error: string;
+            drift: {
+                path: string;
+                desired?: unknown;
+                effective?: unknown;
+            }[];
+        };
+        CameraConfigApplyResult: {
+            /** @enum {string} */
+            result: "ok" | "error" | "unverified";
+            state: components["schemas"]["CameraConfigState"];
+            review: components["schemas"]["CameraConfigReview"];
         };
         CameraConfigStream: {
             name?: string;
@@ -8691,6 +8820,72 @@ export interface operations {
             401: components["responses"]["Unauthorized"];
             403: components["responses"]["Forbidden"];
             404: components["responses"]["NotFound"];
+        };
+    };
+    reviewCameraConfig: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                cameraId: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["CameraConfigPatch"];
+            };
+        };
+        responses: {
+            /** @description What applying the patch would do */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["CameraConfigReview"];
+                };
+            };
+            400: components["responses"]["BadRequest"];
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+        };
+    };
+    applyCameraConfig: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                cameraId: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": {
+                    patch: components["schemas"]["CameraConfigPatch"];
+                    /** Format: int64 */
+                    expected_revision: number;
+                    origin?: components["schemas"]["CameraConfigOrigin"];
+                };
+            };
+        };
+        responses: {
+            /** @description Outcome of the apply */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["CameraConfigApplyResult"];
+                };
+            };
+            400: components["responses"]["BadRequest"];
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+            409: components["responses"]["Conflict"];
         };
     };
     checkCameraOnvif: {

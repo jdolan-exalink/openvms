@@ -13,6 +13,7 @@ import (
 	"github.com/jdolan-exalink/openvms/internal/access"
 	"github.com/jdolan-exalink/openvms/internal/api/gen"
 	"github.com/jdolan-exalink/openvms/internal/authz"
+	"github.com/jdolan-exalink/openvms/internal/camconfig"
 	"github.com/jdolan-exalink/openvms/internal/frigate"
 	"github.com/jdolan-exalink/openvms/internal/inventory"
 	"github.com/jdolan-exalink/openvms/internal/store"
@@ -153,5 +154,136 @@ func TestGetCameraConfigRequiresActor(t *testing.T) {
 	_, err := h.GetCameraConfig(context.Background(), gen.GetCameraConfigRequestObject{})
 	if status, _, _ := statusFor(err); status != http.StatusUnauthorized {
 		t.Fatalf("status = %d", status)
+	}
+}
+
+type fakeCamConfigWriter struct {
+	review      camconfig.Review
+	apply       inventory.ConfigApplyResult
+	err         error
+	gotPatch    camconfig.Patch
+	gotApply    inventory.ConfigApplyInput
+	reviewCalls int
+	applyCalls  int
+}
+
+func (f *fakeCamConfigWriter) ReviewCameraConfig(_ context.Context, _ authz.Actor, _ uuid.UUID, p camconfig.Patch) (camconfig.Review, error) {
+	f.reviewCalls++
+	f.gotPatch = p
+	return f.review, f.err
+}
+
+func (f *fakeCamConfigWriter) ApplyCameraConfig(_ context.Context, _ authz.Actor, _ uuid.UUID, in inventory.ConfigApplyInput) (inventory.ConfigApplyResult, error) {
+	f.applyCalls++
+	f.gotApply = in
+	return f.apply, f.err
+}
+
+func writerCtx() context.Context {
+	return WithActor(context.Background(), authz.Actor{UserID: uuid.New()})
+}
+
+func TestReviewCameraConfigRejectsUnknownFieldsBeforeTheService(t *testing.T) {
+	w := &fakeCamConfigWriter{}
+	h := &Handlers{camConfigWrite: w}
+	for name, patch := range map[string]map[string]any{
+		"unknown field": {"streams": map[string]any{"primary": map[string]any{"width": 1}}},
+		"nested field":  {"detection": map[string]any{"sensitivity": 3}},
+		"empty":         {},
+	} {
+		t.Run(name, func(t *testing.T) {
+			body := gen.ReviewCameraConfigJSONRequestBody(patch)
+			_, err := h.ReviewCameraConfig(writerCtx(), gen.ReviewCameraConfigRequestObject{CameraId: uuid.New(), Body: &body})
+			if status, _, _ := statusFor(err); status != http.StatusBadRequest {
+				t.Fatalf("status = %d (%v)", status, err)
+			}
+		})
+	}
+	if w.reviewCalls != 0 {
+		t.Fatalf("service reached %d times", w.reviewCalls)
+	}
+}
+
+func TestReviewCameraConfigReturnsChangesAndImpact(t *testing.T) {
+	w := &fakeCamConfigWriter{review: camconfig.Review{
+		Changes: []camconfig.Change{{Path: "detection.enabled", Label: "detección de objetos", From: false, To: true}},
+		Impact:  []camconfig.ImpactItem{{Code: camconfig.ImpactEngineReload, Message: "Frigate recargará configuración;"}},
+	}}
+	h := &Handlers{camConfigWrite: w}
+	body := gen.ReviewCameraConfigJSONRequestBody{"detection": map[string]any{"enabled": true}}
+	res, err := h.ReviewCameraConfig(writerCtx(), gen.ReviewCameraConfigRequestObject{CameraId: uuid.New(), Body: &body})
+	if err != nil {
+		t.Fatal(err)
+	}
+	out := res.(gen.ReviewCameraConfig200JSONResponse)
+	if len(out.Changes) != 1 || out.Changes[0].Path != "detection.enabled" || out.Changes[0].To != true || out.Impact[0].Message != "Frigate recargará configuración;" {
+		t.Fatalf("review = %+v", out)
+	}
+	if w.gotPatch.Detection == nil || !*w.gotPatch.Detection.Enabled {
+		t.Fatalf("patch = %+v", w.gotPatch)
+	}
+}
+
+func TestApplyCameraConfigMapsOriginAndErrors(t *testing.T) {
+	body := gen.ApplyCameraConfigJSONRequestBody{
+		Patch: gen.CameraConfigPatch{"recording": map[string]any{"enabled": true}}, ExpectedRevision: 4,
+	}
+	origin := gen.CameraConfigOrigin("profile")
+	body.Origin = &origin
+
+	t.Run("passes revision and origin on", func(t *testing.T) {
+		w := &fakeCamConfigWriter{apply: inventory.ConfigApplyResult{
+			Outcome: camconfig.Outcome{Result: camconfig.ResultOK},
+			State:   camconfig.State{DesiredRevision: 5, AppliedRevision: 5, SyncState: camconfig.SyncSynced, Drift: []camconfig.Drift{}},
+		}}
+		h := &Handlers{camConfigWrite: w}
+		res, err := h.ApplyCameraConfig(writerCtx(), gen.ApplyCameraConfigRequestObject{CameraId: uuid.New(), Body: &body})
+		if err != nil {
+			t.Fatal(err)
+		}
+		if w.gotApply.ExpectedRevision != 4 || w.gotApply.Origin != "profile" {
+			t.Fatalf("input = %+v", w.gotApply)
+		}
+		out := res.(gen.ApplyCameraConfig200JSONResponse)
+		if out.Result != gen.CameraConfigApplyResultResultOk || out.State.SyncState != gen.CameraConfigStateSyncStateSynced || out.State.DesiredRevision != 5 {
+			t.Fatalf("out = %+v", out)
+		}
+	})
+	for name, tc := range map[string]struct {
+		err    error
+		status int
+	}{
+		"stale revision":    {inventory.ErrRevisionConflict, http.StatusConflict},
+		"permission denied": {access.ErrForbidden, http.StatusForbidden},
+		"unknown camera":    {store.ErrNotFound, http.StatusNotFound},
+	} {
+		t.Run(name, func(t *testing.T) {
+			h := &Handlers{camConfigWrite: &fakeCamConfigWriter{err: tc.err}}
+			_, err := h.ApplyCameraConfig(writerCtx(), gen.ApplyCameraConfigRequestObject{CameraId: uuid.New(), Body: &body})
+			if status, _, _ := statusFor(err); status != tc.status {
+				t.Fatalf("status = %d, want %d", status, tc.status)
+			}
+		})
+	}
+	t.Run("unknown field never reaches the service", func(t *testing.T) {
+		w := &fakeCamConfigWriter{}
+		h := &Handlers{camConfigWrite: w}
+		bad := gen.ApplyCameraConfigJSONRequestBody{Patch: gen.CameraConfigPatch{"ptz": map[string]any{"home": true}}}
+		_, err := h.ApplyCameraConfig(writerCtx(), gen.ApplyCameraConfigRequestObject{CameraId: uuid.New(), Body: &bad})
+		if status, _, _ := statusFor(err); status != http.StatusBadRequest || w.applyCalls != 0 {
+			t.Fatalf("status = %d calls = %d", status, w.applyCalls)
+		}
+	})
+}
+
+func TestGetCameraConfigCarriesState(t *testing.T) {
+	ce := camConfigFixture(fakeFrigate{doc: map[string]any{"detect": map[string]any{"enabled": false}}})
+	// Desired says detection on, the engine reports it off: a drift the response must show.
+	ce.State = &db.CameraConfigState{
+		Desired: json.RawMessage(`{"detection":{"enabled":true}}`), DesiredRevision: 3, AppliedRevision: 3, SyncState: "synced",
+	}
+	cfg, _ := getCamConfig(t, fakeCamConfigSource{ce: ce})
+	if cfg.State.SyncState != gen.CameraConfigStateSyncStateDrift || cfg.State.DesiredRevision != 3 || len(cfg.State.Drift) != 1 || cfg.State.Drift[0].Path != "detection.enabled" {
+		t.Fatalf("state = %+v", cfg.State)
 	}
 }
