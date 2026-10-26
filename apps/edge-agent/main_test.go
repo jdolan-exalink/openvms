@@ -164,6 +164,16 @@ func TestBuildMuxFeatureRoutesRemainIsolated(t *testing.T) {
 		if got := post(mux, "/v1/onvif/ptz", `{}`, "").Code; got != http.StatusUnauthorized {
 			t.Fatalf("expected unauthorized, got=%d", got)
 		}
+		// The video-device and reboot operations are mounted with the control scope; a missing
+		// route would answer 404, which OpenVMS reads as "agent too old".
+		for _, path := range []string{"/v1/onvif/video-device", "/v1/onvif/reboot"} {
+			if got := post(mux, path, `{}`, "").Code; got != http.StatusUnauthorized {
+				t.Fatalf("%s without a token: got=%d, want 401", path, got)
+			}
+			if got := post(mux, path, `{"endpoint":"http://10.9.9.9/x"}`, token).Code; got != http.StatusBadRequest {
+				t.Fatalf("%s with a token: got=%d, want 400 (disallowed endpoint)", path, got)
+			}
+		}
 	})
 
 	t.Run("provision keepalive and configure routes mounted", func(t *testing.T) {

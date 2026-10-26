@@ -54,7 +54,7 @@ The version of OpenVMS lives in `VERSION` and the version of the edge agent in
 
 ### Changed
 
-- Agent 0.4.5: schema-only change: sqlc models gain camera_config_state (no behaviour change in the agent)
+- Agent 0.4.5: schema-only change: sqlc models gain camera_config_state. It also adds the ONVIF operations the camera editor needs behind a site: `POST /v1/onvif/video-device` (`profile_streams`, `video_options`, `set_video_encoder`), `POST /v1/onvif/reboot` and the PTZ actions `set_preset`, `remove_preset`, `goto_home`, `set_home`, `get_nodes` (scope `control`; credentials arrive in the request and are never logged or returned).
 - Agent 0.4.4: Rebuilt with the server delete purge queries; no change in agent behavior.
 - Agent 0.4.3: Revoking or re-creating the openvms token keeps /etc/openvms/openvms.apikey in step: revoke removes it, create saves the new key.
 - Agent 0.4.2: The installer keeps the OpenVMS key in /etc/openvms/openvms.apikey and ends with the host addresses and the steps to connect it in OpenVMS
