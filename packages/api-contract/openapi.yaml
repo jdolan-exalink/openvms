@@ -1296,6 +1296,30 @@ paths:
         "403": { $ref: "#/components/responses/Forbidden" }
         "404": { $ref: "#/components/responses/NotFound" }
         "502": { $ref: "#/components/responses/FrigateUnreachable" }
+  /api/v1/cameras/{cameraId}/normalized-config:
+    parameters:
+      - { name: cameraId, in: path, required: true, schema: { type: string, format: uuid } }
+    get:
+      tags: [cameras]
+      operationId: getCameraConfig
+      summary: Get the engine-agnostic configuration model of a camera
+      description: |
+        Requires cameras.view on the camera. Returns the normalized model (identity, device,
+        capabilities, streams by role, recording, detection, analytics, zones, PTZ, fisheye,
+        integrations, overrides) that adapters build from the camera's engine, so clients never
+        depend on engine structures. Stream URLs are reduced to scheme, host and path: credentials
+        and query strings are never returned. When the engine cannot be reached the response still
+        carries what OpenVMS knows and `sources` marks the engine as unavailable (HTTP 200).
+        Fields the engine did not report are omitted, never guessed.
+      responses:
+        "200":
+          description: Normalized camera configuration
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/CameraConfig" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { $ref: "#/components/responses/NotFound" }
   /api/v1/cameras/{cameraId}/onvif/check:
     parameters:
       - { name: cameraId, in: path, required: true, schema: { type: string, format: uuid } }
@@ -6015,6 +6039,121 @@ components:
         zones:
           type: array
           items: { $ref: "#/components/schemas/CameraZone" }
+    CameraConfig:
+      type: object
+      description: Engine-agnostic configuration model of one camera.
+      required: [identity, origin, device, capabilities, streams, recording, detection, analytics, zones, ptz, fisheye, integrations, overrides, sources, warnings]
+      properties:
+        identity:
+          type: object
+          required: [camera_id, name, remote_name, tags, enabled]
+          properties:
+            camera_id: { type: string }
+            name: { type: string }
+            remote_name: { type: string }
+            description: { type: string }
+            location: { type: string }
+            tags: { type: array, items: { type: string } }
+            enabled: { type: boolean }
+        origin:
+          type: object
+          required: [engine, server_id]
+          properties:
+            engine: { type: string, description: Engine kind, for example frigate. }
+            engine_version: { type: string }
+            server_id: { type: string }
+            server_name: { type: string }
+        device:
+          type: object
+          properties:
+            manufacturer: { type: string }
+            model: { type: string }
+            firmware: { type: string }
+            serial_number: { type: string }
+            address: { type: string }
+            onvif_version: { type: string }
+            onvif_profile: { type: string }
+        capabilities:
+          type: array
+          description: Only capabilities with positive evidence.
+          items:
+            type: string
+            enum: [onvif, audio, ptz, lpr, fisheye, object_detection, recording, analytics, events]
+        streams:
+          type: object
+          description: Streams by role; recording is present only when it differs from primary.
+          properties:
+            primary: { $ref: "#/components/schemas/CameraConfigStream" }
+            detection: { $ref: "#/components/schemas/CameraConfigStream" }
+            recording: { $ref: "#/components/schemas/CameraConfigStream" }
+        recording:
+          type: object
+          properties:
+            enabled: { type: boolean }
+        detection:
+          type: object
+          required: [objects]
+          properties:
+            enabled: { type: boolean }
+            objects: { type: array, items: { type: string } }
+        analytics:
+          type: object
+          properties:
+            lpr: { type: boolean }
+            audio: { type: boolean }
+        zones:
+          type: array
+          items:
+            type: object
+            required: [name, objects]
+            properties:
+              name: { type: string }
+              objects: { type: array, items: { type: string } }
+        ptz:
+          type: object
+          required: [supported]
+          properties:
+            supported: { type: boolean }
+            autotracking: { type: boolean }
+        fisheye:
+          type: object
+          required: [supported]
+          properties:
+            supported: { type: boolean }
+        integrations:
+          type: array
+          items:
+            type: object
+            required: [name, enabled]
+            properties:
+              name: { type: string }
+              enabled: { type: boolean }
+        overrides:
+          type: object
+          properties:
+            default_live_quality: { type: string }
+        sources:
+          type: array
+          description: Where each part of the model came from and whether it could be read.
+          items:
+            type: object
+            required: [name, status]
+            properties:
+              name: { type: string }
+              status: { type: string, enum: [ok, unavailable] }
+              detail: { type: string }
+        warnings: { type: array, items: { type: string } }
+    CameraConfigStream:
+      type: object
+      required: [roles]
+      properties:
+        name: { type: string }
+        url: { type: string, description: Scheme, host and path only; never credentials or query. }
+        codec: { type: string }
+        width: { type: integer }
+        height: { type: integer }
+        fps: { type: number }
+        roles: { type: array, items: { type: string } }
     CameraFrigateConfig:
       type: object
       required: [camera_id, camera_name, server_id, detect_enabled, tracked_objects, lpr_enabled, zones]

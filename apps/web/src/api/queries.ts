@@ -131,6 +131,14 @@ export const cameraFrigateConfigQuery = (cameraId: string) =>
       ),
   });
 
+/** Engine-agnostic configuration model of a camera (identity, device, streams by role, capabilities). */
+export const cameraConfigQuery = (cameraId: string) =>
+  queryOptions({
+    queryKey: ["cameras", cameraId, "config-model"],
+    queryFn: async () =>
+      unwrap(await api.GET("/api/v1/cameras/{cameraId}/normalized-config", { params: { path: { cameraId } } })),
+  });
+
 /** Full effective Frigate config of a camera (schema-driven editor). */
 export const cameraFrigateDocQuery = (cameraId: string) =>
   queryOptions({
