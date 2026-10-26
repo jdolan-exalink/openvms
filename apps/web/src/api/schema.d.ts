@@ -1085,6 +1085,28 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/cameras/{cameraId}/web/session": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                cameraId: string;
+            };
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Open the camera's own web interface through its edge agent
+         * @description Creates a short-lived session under /camproxy/{session}/ that proxies the camera web interface through the agent of the camera's server. The camera address is taken from the camera record only; the caller may choose the scheme and port. Requires servers.manage and access to configuration secrets on the camera's server. 404 when the camera has no usable private IPv4 address, 409 when the server has no (or an outdated) agent, 502 when the agent cannot reach the camera.
+         */
+        post: operations["createCameraWebSession"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/cameras/{cameraId}/lpr/test": {
         parameters: {
             query?: never;
@@ -4232,6 +4254,17 @@ export interface components {
             endpoint?: string;
             username?: string;
             password?: string;
+        };
+        CameraWebSessionRequest: {
+            /** @enum {string} */
+            scheme?: "http" | "https";
+            port?: number;
+        };
+        CameraWebSession: {
+            /** @description Same-origin path of the proxied camera interface */
+            url: string;
+            /** Format: date-time */
+            expires_at: string;
         };
         ServerCheckCamerasOnvifRequest: {
             interface_name?: string;
@@ -8552,6 +8585,38 @@ export interface operations {
             401: components["responses"]["Unauthorized"];
             403: components["responses"]["Forbidden"];
             404: components["responses"]["NotFound"];
+            502: components["responses"]["FrigateUnreachable"];
+        };
+    };
+    createCameraWebSession: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                cameraId: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: {
+            content: {
+                "application/json": components["schemas"]["CameraWebSessionRequest"];
+            };
+        };
+        responses: {
+            /** @description Session created */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["CameraWebSession"];
+                };
+            };
+            400: components["responses"]["BadRequest"];
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+            409: components["responses"]["Conflict"];
             502: components["responses"]["FrigateUnreachable"];
         };
     };
