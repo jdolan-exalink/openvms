@@ -12,6 +12,11 @@ The version of OpenVMS lives in `VERSION` and the version of the edge agent in
 
 ### Added
 
+- Camera configuration profiles and bulk apply (backend): tenant profiles are named sparse patches a
+  camera may follow (migration 00077); the normalized config now reports per-field provenance
+  (engine, profile, override); `/api/v1/camera-config/profiles`, `/cameras/{id}/profile/review|apply`
+  and `/camera-config/bulk/review|apply` (one section per call, at most 200 cameras). See
+  docs/camera-config-profiles.md.
 - Camera editor: PTZ tab (pad with speed, presets list and go, stored tours per camera, contextual
   controls over the preview) and a Fisheye tab that separates the original stream and recording from the
   dewarped view; tours use migration 00079 and `/api/v1/cameras/{id}/ptz/tours`. Preset editing and home

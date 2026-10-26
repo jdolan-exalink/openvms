@@ -39,3 +39,9 @@ SELECT s.camera_id FROM camera_config_state s
 JOIN cameras c ON c.id = s.camera_id AND c.tenant_id = s.tenant_id AND c.deleted_at IS NULL
 WHERE s.profile_id = @profile_id
 ORDER BY s.camera_id;
+
+-- name: ListCameraConfigProfileCameras :many
+SELECT s.camera_id, s.profile_version FROM camera_config_state s
+JOIN cameras c ON c.id = s.camera_id AND c.tenant_id = s.tenant_id AND c.deleted_at IS NULL
+WHERE s.profile_id = @profile_id
+ORDER BY s.camera_id;

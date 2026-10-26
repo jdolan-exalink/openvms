@@ -1407,6 +1407,208 @@ paths:
         "403": { $ref: "#/components/responses/Forbidden" }
         "404": { $ref: "#/components/responses/NotFound" }
         "409": { $ref: "#/components/responses/Conflict" }
+  /api/v1/camera-config/profiles:
+    get:
+      tags: [cameras]
+      operationId: listCameraConfigProfiles
+      summary: List the tenant's camera configuration profiles
+      description: |
+        Level 2 of the configuration: named sparse patches (same document as a camera's
+        overrides) a camera may follow. Requires cameras.view on the tenant. Each profile
+        carries how many cameras follow it.
+      responses:
+        "200":
+          description: Profiles
+          content:
+            application/json:
+              schema:
+                type: array
+                items: { $ref: "#/components/schemas/CameraConfigProfile" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+    post:
+      tags: [cameras]
+      operationId: createCameraConfigProfile
+      summary: Create a camera configuration profile
+      description: |
+        Requires cameras.manage on the tenant. The patch is validated like a camera patch:
+        unknown or untranslatable fields are 400; `detection.selection` is not allowed (use raw
+        `detection.objects`). Names are unique per tenant (409).
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/CameraConfigProfileInput" }
+      responses:
+        "201":
+          description: Created
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/CameraConfigProfile" }
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "409": { $ref: "#/components/responses/Conflict" }
+  /api/v1/camera-config/profiles/{profileId}:
+    parameters:
+      - { name: profileId, in: path, required: true, schema: { type: string, format: uuid } }
+    get:
+      tags: [cameras]
+      operationId: getCameraConfigProfile
+      summary: Get a profile and the cameras that follow it
+      description: |
+        `cameras` lists only the followers the caller can view; `camera_count` counts all of
+        them. A follower is `outdated` when the profile changed after it was last applied:
+        re-apply it with the camera's profile review/apply.
+      responses:
+        "200":
+          description: The profile
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/CameraConfigProfileDetail" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { $ref: "#/components/responses/NotFound" }
+    put:
+      tags: [cameras]
+      operationId: updateCameraConfigProfile
+      summary: Replace a profile
+      description: |
+        Requires cameras.manage. Bumps `version`. Cameras are NOT changed automatically.
+        `expected_version` (optional) makes a stale edit answer 409.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/CameraConfigProfileInput" }
+      responses:
+        "200":
+          description: Updated
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/CameraConfigProfile" }
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { $ref: "#/components/responses/NotFound" }
+        "409": { $ref: "#/components/responses/Conflict" }
+    delete:
+      tags: [cameras]
+      operationId: deleteCameraConfigProfile
+      summary: Delete a profile no camera follows
+      description: Requires cameras.manage. 409 (`profile_in_use`) while cameras follow it.
+      responses:
+        "204": { description: Deleted }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { $ref: "#/components/responses/NotFound" }
+        "409": { $ref: "#/components/responses/Conflict" }
+  /api/v1/cameras/{cameraId}/profile/review:
+    parameters:
+      - { name: cameraId, in: path, required: true, schema: { type: string, format: uuid } }
+    post:
+      tags: [cameras]
+      operationId: reviewCameraProfile
+      summary: Preview assigning (or unlinking) a profile
+      description: |
+        Requires cameras.manage on the camera and the permission the camera config review needs.
+        No side effects. `profile_id: null` previews an unlink. `review` lists the changes
+        that would reach the engine (profile fields not shadowed by the camera's overrides);
+        `parameters` is their count; `shadowed` are profile fields the overrides keep winning.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/CameraConfigProfileAssign" }
+      responses:
+        "200":
+          description: Preview
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/CameraConfigProfileReview" }
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { $ref: "#/components/responses/NotFound" }
+  /api/v1/cameras/{cameraId}/profile/apply:
+    parameters:
+      - { name: cameraId, in: path, required: true, schema: { type: string, format: uuid } }
+    post:
+      tags: [cameras]
+      operationId: applyCameraProfile
+      summary: Assign (or unlink) a profile
+      description: |
+        Stores the link and applies the profile fields that differ through the normal
+        desired/effective/audit pipeline with origin `profile`; the camera's overrides are never
+        rewritten. Unlinking (`profile_id: null`) changes no engine value; `keep_values`
+        (default true) turns the profile's current values into overrides. Audited as
+        CAMERA_CONFIG_PROFILE_CHANGED (and CAMERA_CONFIG_CHANGED for the apply).
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/CameraConfigProfileAssign" }
+      responses:
+        "200":
+          description: Outcome
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/CameraConfigProfileApplyResult" }
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { $ref: "#/components/responses/NotFound" }
+        "409": { $ref: "#/components/responses/Conflict" }
+  /api/v1/camera-config/bulk/review:
+    post:
+      tags: [cameras]
+      operationId: reviewCameraConfigBulk
+      summary: Review one configuration section for many cameras
+      description: |
+        Select cameras with `camera_ids` or `group_id` (members the caller can view), at most
+        200. `patch` must hold exactly one top-level section (detection, recording, analytics or
+        streams), else 400. Each row is `will_apply`, `incompatible`, `skipped` (no permission,
+        not visible, or nothing to change) or `unreachable`. No side effects.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/CameraConfigBulkRequest" }
+      responses:
+        "200":
+          description: Per-camera review
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/CameraConfigBulkReport" }
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { $ref: "#/components/responses/NotFound" }
+  /api/v1/camera-config/bulk/apply:
+    post:
+      tags: [cameras]
+      operationId: applyCameraConfigBulk
+      summary: Apply one configuration section to many cameras
+      description: |
+        Same selection and rules as the bulk review. Cameras are applied one after another
+        through the normal pipeline (revisions, verification, audit with the given origin);
+        fields outside the section are never touched and one failure stops nothing. Rows end
+        `applied`, `failed`, `incompatible`, `skipped` or `unreachable`.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/CameraConfigBulkRequest" }
+      responses:
+        "200":
+          description: Per-camera outcome
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/CameraConfigBulkReport" }
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { $ref: "#/components/responses/NotFound" }
   /api/v1/cameras/{cameraId}/video-options:
     parameters:
       - { name: cameraId, in: path, required: true, schema: { type: string, format: uuid } }
@@ -6276,6 +6478,11 @@ components:
       required: [identity, origin, device, capabilities, streams, recording, detection, analytics, zones, ptz, fisheye, integrations, overrides, sources, warnings, state]
       properties:
         state: { $ref: "#/components/schemas/CameraConfigState" }
+        profile: { $ref: "#/components/schemas/CameraConfigProfileRef" }
+        provenance:
+          type: object
+          description: Where each field's effective value comes from (engine, profile, override), by patch path.
+          additionalProperties: { $ref: "#/components/schemas/CameraConfigProvenance" }
         identity:
           type: object
           required: [camera_id, name, remote_name, tags, enabled]
@@ -6593,6 +6800,114 @@ components:
         result: { type: string, enum: [ok, error, unverified] }
         state: { $ref: "#/components/schemas/CameraConfigState" }
         review: { $ref: "#/components/schemas/CameraConfigReview" }
+    CameraConfigProvenance:
+      type: object
+      required: [source]
+      properties:
+        source: { type: string, enum: [engine, profile, override], description: "engine = heredado; profile = definido por perfil; override = modificado localmente" }
+        profile_id: { type: string }
+        profile_name: { type: string }
+    CameraConfigProfileRef:
+      type: object
+      required: [id, name, version, outdated]
+      properties:
+        id: { type: string }
+        name: { type: string }
+        version: { type: integer, format: int64 }
+        outdated: { type: boolean }
+    CameraConfigProfileInput:
+      type: object
+      required: [name, patch]
+      properties:
+        name: { type: string, maxLength: 120 }
+        description: { type: string, maxLength: 1000 }
+        patch: { $ref: "#/components/schemas/CameraConfigPatch" }
+        expected_version: { type: integer, format: int64, minimum: 0 }
+    CameraConfigProfile:
+      type: object
+      required: [id, name, description, patch, version, camera_count, created_at, updated_at]
+      properties:
+        id: { type: string, format: uuid }
+        name: { type: string }
+        description: { type: string }
+        patch: { $ref: "#/components/schemas/CameraConfigPatch" }
+        version: { type: integer, format: int64 }
+        camera_count: { type: integer }
+        created_at: { type: string, format: date-time }
+        updated_at: { type: string, format: date-time }
+    CameraConfigProfileDetail:
+      allOf:
+        - $ref: "#/components/schemas/CameraConfigProfile"
+        - type: object
+          required: [cameras]
+          properties:
+            cameras:
+              type: array
+              items:
+                type: object
+                required: [camera_id, outdated]
+                properties:
+                  camera_id: { type: string, format: uuid }
+                  outdated: { type: boolean }
+    CameraConfigProfileAssign:
+      type: object
+      required: [profile_id]
+      properties:
+        profile_id: { type: string, format: uuid, nullable: true, description: null unlinks the camera's profile }
+        keep_values: { type: boolean, default: true, description: Only when unlinking; keep the profile's current values as overrides. }
+    CameraConfigProfileReview:
+      type: object
+      required: [review, parameters, shadowed, converted, dropped]
+      properties:
+        profile: { $ref: "#/components/schemas/CameraConfigProfileRef" }
+        review: { $ref: "#/components/schemas/CameraConfigReview" }
+        parameters: { type: integer }
+        shadowed: { type: array, items: { type: string } }
+        converted: { type: array, items: { type: string } }
+        dropped: { type: array, items: { type: string } }
+    CameraConfigProfileApplyResult:
+      type: object
+      required: [review]
+      properties:
+        review: { $ref: "#/components/schemas/CameraConfigProfileReview" }
+        apply: { $ref: "#/components/schemas/CameraConfigApplyResult" }
+    CameraConfigBulkRequest:
+      type: object
+      required: [patch]
+      properties:
+        camera_ids: { type: array, maxItems: 200, items: { type: string, format: uuid } }
+        group_id: { type: string, format: uuid }
+        patch: { $ref: "#/components/schemas/CameraConfigPatch" }
+        origin: { type: string, enum: [group, api], default: group }
+    CameraConfigBulkReport:
+      type: object
+      required: [section, rows, totals, restarts]
+      properties:
+        section: { type: string, enum: [detection, recording, analytics, streams] }
+        restarts: { type: integer, description: Cameras whose change needs an engine restart. }
+        totals:
+          type: object
+          required: [cameras, will_apply, applied, failed, incompatible, skipped, unreachable]
+          properties:
+            cameras: { type: integer }
+            will_apply: { type: integer }
+            applied: { type: integer }
+            failed: { type: integer }
+            incompatible: { type: integer }
+            skipped: { type: integer }
+            unreachable: { type: integer }
+        rows:
+          type: array
+          items:
+            type: object
+            required: [camera_id, name, status, changes, impact, reason]
+            properties:
+              camera_id: { type: string }
+              name: { type: string }
+              status: { type: string, enum: [will_apply, applied, failed, incompatible, skipped, unreachable] }
+              changes: { type: array, items: { type: object, required: [path, label], properties: { path: { type: string }, label: { type: string }, from: { nullable: true }, to: { nullable: true } } } }
+              impact: { type: array, items: { type: object, required: [code, message], properties: { code: { type: string }, message: { type: string } } } }
+              reason: { type: string }
     CameraConfigStream:
       type: object
       required: [roles]

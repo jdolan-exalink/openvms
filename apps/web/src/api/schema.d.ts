@@ -1169,6 +1169,164 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/camera-config/profiles": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * List the tenant's camera configuration profiles
+         * @description Level 2 of the configuration: named sparse patches (same document as a camera's
+         *     overrides) a camera may follow. Requires cameras.view on the tenant. Each profile
+         *     carries how many cameras follow it.
+         */
+        get: operations["listCameraConfigProfiles"];
+        put?: never;
+        /**
+         * Create a camera configuration profile
+         * @description Requires cameras.manage on the tenant. The patch is validated like a camera patch:
+         *     unknown or untranslatable fields are 400; `detection.selection` is not allowed (use raw
+         *     `detection.objects`). Names are unique per tenant (409).
+         */
+        post: operations["createCameraConfigProfile"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/camera-config/profiles/{profileId}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                profileId: string;
+            };
+            cookie?: never;
+        };
+        /**
+         * Get a profile and the cameras that follow it
+         * @description `cameras` lists only the followers the caller can view; `camera_count` counts all of
+         *     them. A follower is `outdated` when the profile changed after it was last applied:
+         *     re-apply it with the camera's profile review/apply.
+         */
+        get: operations["getCameraConfigProfile"];
+        /**
+         * Replace a profile
+         * @description Requires cameras.manage. Bumps `version`. Cameras are NOT changed automatically.
+         *     `expected_version` (optional) makes a stale edit answer 409.
+         */
+        put: operations["updateCameraConfigProfile"];
+        post?: never;
+        /**
+         * Delete a profile no camera follows
+         * @description Requires cameras.manage. 409 (`profile_in_use`) while cameras follow it.
+         */
+        delete: operations["deleteCameraConfigProfile"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/cameras/{cameraId}/profile/review": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                cameraId: string;
+            };
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Preview assigning (or unlinking) a profile
+         * @description Requires cameras.manage on the camera and the permission the camera config review needs.
+         *     No side effects. `profile_id: null` previews an unlink. `review` lists the changes
+         *     that would reach the engine (profile fields not shadowed by the camera's overrides);
+         *     `parameters` is their count; `shadowed` are profile fields the overrides keep winning.
+         */
+        post: operations["reviewCameraProfile"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/cameras/{cameraId}/profile/apply": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                cameraId: string;
+            };
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Assign (or unlink) a profile
+         * @description Stores the link and applies the profile fields that differ through the normal
+         *     desired/effective/audit pipeline with origin `profile`; the camera's overrides are never
+         *     rewritten. Unlinking (`profile_id: null`) changes no engine value; `keep_values`
+         *     (default true) turns the profile's current values into overrides. Audited as
+         *     CAMERA_CONFIG_PROFILE_CHANGED (and CAMERA_CONFIG_CHANGED for the apply).
+         */
+        post: operations["applyCameraProfile"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/camera-config/bulk/review": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Review one configuration section for many cameras
+         * @description Select cameras with `camera_ids` or `group_id` (members the caller can view), at most
+         *     200. `patch` must hold exactly one top-level section (detection, recording, analytics or
+         *     streams), else 400. Each row is `will_apply`, `incompatible`, `skipped` (no permission,
+         *     not visible, or nothing to change) or `unreachable`. No side effects.
+         */
+        post: operations["reviewCameraConfigBulk"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/camera-config/bulk/apply": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Apply one configuration section to many cameras
+         * @description Same selection and rules as the bulk review. Cameras are applied one after another
+         *     through the normal pipeline (revisions, verification, audit with the given origin);
+         *     fields outside the section are never touched and one failure stops nothing. Rows end
+         *     `applied`, `failed`, `incompatible`, `skipped` or `unreachable`.
+         */
+        post: operations["applyCameraConfigBulk"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/cameras/{cameraId}/video-options": {
         parameters: {
             query?: never;
@@ -4942,6 +5100,11 @@ export interface components {
         /** @description Engine-agnostic configuration model of one camera. */
         CameraConfig: {
             state: components["schemas"]["CameraConfigState"];
+            profile?: components["schemas"]["CameraConfigProfileRef"];
+            /** @description Where each field's effective value comes from (engine, profile, override), by patch path. */
+            provenance?: {
+                [key: string]: components["schemas"]["CameraConfigProvenance"];
+            };
             identity: {
                 camera_id: string;
                 name: string;
@@ -5223,6 +5386,117 @@ export interface components {
             result: "ok" | "error" | "unverified";
             state: components["schemas"]["CameraConfigState"];
             review: components["schemas"]["CameraConfigReview"];
+        };
+        CameraConfigProvenance: {
+            /**
+             * @description engine = heredado; profile = definido por perfil; override = modificado localmente
+             * @enum {string}
+             */
+            source: "engine" | "profile" | "override";
+            profile_id?: string;
+            profile_name?: string;
+        };
+        CameraConfigProfileRef: {
+            id: string;
+            name: string;
+            /** Format: int64 */
+            version: number;
+            outdated: boolean;
+        };
+        CameraConfigProfileInput: {
+            name: string;
+            description?: string;
+            patch: components["schemas"]["CameraConfigPatch"];
+            /** Format: int64 */
+            expected_version?: number;
+        };
+        CameraConfigProfile: {
+            /** Format: uuid */
+            id: string;
+            name: string;
+            description: string;
+            patch: components["schemas"]["CameraConfigPatch"];
+            /** Format: int64 */
+            version: number;
+            camera_count: number;
+            /** Format: date-time */
+            created_at: string;
+            /** Format: date-time */
+            updated_at: string;
+        };
+        CameraConfigProfileDetail: components["schemas"]["CameraConfigProfile"] & {
+            cameras: {
+                /** Format: uuid */
+                camera_id: string;
+                outdated: boolean;
+            }[];
+        };
+        CameraConfigProfileAssign: {
+            /**
+             * Format: uuid
+             * @description null unlinks the camera's profile
+             */
+            profile_id: string | null;
+            /**
+             * @description Only when unlinking; keep the profile's current values as overrides.
+             * @default true
+             */
+            keep_values: boolean;
+        };
+        CameraConfigProfileReview: {
+            profile?: components["schemas"]["CameraConfigProfileRef"];
+            review: components["schemas"]["CameraConfigReview"];
+            parameters: number;
+            shadowed: string[];
+            converted: string[];
+            dropped: string[];
+        };
+        CameraConfigProfileApplyResult: {
+            review: components["schemas"]["CameraConfigProfileReview"];
+            apply?: components["schemas"]["CameraConfigApplyResult"];
+        };
+        CameraConfigBulkRequest: {
+            camera_ids?: string[];
+            /** Format: uuid */
+            group_id?: string;
+            patch: components["schemas"]["CameraConfigPatch"];
+            /**
+             * @default group
+             * @enum {string}
+             */
+            origin: "group" | "api";
+        };
+        CameraConfigBulkReport: {
+            /** @enum {string} */
+            section: "detection" | "recording" | "analytics" | "streams";
+            /** @description Cameras whose change needs an engine restart. */
+            restarts: number;
+            totals: {
+                cameras: number;
+                will_apply: number;
+                applied: number;
+                failed: number;
+                incompatible: number;
+                skipped: number;
+                unreachable: number;
+            };
+            rows: {
+                camera_id: string;
+                name: string;
+                /** @enum {string} */
+                status: "will_apply" | "applied" | "failed" | "incompatible" | "skipped" | "unreachable";
+                changes: {
+                    path: string;
+                    label: string;
+                    from?: unknown;
+                    to?: unknown;
+                }[];
+                impact: {
+                    code: string;
+                    message: string;
+                }[];
+                reason: string;
+            }[];
         };
         CameraConfigStream: {
             name?: string;
@@ -9191,6 +9465,253 @@ export interface operations {
             403: components["responses"]["Forbidden"];
             404: components["responses"]["NotFound"];
             409: components["responses"]["Conflict"];
+        };
+    };
+    listCameraConfigProfiles: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Profiles */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["CameraConfigProfile"][];
+                };
+            };
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+        };
+    };
+    createCameraConfigProfile: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["CameraConfigProfileInput"];
+            };
+        };
+        responses: {
+            /** @description Created */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["CameraConfigProfile"];
+                };
+            };
+            400: components["responses"]["BadRequest"];
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            409: components["responses"]["Conflict"];
+        };
+    };
+    getCameraConfigProfile: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                profileId: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The profile */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["CameraConfigProfileDetail"];
+                };
+            };
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+        };
+    };
+    updateCameraConfigProfile: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                profileId: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["CameraConfigProfileInput"];
+            };
+        };
+        responses: {
+            /** @description Updated */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["CameraConfigProfile"];
+                };
+            };
+            400: components["responses"]["BadRequest"];
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+            409: components["responses"]["Conflict"];
+        };
+    };
+    deleteCameraConfigProfile: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                profileId: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Deleted */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+            409: components["responses"]["Conflict"];
+        };
+    };
+    reviewCameraProfile: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                cameraId: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["CameraConfigProfileAssign"];
+            };
+        };
+        responses: {
+            /** @description Preview */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["CameraConfigProfileReview"];
+                };
+            };
+            400: components["responses"]["BadRequest"];
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+        };
+    };
+    applyCameraProfile: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                cameraId: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["CameraConfigProfileAssign"];
+            };
+        };
+        responses: {
+            /** @description Outcome */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["CameraConfigProfileApplyResult"];
+                };
+            };
+            400: components["responses"]["BadRequest"];
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+            409: components["responses"]["Conflict"];
+        };
+    };
+    reviewCameraConfigBulk: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["CameraConfigBulkRequest"];
+            };
+        };
+        responses: {
+            /** @description Per-camera review */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["CameraConfigBulkReport"];
+                };
+            };
+            400: components["responses"]["BadRequest"];
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+        };
+    };
+    applyCameraConfigBulk: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["CameraConfigBulkRequest"];
+            };
+        };
+        responses: {
+            /** @description Per-camera outcome */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["CameraConfigBulkReport"];
+                };
+            };
+            400: components["responses"]["BadRequest"];
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
         };
     };
     getCameraVideoOptions: {

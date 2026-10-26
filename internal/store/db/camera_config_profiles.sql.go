@@ -127,6 +127,38 @@ func (q *Queries) ListCameraConfigProfileCameraIDs(ctx context.Context, profileI
 	return items, nil
 }
 
+const listCameraConfigProfileCameras = `-- name: ListCameraConfigProfileCameras :many
+SELECT s.camera_id, s.profile_version FROM camera_config_state s
+JOIN cameras c ON c.id = s.camera_id AND c.tenant_id = s.tenant_id AND c.deleted_at IS NULL
+WHERE s.profile_id = $1
+ORDER BY s.camera_id
+`
+
+type ListCameraConfigProfileCamerasRow struct {
+	CameraID       uuid.UUID
+	ProfileVersion *int64
+}
+
+func (q *Queries) ListCameraConfigProfileCameras(ctx context.Context, profileID *uuid.UUID) ([]ListCameraConfigProfileCamerasRow, error) {
+	rows, err := q.db.Query(ctx, listCameraConfigProfileCameras, profileID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []ListCameraConfigProfileCamerasRow{}
+	for rows.Next() {
+		var i ListCameraConfigProfileCamerasRow
+		if err := rows.Scan(&i.CameraID, &i.ProfileVersion); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const listCameraConfigProfiles = `-- name: ListCameraConfigProfiles :many
 SELECT p.id, p.tenant_id, p.name, p.description, p.patch, p.version, p.created_by, p.created_at,
        p.updated_by, p.updated_at,

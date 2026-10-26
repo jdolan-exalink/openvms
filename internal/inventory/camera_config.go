@@ -215,6 +215,7 @@ func (s *Service) ApplyCameraConfigWith(ctx context.Context, actor authz.Actor, 
 
 	var t configTarget
 	var rec db.CameraConfigState
+	var inherited camconfig.Patch
 	err := s.tx(ctx, actor, func(q *db.Queries, c *access.Checker) error {
 		var err error
 		if t, err = s.loadConfigTarget(ctx, id, q, c); err != nil {
@@ -227,7 +228,15 @@ func (s *Service) ApplyCameraConfigWith(ctx context.Context, actor authz.Actor, 
 		if err != nil {
 			return err
 		}
-		merged, err := json.Marshal(camconfig.Merge(StoredConfigState(&cur).Desired, patch))
+		if inherited, err = profilePatchOf(ctx, q, cur.ProfileID); err != nil {
+			return err
+		}
+		// A change that comes from the camera's profile is not an override of the camera.
+		next := camconfig.Merge(StoredConfigState(&cur).Desired, patch)
+		if origin == camconfig.OriginProfile {
+			next = StoredConfigState(&cur).Desired
+		}
+		merged, err := json.Marshal(next)
 		if err != nil {
 			return err
 		}
@@ -242,7 +251,8 @@ func (s *Service) ApplyCameraConfigWith(ctx context.Context, actor authz.Actor, 
 	if err != nil {
 		return ConfigApplyResult{}, err
 	}
-	desired := StoredConfigState(&rec).Desired
+	// The camera's effective desired state: its profile overlaid with its own overrides.
+	desired := camconfig.Merge(inherited, StoredConfigState(&rec).Desired)
 
 	ad := s.configAdapter(ctx, actor, t)
 	ad.Video = video

@@ -95,6 +95,8 @@ func statusFor(err error) (int, string, string) {
 		return http.StatusConflict, "conflict", err.Error()
 	case errors.Is(err, provision.ErrNotFound):
 		return http.StatusNotFound, "not_found", "not found"
+	case errors.As(err, new(*inventory.ProfileInUseError)):
+		return http.StatusConflict, "profile_in_use", err.Error()
 	case errors.Is(err, inventory.ErrCameraGroupVersionConflict):
 		return http.StatusConflict, "conflict", err.Error()
 	case errors.Is(err, rules.ErrVersionConflict):
