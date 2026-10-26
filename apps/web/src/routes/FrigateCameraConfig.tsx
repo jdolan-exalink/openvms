@@ -19,6 +19,7 @@ import { SyncStatusPanel } from "@/components/camera/SyncStatusPanel";
 import { CameraPreview } from "@/components/camera/CameraPreview";
 import { CameraSummaryCards } from "@/components/camera/CameraSummaryCards";
 import { CameraTabs } from "@/components/camera/CameraTabs";
+import { VideoTab } from "@/components/camera/video/VideoTab";
 import { CameraWebView } from "@/components/camera/CameraWebView";
 import { MoreActions } from "@/components/camera/MoreActions";
 import { PendingChangesBar } from "@/components/camera/PendingChangesBar";
@@ -403,7 +404,7 @@ function FrigateCameraConfigScreen({ cameraId }: { cameraId: string }) {
             { label: "Motor", value: version ? `Frigate ${version}` : "Frigate" },
             { label: "Cámara", value: cam?.remote_name || NONE },
           ]}
-          video={videoRows(cam, config)}
+          video={videoRows(cam, config, change.config.data)}
           device={deviceRows(cam, config)}
           capabilities={capabilityList(cam, config)}
         />
@@ -416,7 +417,7 @@ function FrigateCameraConfigScreen({ cameraId }: { cameraId: string }) {
         onSelect={(t) => setActive(t.sections[0] ?? GENERAL)}
       />
 
-      {tab.sections.length > 1 && (
+      {tab.sections.length > 1 && tab.id !== "video" && (
         <nav aria-label={`Subsecciones de ${tab.label}`} className="flex flex-wrap gap-2">
           {tab.sections.map((s) => (
             <button
@@ -442,7 +443,29 @@ function FrigateCameraConfigScreen({ cameraId }: { cameraId: string }) {
         className="flex min-w-0 flex-1 flex-col gap-5 rounded-m3-2xl bg-surface-1 p-5 border border-outline-variant/60 shadow-sm"
       >
         {tab.id === "analytics" && cameraType === "lpr_frigate" && section !== PROVISION && <LprTestCard cameraId={cameraId} engine="frigate" />}
-        {tab.sections.length === 0 ? (
+        {tab.id === "video" ? (
+          <VideoTab
+            cameraId={cameraId}
+            legacy={
+              tab.sections.length > 0 &&
+              tab.sections.map((s) => (
+                <div key={s} className="flex flex-col gap-3">
+                  <h4 className="text-xs font-bold uppercase tracking-wider text-muted">{sectionTitle(s)}</h4>
+                  <SectionPanel
+                    section={s}
+                    schema={camProps[s]}
+                    value={valueOf(s)}
+                    onChange={(v) => setEdits((e) => ({ ...e, [s]: v }))}
+                    ctx={ctx}
+                    camera={doc.data}
+                    config={config}
+                    onEditZones={() => setZoneEditor(true)}
+                  />
+                </div>
+              ))
+            }
+          />
+        ) : tab.sections.length === 0 ? (
           <p className="text-sm text-muted">Esta versión de Frigate no expone ajustes en esta pestaña.</p>
         ) : section === GENERAL ? (
           <CameraGeneral cameraId={cameraId} canManage={canManageCamera} frigate={general} onApplyToFrigate={onApplyToFrigate} />
@@ -488,7 +511,7 @@ function FrigateCameraConfigScreen({ cameraId }: { cameraId: string }) {
           />
         )}
 
-        {!isPseudo && Object.keys(errors).some((p) => p.split(".")[0] === section) && (
+        {!isPseudo && Object.keys(errors).some((p) => (tab.id === "video" ? tab.sections.includes(p.split(".")[0]!) : p.split(".")[0] === section)) && (
           <p role="alert" className="text-xs text-bad">
             Hay valores no válidos en esta sección.
           </p>

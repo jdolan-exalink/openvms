@@ -1,4 +1,5 @@
 import type { Schemas } from "@/api/client";
+import { streamSummary } from "./video/videoParams";
 
 type Camera = Schemas["Camera"];
 type Rec = Record<string, unknown>;
@@ -64,7 +65,7 @@ export type StreamRow = { id: "primary" | "detect" | "record"; label: string; va
  * Video summary rows. Principal is the first input, Detección the detect-role input with its
  * resolution and fps, Grabación only when the record input is a different one.
  */
-export function videoRows(camera: Camera | undefined, config: Rec): StreamRow[] {
+export function videoRows(camera: Camera | undefined, config: Rec, model?: Schemas["CameraConfig"]): StreamRow[] {
   const ffmpeg = isRec(config.ffmpeg) ? config.ffmpeg : undefined;
   const inputs = Array.isArray(ffmpeg?.inputs) ? ffmpeg.inputs.filter(isRec) : [];
   const roles = (i: Rec) => (Array.isArray(i.roles) ? i.roles.filter((r): r is string => typeof r === "string") : []);
@@ -77,7 +78,13 @@ export function videoRows(camera: Camera | undefined, config: Rec): StreamRow[] 
 
   const rows: StreamRow[] = [{ id: "primary", label: "Principal", value: join([camera?.hq_codec?.toUpperCase()]) }];
   rows.push({ id: "detect", label: "Detección", value: join([size, fps ? `${fps} fps` : undefined, camera?.live_codec?.toUpperCase()]) });
-  if (recordIdx > 0 && recordIdx !== detectIdx) rows.push({ id: "record", label: "Grabación", value: join(["entrada " + (recordIdx + 1)]) });
+  // The normalized model knows the real values (enriched over ONVIF); use them when it has any.
+  const primary = streamSummary(model?.streams?.primary);
+  if (primary) rows[0] = { ...rows[0]!, value: primary };
+  const det = streamSummary(model?.streams?.detection);
+  if (det) rows[1] = { ...rows[1]!, value: det };
+  if (model?.streams?.recording) rows.push({ id: "record", label: "Grabación", value: streamSummary(model.streams?.recording) ?? NONE });
+  else if (!model && recordIdx > 0 && recordIdx !== detectIdx) rows.push({ id: "record", label: "Grabación", value: join(["entrada " + (recordIdx + 1)]) });
   return rows;
 }
 

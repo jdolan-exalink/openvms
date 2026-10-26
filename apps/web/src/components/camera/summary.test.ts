@@ -70,3 +70,18 @@ describe("deviceRows", () => {
     expect(rows.map((r) => r.value)).toEqual(["—", "—", "10.0.0.2", "—"]);
   });
 });
+
+describe("videoRows with the normalized model", () => {
+  const model = (streams: object) => ({ streams }) as Schemas["CameraConfig"];
+
+  it("shows the real principal and detection values", () => {
+    const rows = videoRows(camera(), {}, model({ primary: { width: 1920, height: 1080, fps: 15, codec: "h264", roles: [] }, detection: { width: 640, height: 360, fps: 5, codec: "h264", roles: [] } }));
+    expect(rows.map((r) => `${r.label} ${r.value}`)).toEqual(["Principal 1920×1080 · 15 FPS · H.264", "Detección 640×360 · 5 FPS · H.264"]);
+  });
+
+  it("keeps the dash when the model has no values and adds Grabación only when distinct", () => {
+    expect(videoRows(camera(), {}, model({}))[0]!.value).toBe("—");
+    const rows = videoRows(camera(), {}, model({ recording: { width: 1280, height: 720, roles: [] } }));
+    expect(rows.find((r) => r.id === "record")?.value).toBe("1280×720");
+  });
+});

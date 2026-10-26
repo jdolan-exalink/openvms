@@ -535,6 +535,16 @@ describe("FrigateCameraConfig", () => {
       expect(await frigatePatch(fetchMock)!.clone().json()).toEqual({ sections: { ffmpeg: { inputs: [{ path: "rtsp://10.0.0.9/2", roles: ["detect"] }] } } });
     });
 
+    it("renders the Video tab as streams and keeps the Frigate video sections under Avanzado de video", async () => {
+      mountFull({ config: { ffmpeg: { inputs: [{ path: "rtsp://10.0.0.9/1", roles: ["detect"] }] } } });
+      await goTo("Video");
+      expect(await screen.findByRole("region", { name: "Stream principal" })).toBeInTheDocument();
+      expect(screen.getByRole("region", { name: "Stream de detección" })).toBeInTheDocument();
+      const details = screen.getByText("Avanzado de video (Frigate)").closest("details")!;
+      expect(details.open).toBe(false);
+      expect(within(details).getByText("FFmpeg y streams")).toBeInTheDocument();
+    });
+
     it("locks the Frigate fields without the config permission", async () => {
       mountFull({ editable: false, config: { audio: { enabled: true } } });
       expect(await screen.findByRole("switch", { name: "Audio" })).toBeDisabled();
