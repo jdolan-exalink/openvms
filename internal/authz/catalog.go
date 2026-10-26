@@ -57,6 +57,19 @@ const (
 	// password), the raw config.yml and the stored revisions that contain them.
 	ServersConfigSecrets Permission = "servers.config.secrets" //nolint:gosec // permission name, not a credential
 
+	// Granular camera configuration (PRD §40). They refine servers.config / cameras.* for the
+	// normalized camera editor; see CompatFor for how legacy grants keep working.
+	CamerasConfigView      Permission = "cameras.config.view"
+	CamerasConfigEdit      Permission = "cameras.config.edit"
+	CamerasConfigVideo     Permission = "cameras.config.video"
+	CamerasConfigRecording Permission = "cameras.config.recording"
+	CamerasConfigAnalytics Permission = "cameras.config.analytics"
+	CamerasConfigPTZ       Permission = "cameras.config.ptz"
+	CamerasWebAccess       Permission = "cameras.web.access"
+	CamerasConfigAdvanced  Permission = "cameras.config.advanced"
+	CamerasConfigYAML      Permission = "cameras.config.yaml"
+	CamerasRestart         Permission = "cameras.restart"
+
 	UsersView   Permission = "users.view"
 	UsersManage Permission = "users.manage"
 
@@ -128,6 +141,16 @@ var Catalog = []Definition{
 	{ServersRestart, "Reiniciar servidores Frigate", ScopeServer},
 	{ServersConfig, "Editar configuración de Frigate", ScopeServer},
 	{ServersConfigSecrets, "Ver y editar credenciales, URLs de streams y el YAML completo de Frigate", ScopeServer},
+	{CamerasConfigView, "Cámaras: ver la configuración", ScopeCamera},
+	{CamerasConfigEdit, "Cámaras: modificar la configuración (detección e identidad)", ScopeCamera},
+	{CamerasConfigVideo, "Cámaras: modificar video (streams)", ScopeCamera},
+	{CamerasConfigRecording, "Cámaras: modificar grabación", ScopeCamera},
+	{CamerasConfigAnalytics, "Cámaras: modificar analíticas", ScopeCamera},
+	{CamerasConfigPTZ, "Cámaras: modificar PTZ", ScopeCamera},
+	{CamerasWebAccess, "Cámaras: acceder a la web de la cámara", ScopeCamera},
+	{CamerasConfigAdvanced, "Cámaras: configuración avanzada", ScopeCamera},
+	{CamerasConfigYAML, "Cámaras: editar YAML", ScopeCamera},
+	{CamerasRestart, "Cámaras: reiniciar el dispositivo", ScopeCamera},
 	{UsersView, "Ver usuarios", ScopeTenant},
 	{UsersManage, "Administrar usuarios", ScopeTenant},
 	{GroupsView, "Ver grupos de usuarios", ScopeTenant},
