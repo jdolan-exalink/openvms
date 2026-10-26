@@ -1169,6 +1169,173 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/cameras/{cameraId}/frigate-yaml": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                cameraId: string;
+            };
+            cookie?: never;
+        };
+        /**
+         * Get the YAML of one section of the camera's Frigate configuration
+         * @description Advanced → "Editar YAML de detección". Requires the permission to edit YAML
+         *     (cameras.config.yaml; the legacy pair servers.config + servers.config.secrets keeps
+         *     working). `section` is a top-level camera section (detect, objects, record, snapshots,
+         *     motion, zones, ffmpeg, ...). Credentials are masked exactly like the
+         *     frigate-config document unless the actor holds servers.config.secrets (`secrets_visible`);
+         *     a masked placeholder left untouched in the YAML never overwrites the real value when it
+         *     is saved. `managed_paths` are the parts of the section that OpenVMS manages through the
+         *     camera's desired state (profile overlaid with overrides), relative to the section, so
+         *     the UI can warn before editing them. `revision` is the camera's desired-state revision to
+         *     send back as `expected_revision`.
+         */
+        get: operations["getCameraFrigateYaml"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/cameras/{cameraId}/frigate-yaml/validate": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                cameraId: string;
+            };
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Validate an edited section YAML without saving it
+         * @description Same permission as reading the YAML. Returns syntax errors (line and column), schema
+         *     errors (checked against the Frigate camera schema the schema editor uses), the diff
+         *     against the current section (leaf values, credentials removed) and the managed
+         *     parameters the edit would change (`managed_conflicts`). It has no side effects.
+         *     Keys removed from the YAML are not deleted from Frigate (a warning says so).
+         */
+        post: operations["validateCameraFrigateYaml"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/cameras/{cameraId}/frigate-yaml/apply": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                cameraId: string;
+            };
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Save an edited section YAML
+         * @description Same permission as reading the YAML, plus what the Frigate camera PATCH needs. The edit
+         *     goes through the existing sectioned PATCH (revisions, rollback copy and audit of that
+         *     path apply). Answers 400 when the YAML has syntax or schema errors, 409 when
+         *     `expected_revision` is stale (`revision_conflict`) or when the edit changes parameters
+         *     managed by OpenVMS and `confirm_managed_conflicts` is not true (`managed_conflict`);
+         *     nothing is written in those cases. Only changed values are sent: untouched masked
+         *     placeholders and unchanged credentials are never written. A confirmed edit of managed
+         *     parameters leaves the camera in `drift` (diferencia detectada) instead of being
+         *     overwritten silently. Audited as CAMERA_CONFIG_CHANGED with origin `yaml`.
+         */
+        post: operations["applyCameraFrigateYaml"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/cameras/{cameraId}/normalized-config/history": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                cameraId: string;
+            };
+            cookie?: never;
+        };
+        /**
+         * List the recent configuration changes of a camera
+         * @description Requires servers.config on the camera's server (like the review). Newest first, from the
+         *     audit trail (CAMERA_CONFIG_CHANGED): who, when, origin, result and the paths with old and
+         *     new values (credentials removed). `rollbackable` says whether the old values can be
+         *     restored through the rollback endpoint; `rollback_reason` says why not.
+         */
+        get: operations["listCameraConfigHistory"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/cameras/{cameraId}/normalized-config/rollback": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                cameraId: string;
+            };
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Restore the configuration a change replaced
+         * @description "Restaurar configuración anterior". Builds the inverse patch from the old values of a
+         *     recorded change (`audit_id`, default the latest change that can be undone) and applies
+         *     it through the normal review/apply pipeline with origin `ui`; the audit row of the
+         *     rollback names the change it undid (`rollback_of`). It needs the same permissions as an
+         *     apply for every section it touches. Answers 400 (nothing written) when the old values
+         *     are not available or cannot be restored with the patch type (video, changes made with
+         *     YAML), and 409 on a stale `expected_revision`.
+         */
+        post: operations["rollbackCameraConfig"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/cameras/{cameraId}/advanced": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                cameraId: string;
+            };
+            cookie?: never;
+        };
+        /**
+         * Read-only technical information of the camera by backend
+         * @description Requires cameras.config.advanced (legacy servers.config keeps working) and cameras.view.
+         *     Frigate: sections of the generated configuration and which ones OpenVMS manages.
+         *     ONVIF: media profiles with stream URIs reduced to scheme, host and path, capabilities
+         *     and reported parameters, from the stored probe (no call to the camera). Provision: the
+         *     ISR link and its technical data, from existing evidence and the agent's status (read
+         *     only). Raw engine or ffmpeg errors never appear here; see `plain_error` in apply results.
+         */
+        get: operations["getCameraAdvanced"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/camera-config/profiles": {
         parameters: {
             query?: never;
@@ -5386,6 +5553,196 @@ export interface components {
             result: "ok" | "error" | "unverified";
             state: components["schemas"]["CameraConfigState"];
             review: components["schemas"]["CameraConfigReview"];
+            /**
+             * @description The apply's failure in plain words with the technical text apart. Additive: `state.last_error`
+             *     keeps the sanitized raw text. Absent when the apply did not fail.
+             */
+            plain_error?: components["schemas"]["CameraPlainError"];
+        };
+        /**
+         * @description A failure in plain words (`message`, shown by default) with the sanitized technical text
+         *     (`technical`, shown under "Ver información técnica"). Credentials, query strings and
+         *     key=value secrets are removed from `technical`.
+         */
+        CameraPlainError: {
+            /** @example No se pudo iniciar el stream de grabación. */
+            message: string;
+            /** @example ffmpeg exited with code 1 */
+            technical: string;
+        };
+        /** @description A part of the engine configuration that OpenVMS manages (path relative to the section). */
+        CameraYamlManagedPath: {
+            /** @example detection.enabled */
+            patch_path: string;
+            /** @example enabled */
+            engine_path: string;
+            /** @description The value OpenVMS wants */
+            value: unknown;
+        };
+        CameraYamlSection: {
+            /** Format: uuid */
+            camera_id: string;
+            section: string;
+            yaml: string;
+            /** @description false when the camera has no such section yet */
+            exists: boolean;
+            secrets_visible: boolean;
+            managed_paths: components["schemas"]["CameraYamlManagedPath"][];
+            /** Format: int64 */
+            revision: number;
+        };
+        CameraYamlSyntaxIssue: {
+            line: number;
+            column: number;
+            message: string;
+        };
+        CameraYamlSchemaIssue: {
+            /** @description Dotted path from the section */
+            path: string;
+            message: string;
+        };
+        CameraYamlChange: {
+            path: string;
+            /** @enum {string} */
+            kind: "added" | "removed" | "changed";
+            from?: unknown;
+            to?: unknown;
+        };
+        CameraYamlConflict: {
+            patch_path: string;
+            engine_path: string;
+            desired?: unknown;
+            new?: unknown;
+        };
+        CameraYamlValidation: {
+            section: string;
+            valid: boolean;
+            schema_checked: boolean;
+            syntax: components["schemas"]["CameraYamlSyntaxIssue"][];
+            schema: components["schemas"]["CameraYamlSchemaIssue"][];
+            changes: components["schemas"]["CameraYamlChange"][];
+            managed_conflicts: components["schemas"]["CameraYamlConflict"][];
+            warnings: string[];
+            /** Format: int64 */
+            revision: number;
+        };
+        CameraYamlApplyResult: {
+            validation: components["schemas"]["CameraYamlValidation"];
+            frigate: components["schemas"]["FrigatePatchResult"];
+            /** @description true when managed parameters were changed and the camera was left in drift */
+            marked_drift: boolean;
+            /**
+             * Format: int64
+             * @description The camera's desired-state revision after the edit
+             */
+            revision: number;
+            /** @description Stored sync state when it was just marked; empty otherwise */
+            sync_state: string;
+        };
+        CameraConfigHistoryChange: {
+            path: string;
+            from?: unknown;
+            to?: unknown;
+        };
+        CameraConfigHistoryEntry: {
+            /**
+             * Format: int64
+             * @description Audit id; pass it as audit_id to roll back
+             */
+            id: number;
+            /** Format: date-time */
+            time: string;
+            /** Format: uuid */
+            user_id?: string | null;
+            user?: string;
+            origin: components["schemas"]["CameraConfigOrigin"];
+            /** @enum {string} */
+            result: "ok" | "error" | "unverified";
+            /** @description Set for YAML edits */
+            section?: string;
+            changes: components["schemas"]["CameraConfigHistoryChange"][];
+            error?: components["schemas"]["CameraPlainError"];
+            /**
+             * Format: int64
+             * @description The change this one undid
+             */
+            rollback_of?: number;
+            /**
+             * Format: int64
+             * @description The change that undid this one
+             */
+            rolled_back_by?: number;
+            rollbackable: boolean;
+            rollback_reason?: string;
+        };
+        CameraConfigRollbackResult: {
+            /**
+             * Format: int64
+             * @description Audit id of the change that was undone
+             */
+            rolled_back: number;
+            result: components["schemas"]["CameraConfigApplyResult"];
+        };
+        CameraAdvancedProfile: {
+            token: string;
+            name: string;
+            encoding: string;
+            width: number;
+            height: number;
+            fps: number;
+            bitrate: number;
+            /** @description Scheme */
+            stream_uri: string;
+        };
+        CameraAdvanced: {
+            /** Format: uuid */
+            camera_id: string;
+            frigate: {
+                available: boolean;
+                reason?: string;
+                version: string;
+                sections: string[];
+                managed_sections: string[];
+                /** Format: int64 */
+                desired_revision: number;
+                /** Format: int64 */
+                applied_revision: number;
+                sync_state: string;
+            };
+            onvif: {
+                configured: boolean;
+                /** @description Scheme */
+                endpoint: string;
+                version?: string;
+                profile?: string;
+                manufacturer?: string;
+                model?: string;
+                firmware?: string;
+                profiles: components["schemas"]["CameraAdvancedProfile"][];
+                capabilities: {
+                    [key: string]: boolean;
+                };
+                services: string[];
+                reported: {
+                    [key: string]: unknown;
+                };
+            };
+            provision: {
+                evidence: boolean;
+                tags: string[];
+                manufacturer?: string;
+                model?: string;
+                /** @description The agent's view of the camera; reachable=false when it could not be asked. */
+                link: {
+                    reachable: boolean;
+                    registered: boolean;
+                    online: boolean;
+                    /** Format: int64 */
+                    event_count: number;
+                    /** Format: date-time */
+                    last_event_at?: string | null;
+                };
+            };
         };
         CameraConfigProvenance: {
             /**
@@ -9465,6 +9822,193 @@ export interface operations {
             403: components["responses"]["Forbidden"];
             404: components["responses"]["NotFound"];
             409: components["responses"]["Conflict"];
+        };
+    };
+    getCameraFrigateYaml: {
+        parameters: {
+            query: {
+                section: string;
+            };
+            header?: never;
+            path: {
+                cameraId: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The section as YAML */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["CameraYamlSection"];
+                };
+            };
+            400: components["responses"]["BadRequest"];
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+        };
+    };
+    validateCameraFrigateYaml: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                cameraId: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": {
+                    section: string;
+                    yaml: string;
+                };
+            };
+        };
+        responses: {
+            /** @description Validation result (an invalid edit is still 200 with valid=false) */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["CameraYamlValidation"];
+                };
+            };
+            400: components["responses"]["BadRequest"];
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+        };
+    };
+    applyCameraFrigateYaml: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                cameraId: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": {
+                    section: string;
+                    yaml: string;
+                    /** Format: int64 */
+                    expected_revision: number;
+                    /** @default false */
+                    confirm_managed_conflicts?: boolean;
+                };
+            };
+        };
+        responses: {
+            /** @description The edit was saved */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["CameraYamlApplyResult"];
+                };
+            };
+            400: components["responses"]["BadRequest"];
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+            409: components["responses"]["Conflict"];
+        };
+    };
+    listCameraConfigHistory: {
+        parameters: {
+            query?: {
+                limit?: number;
+            };
+            header?: never;
+            path: {
+                cameraId: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Changes */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["CameraConfigHistoryEntry"][];
+                };
+            };
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+        };
+    };
+    rollbackCameraConfig: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                cameraId: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": {
+                    /** Format: int64 */
+                    audit_id?: number;
+                    /** Format: int64 */
+                    expected_revision: number;
+                };
+            };
+        };
+        responses: {
+            /** @description Outcome of the rollback */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["CameraConfigRollbackResult"];
+                };
+            };
+            400: components["responses"]["BadRequest"];
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+            409: components["responses"]["Conflict"];
+        };
+    };
+    getCameraAdvanced: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                cameraId: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Technical information */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["CameraAdvanced"];
+                };
+            };
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
         };
     };
     listCameraConfigProfiles: {
