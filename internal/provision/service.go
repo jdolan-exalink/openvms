@@ -97,6 +97,10 @@ type Service struct {
 	agentUpdatePersistTLS          func(context.Context, authz.Actor, db.ServerAgent, uint16, []byte) error
 	agentUpdateVerifyTLS           func(context.Context, authz.Actor, db.ServerAgent, AgentTLSConfig) error
 	agentUpdatePreflightHealth     func(context.Context, string, uint16, string, AgentTLSConfig) error
+	// Uninstall seams: the SSH dial, the read of the agent's original config and its write to Frigate.
+	agentUninstallDial         func(ctx context.Context, host string, port uint16, password string, trust func(context.Context, string) error) (AgentInstallConn, error)
+	agentUninstallReadOriginal func(context.Context, authz.Actor, uuid.UUID) (string, bool, error)
+	agentUninstallSaveConfig   func(ctx context.Context, actor authz.Actor, serverID uuid.UUID, yaml string) error
 
 	mu   sync.Mutex
 	jobs map[uuid.UUID]*job

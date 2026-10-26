@@ -770,6 +770,7 @@ export interface paths {
         /**
          * Uninstall a registered agent from the host over SSH
          * @description Requires servers.manage and servers.config.secrets. Stops and disables the systemd agent service, removes agent files, and removes registration.
+         *     With config_action restore_original the original Frigate configuration saved by the agent is written back (and Frigate restarted) before anything is removed; if the agent holds none, or the write fails, the job fails and nothing is uninstalled.
          */
         post: operations["uninstallServerAgentOverSSH"];
         delete?: never;
@@ -4045,6 +4046,23 @@ export interface components {
             ssh_port: number;
             /** @description Transient root SSH password; never persisted or echoed. */
             ssh_password: string;
+        };
+        /** @description Same SSH trust rules as ServerAgentUpdateRequest, plus what to do with Frigate's configuration and with the agent's saved original. */
+        ServerAgentUninstallRequest: {
+            ssh_port: number;
+            /** @description Transient root SSH password; never persisted or echoed. */
+            ssh_password: string;
+            /**
+             * @description keep leaves Frigate's current configuration; restore_original writes back the original saved by the agent and restarts Frigate.
+             * @default keep
+             * @enum {string}
+             */
+            config_action: "keep" | "restore_original";
+            /**
+             * @description When true the agent's saved original configuration is deleted from the host; otherwise it stays so another OpenVMS can adopt the server.
+             * @default false
+             */
+            discard_backup: boolean;
         };
         AgentEnrollToken: {
             /** @description One-time secret, shown only in this response. */
@@ -8032,7 +8050,7 @@ export interface operations {
         };
         requestBody: {
             content: {
-                "application/json": components["schemas"]["ServerAgentUpdateRequest"];
+                "application/json": components["schemas"]["ServerAgentUninstallRequest"];
             };
         };
         responses: {

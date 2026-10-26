@@ -87,6 +87,40 @@ func (s *Service) GetAgentBackup(ctx context.Context, actor authz.Actor, serverI
 	return readAgentBackup(ctx, client, token)
 }
 
+// readAgentOriginalConfig returns the original configuration text the agent keeps. found is false
+// when the agent has no backup (or an empty one, which is not restorable). The text is never logged.
+// The caller is responsible for authorization.
+func (s *Service) readAgentOriginalConfig(ctx context.Context, actor authz.Actor, serverID uuid.UUID) (string, bool, error) {
+	client, token, err := s.getAgentClientAndToken(ctx, actor, serverID)
+	if err != nil {
+		return "", false, err
+	}
+	status, data, err := agentBackupRequest(ctx, client, token, http.MethodGet, nil)
+	if err != nil {
+		return "", false, err
+	}
+	switch status {
+	case http.StatusOK:
+		var wire struct {
+			Config string `json:"config"`
+		}
+		if json.Unmarshal(data, &wire) != nil {
+			return "", false, fmt.Errorf("%w: the agent's backup answer is not valid", ErrAgentProbeFailed)
+		}
+		return wire.Config, wire.Config != "", nil
+	case http.StatusNotFound:
+		var wire backupWire
+		if json.Unmarshal(data, &wire) == nil && wire.Code == "no_backup" {
+			return "", false, nil
+		}
+		return "", false, ErrAgentBackupUnsupported
+	case http.StatusMethodNotAllowed:
+		return "", false, ErrAgentBackupUnsupported
+	default:
+		return "", false, fmt.Errorf("%w: the agent answered %d to the backup read", ErrAgentProbeFailed, status)
+	}
+}
+
 // EnsureOriginalConfigBackup makes the agent keep the original Frigate configuration of the server:
 // when it already has one nothing is sent; otherwise the original (see
 // inventory.OriginalFrigateConfig) is stored. The agent keeps the first copy it receives, so calling
