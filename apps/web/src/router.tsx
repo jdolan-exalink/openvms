@@ -14,6 +14,7 @@ const Alarms = lazyRouteComponent(() => import("./routes/Alarms"), "Alarms");
 const Audit = lazyRouteComponent(() => import("./routes/Audit"), "Audit");
 const Branding = lazyRouteComponent(() => import("./routes/Branding"), "Branding");
 const CameraGroups = lazyRouteComponent(() => import("./routes/CameraGroups"), "CameraGroups");
+const CameraProfiles = lazyRouteComponent(() => import("./routes/CameraProfiles"), "CameraProfiles");
 const Cameras = lazyRouteComponent(() => import("./routes/Cameras"), "Cameras");
 const Dashboard = lazyRouteComponent(() => import("./routes/Dashboard"), "Dashboard");
 const Events = lazyRouteComponent(() => import("./routes/Events"), "Events");
@@ -206,6 +207,7 @@ export const routeTree = rootRoute.addChildren([
       camerasRoute,
       cameraFrigateRoute,
       settingsChild("/camera-groups", CameraGroups),
+      settingsChild("/camera-profiles", CameraProfiles),
       settingsChild("/rules", Rules),
       settingsChild("/channels", Channels),
       settingsChild("/notifications", Notifications),

@@ -17,6 +17,7 @@ const messages = {
   servers: "Servidores",
   cameras: "Cámaras",
   cameraGroups: "Grupos de cámaras",
+  cameraProfiles: "Perfiles de cámara",
   rules: "Reglas",
   channels: "Canales",
   notifications: "Notificaciones",
