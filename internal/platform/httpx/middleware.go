@@ -78,12 +78,27 @@ func AccessLog(log *slog.Logger) func(http.Handler) http.Handler {
 			next.ServeHTTP(rec, r)
 			log.InfoContext(r.Context(), "http request",
 				"method", r.Method,
-				"path", r.URL.Path,
+				"path", redactedLogPath(r.URL.Path),
 				"status", rec.status,
 				"duration_ms", time.Since(start).Milliseconds(),
 			)
 		})
 	}
+}
+
+// cameraWebPrefix is where the camera web proxy serves a session; the next path segment is the
+// session id, a working credential, so it never goes to the logs.
+const cameraWebPrefix = "/camproxy/"
+
+func redactedLogPath(path string) string {
+	rest, ok := strings.CutPrefix(path, cameraWebPrefix)
+	if !ok {
+		return path
+	}
+	if _, tail, found := strings.Cut(rest, "/"); found {
+		return cameraWebPrefix + "[redacted]/" + tail
+	}
+	return cameraWebPrefix + "[redacted]"
 }
 
 // Recover turns a panic into a 500 and logs it instead of killing the connection silently.

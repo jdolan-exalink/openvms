@@ -16,7 +16,12 @@
 (openvms_site_routes) {
 	encode zstd gzip
 
-	header {
+	# /camproxy serves a camera's own web interface inside a sandboxed iframe; its responses carry
+	# their own Content-Security-Policy (sandbox, no allow-same-origin), so the site-wide policy
+	# (default-src 'self') must not be applied to them or the camera scripts would not run.
+	@not_camproxy not path /camproxy/*
+
+	header @not_camproxy {
 		X-Content-Type-Options nosniff
 		Referrer-Policy no-referrer
 		X-Frame-Options SAMEORIGIN
@@ -30,14 +35,14 @@
 	# Caddy's reverse_proxy normalizes forwarded headers. Reject comma-joined XFP
 	# values first, before duplicate fields can be collapsed to a single value.
 	@api_forwarded_proto_chain {
-		path /api/* /media/* /ws /ws/* /health/* /openapi.json /docs
+		path /api/* /media/* /ws /ws/* /health/* /openapi.json /docs /camproxy/*
 		expression `{http.request.header.X-Forwarded-Proto}.contains(",")`
 	}
 	handle @api_forwarded_proto_chain {
 		respond "invalid forwarded protocol" 400
 	}
 
-	@api path /api/* /media/* /ws /ws/* /health/* /openapi.json /docs
+	@api path /api/* /media/* /ws /ws/* /health/* /openapi.json /docs /camproxy/*
 	handle @api {
 		reverse_proxy {$API_UPSTREAM:api:8080}
 	}

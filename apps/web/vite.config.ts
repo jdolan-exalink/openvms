@@ -19,6 +19,7 @@ export default defineConfig({
       "/health": api,
       "/openapi.json": api,
       "/docs": api,
+      "/camproxy": api,
       "/ws": { target: api, ws: true },
       "/media": { target: api, ws: true },
     },

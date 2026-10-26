@@ -124,6 +124,13 @@ func NewRouter(h *Handlers, log *slog.Logger, opts Options) (http.Handler, error
 	r.Put("/api/v1/servers/{serverId}/provision-lpr/enforce", h.SetServerProvisionLPREnforceHandler)
 	r.Get("/api/v1/servers/{serverId}/provision-lpr/ingestion", h.GetServerProvisionLPRIngestionHandler)
 
+	// The camera web view. No cookie authentication: the 256-bit session id in the path is the
+	// credential (see internal/camweb). Authenticate leaves this prefix alone because it is not under /api/v1/.
+	if h.CameraWeb != nil {
+		r.Handle("/camproxy", h.CameraWeb)
+		r.Handle("/camproxy/*", h.CameraWeb)
+	}
+
 	return otelhttp.NewHandler(r, "openvms-api"), nil
 }
 

@@ -1320,6 +1320,31 @@ paths:
         "403": { $ref: "#/components/responses/Forbidden" }
         "404": { $ref: "#/components/responses/NotFound" }
         "502": { $ref: "#/components/responses/FrigateUnreachable" }
+  /api/v1/cameras/{cameraId}/web/session:
+    parameters:
+      - { name: cameraId, in: path, required: true, schema: { type: string, format: uuid } }
+    post:
+      tags: [cameras]
+      operationId: createCameraWebSession
+      summary: Open the camera's own web interface through its edge agent
+      description: Creates a short-lived session under /camproxy/{session}/ that proxies the camera web interface through the agent of the camera's server. The camera address is taken from the camera record only; the caller may choose the scheme and port. Requires servers.manage and access to configuration secrets on the camera's server. 404 when the camera has no usable private IPv4 address, 409 when the server has no (or an outdated) agent, 502 when the agent cannot reach the camera.
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/CameraWebSessionRequest" }
+      responses:
+        "200":
+          description: Session created
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/CameraWebSession" }
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { $ref: "#/components/responses/NotFound" }
+        "409": { $ref: "#/components/responses/Conflict" }
+        "502": { $ref: "#/components/responses/FrigateUnreachable" }
   /api/v1/cameras/{cameraId}/onvif/snapshot:
     parameters:
       - { name: cameraId, in: path, required: true, schema: { type: string, format: uuid } }
@@ -5403,6 +5428,18 @@ components:
         endpoint: { type: string, maxLength: 2048 }
         username: { type: string, maxLength: 256 }
         password: { type: string, maxLength: 1024, writeOnly: true }
+    CameraWebSessionRequest:
+      type: object
+      additionalProperties: false
+      properties:
+        scheme: { type: string, enum: [http, https] }
+        port: { type: integer, minimum: 1, maximum: 65535 }
+    CameraWebSession:
+      type: object
+      required: [url, expires_at]
+      properties:
+        url: { type: string, description: Same-origin path of the proxied camera interface, to load in a sandboxed iframe }
+        expires_at: { type: string, format: date-time }
     ServerCheckCamerasOnvifRequest:
       type: object
       additionalProperties: false

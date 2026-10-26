@@ -9,6 +9,7 @@ import (
 	"github.com/jdolan-exalink/openvms/internal/alarms"
 	"github.com/jdolan-exalink/openvms/internal/api/gen"
 	"github.com/jdolan-exalink/openvms/internal/branding"
+	"github.com/jdolan-exalink/openvms/internal/camweb"
 	"github.com/jdolan-exalink/openvms/internal/clipwatermark"
 	"github.com/jdolan-exalink/openvms/internal/events"
 	"github.com/jdolan-exalink/openvms/internal/faces"
@@ -45,6 +46,7 @@ type SessionConnTracker interface {
 type Handlers struct {
 	Inv             *inventory.Service
 	Provision       *provision.Service
+	CameraWeb       *camweb.Service
 	AgentEnroll     *agentenroll.Service
 	Events          *events.Service
 	Faces           *faces.Service
