@@ -18,6 +18,7 @@ import { CameraHeader } from "@/components/camera/CameraHeader";
 import { SyncStatusPanel } from "@/components/camera/SyncStatusPanel";
 import { CameraPreview } from "@/components/camera/CameraPreview";
 import { CameraSummaryCards } from "@/components/camera/CameraSummaryCards";
+import { AnalyticsTab } from "@/components/camera/analytics/AnalyticsTab";
 import { CameraTabs } from "@/components/camera/CameraTabs";
 import { CameraWebView } from "@/components/camera/CameraWebView";
 import { MoreActions } from "@/components/camera/MoreActions";
@@ -54,7 +55,7 @@ import { pickerLabels } from "@/lib/labelEmoji";
 import { loadRestart, saveRestart } from "@/lib/frigateRestart";
 import { can } from "@/lib/perm";
 import {
-  buildCameraTabs, CAMERA_WEB, type CameraTabId, FISHEYE, GENERAL, HISTORY, isFisheyeTagged, ONVIF_INFO, PROVISION, PTZ_CONTROL, tabOfSection,
+  ANALYTICS_MODULES, analyticsTabVisible, buildCameraTabs, CAMERA_WEB, type CameraTabId, FISHEYE, GENERAL, HISTORY, isFisheyeTagged, ONVIF_INFO, PROVISION, PTZ_CONTROL, tabOfSection,
 } from "@/lib/cameraTabs";
 import { persistedToEditorValue, planManagedZoneChanges, splitFrigateZones, zoneSyncStates, type ZoneChangePlan } from "@/lib/cameraZones";
 
@@ -68,7 +69,11 @@ const SECTION_TITLES: Record<string, string> = {
   zones: "Zonas",
   review: "Revisión y Alertas",
   [GENERAL]: "General",
-  [PROVISION]: "Provision LPR",
+  [ANALYTICS_MODULES]: "Módulos",
+  // The raw engine panels stay reachable behind the modules, as the tab's advanced part.
+  [PROVISION]: "Avanzado · Provision LPR",
+  lpr: "Avanzado · LPR",
+  face_recognition: "Avanzado · Reconocimiento facial",
   [CAMERA_WEB]: "Web de la cámara",
   [ONVIF_INFO]: "Capacidades ONVIF",
   [PTZ_CONTROL]: "Control PTZ",
@@ -334,7 +339,12 @@ function FrigateCameraConfigScreen({ cameraId }: { cameraId: string }) {
     generalSections: GENERAL_SECTIONS,
     ptz: !!cam?.onvif_capabilities?.has_ptz || !!cam?.tags?.includes("ptz"),
     fisheye: isFisheyeTagged(cam?.tags),
-    analytics: knowsLpr || knowsSection(general, "face_recognition") || provision || !!cam?.lpr || !!cam?.onvif_capabilities?.has_analytics,
+    analytics: analyticsTabVisible({
+      modules: change.config.data?.analytics?.modules,
+      provision,
+      advertised: !!cam?.onvif_capabilities?.has_analytics,
+      lpr: !!cam?.lpr,
+    }),
     provision,
     cameraWeb: canOpenCameraWeb,
   });
@@ -441,7 +451,7 @@ function FrigateCameraConfigScreen({ cameraId }: { cameraId: string }) {
         aria-label={section === CAMERA_WEB ? "Acceso web a la cámara" : sectionTitle(section)}
         className="flex min-w-0 flex-1 flex-col gap-5 rounded-m3-2xl bg-surface-1 p-5 border border-outline-variant/60 shadow-sm"
       >
-        {tab.id === "analytics" && cameraType === "lpr_frigate" && section !== PROVISION && <LprTestCard cameraId={cameraId} engine="frigate" />}
+        {tab.id === "analytics" && cameraType === "lpr_frigate" && section !== PROVISION && section !== ANALYTICS_MODULES && <LprTestCard cameraId={cameraId} engine="frigate" />}
         {tab.sections.length === 0 ? (
           <p className="text-sm text-muted">Esta versión de Frigate no expone ajustes en esta pestaña.</p>
         ) : section === GENERAL ? (
@@ -453,6 +463,8 @@ function FrigateCameraConfigScreen({ cameraId }: { cameraId: string }) {
             snapshotUrl={`/media/v1/cameras/${cameraId}/snapshot.jpg`}
             canManage={!readOnly}
           />
+        ) : section === ANALYTICS_MODULES ? (
+          <AnalyticsTab cameraId={cameraId} modules={change.config.data?.analytics?.modules} patch={change.patch} setPatch={change.setPatch} readOnly={readOnly} />
         ) : section === PROVISION ? (
           cam && (
             <ProvisionLprSection
