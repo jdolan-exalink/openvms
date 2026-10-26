@@ -91,4 +91,37 @@ describe("ChangeReviewDialog", () => {
     fireEvent.click(screen.getByRole("button", { name: "Ver información técnica" }));
     expect(screen.getByText(/ffmpeg exited/)).toBeInTheDocument();
   });
+  it("prefers the plain error and offers Restaurar configuración anterior when the last change can be undone", async () => {
+    const calls = mount({
+      "/api/v1/cameras/c1/normalized-config": () => json({ identity: { camera_id: "c1" }, state: state() }),
+      "/api/v1/cameras/c1/normalized-config/review": () => json(review),
+      "/api/v1/cameras/c1/normalized-config/apply": () => json({ result: "error", plain_error: { message: "No se pudo iniciar el stream de grabación.", technical: "ffmpeg exited with code 1" }, state: state({ sync_state: "error", last_error: "ffmpeg exited with code 1" }), review }),
+      "/api/v1/cameras/c1/normalized-config/history": () => json([{ id: 3, time: "2026-01-02T03:04:05Z", origin: "ui", result: "ok", changes: [{ path: "detection.enabled", from: false, to: true }], rollbackable: true }]),
+      "/api/v1/cameras/c1/normalized-config/rollback": () => json({ rolled_back: 3, result: { result: "ok", state: state(), review } }),
+    });
+    await openDialog();
+    await screen.findByText("detección de vehículos: OFF → ON");
+    fireEvent.click(screen.getByRole("button", { name: "Aplicar cambios" }));
+    expect(await screen.findByText("No se pudo iniciar el stream de grabación.")).toBeInTheDocument();
+    expect(screen.queryByText(/ffmpeg exited/)).not.toBeInTheDocument();
+    fireEvent.click(await screen.findByRole("button", { name: "Restaurar configuración anterior" }));
+    fireEvent.click(await screen.findByRole("button", { name: "Restaurar" }));
+    await waitFor(() => expect(calls.some((c) => c.url.endsWith("/rollback"))).toBe(true));
+    expect(calls.find((c) => c.url.endsWith("/rollback"))?.body).toEqual({ expected_revision: 4 });
+  });
+
+  it("offers no rollback when nothing can be undone", async () => {
+    mount({
+      "/api/v1/cameras/c1/normalized-config": () => json({ identity: { camera_id: "c1" }, state: state() }),
+      "/api/v1/cameras/c1/normalized-config/review": () => json(review),
+      "/api/v1/cameras/c1/normalized-config/apply": () => json({ result: "error", state: state({ sync_state: "error", last_error: "boom" }), review }),
+      "/api/v1/cameras/c1/normalized-config/history": () => json([{ id: 3, time: "2026-01-02T03:04:05Z", origin: "ui", result: "error", changes: [], rollbackable: false }]),
+    });
+    await openDialog();
+    await screen.findByText("detección de vehículos: OFF → ON");
+    fireEvent.click(screen.getByRole("button", { name: "Aplicar cambios" }));
+    await screen.findByText("No se pudo aplicar la configuración.");
+    await new Promise((r) => setTimeout(r, 50));
+    expect(screen.queryByRole("button", { name: "Restaurar configuración anterior" })).toBeNull();
+  });
 });
