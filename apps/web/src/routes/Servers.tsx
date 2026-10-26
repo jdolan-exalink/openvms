@@ -1,9 +1,8 @@
 import { useT } from "@/i18n";
 import { agentInstallFailureText, agentUninstallFailureText, safeAgentVersion } from "@/lib/agentJobs/failureText";
-import { isAtLeastAgentVersion, isNewerAgentVersion } from "@/lib/agentVersion";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Activity, AlertTriangle, ArrowDown, ArrowUp, Camera, Check, Copy, Pencil, Plus, RefreshCw, RotateCcw, Terminal, Trash2 } from "lucide-react";
-import { Link, useSearch } from "@tanstack/react-router";
+import { Link, useNavigate, useSearch } from "@tanstack/react-router";
 import { type FormEvent, type ReactNode, useCallback, useEffect, useRef, useState } from "react";
 import { ApiError, api, type Schemas, unwrap } from "@/api/client";
 import { classifyPolicyQuery, meQuery, serversQuery, sitesQuery, syncStatusQuery } from "@/api/queries";
@@ -13,6 +12,9 @@ import { Icon } from "@/components/Icon";
 import { Modal } from "@/components/Modal";
 import { AgentUpdateButton } from "@/components/servers/AgentUpdateButton";
 import { ServerActionsPanel } from "@/components/servers/ServerActionsPanel";
+import { ServerDetailTabs } from "@/components/servers/ServerDetailTabs";
+import { ServerFrigateTab } from "@/components/servers/ServerFrigateTab";
+import { ServerSummaryTab, isAgentBinaryCurrent, problemText } from "@/components/servers/ServerSummaryTab";
 import { ServerFrigateConfigModal } from "@/components/servers/ServerFrigateConfigModal";
 import { calculateAttainableDays, calculateUsableStorage, formatBytes } from "@/components/servers/storageRetention";
 import { Button, Empty, ErrorNote, Field, PageHeader, Pill, Select, StatusBadge, Summary, Switch, TextInput } from "@/components/ui";
@@ -1881,40 +1883,6 @@ function LanInterfaceCard({
 }
 
 
-function problemText(problem: Schemas["ServerProblem"], t: ReturnType<typeof useT>) {
-  switch (problem.code) {
-    case "cameras_offline":
-      return t("servers.problemCamerasOffline", { cameras: (problem.cameras ?? []).join(", ") });
-    case "storage_high":
-      return t("servers.problemStorageHigh", { percent: String(problem.used_percent ?? "") });
-    default:
-      return t("servers.problemDetectionStalled");
-  }
-}
-
-function isAgentBinaryCurrent(agent: Schemas["ServerAgent"]) {
-  return hasCurrentDigest(agent) || isCurrentByVersion(agent);
-}
-
-// An agent reached over the plain HTTP listener exposes no binary identity (no /v1/health), so the
-// version it reports decides instead, never the bare status label.
-function isCurrentByVersion(agent: Schemas["ServerAgent"]) {
-  return agent.installed && agent.binary_status === "current" && agent.binary_outdated === false &&
-    !agent.binary_observed?.sha256 && isAtLeastAgentVersion(agent.version, agent.binary_available?.version);
-}
-
-function hasCurrentDigest(agent: Schemas["ServerAgent"]) {
-  const observed = agent.binary_observed?.sha256;
-  const available = agent.binary_available?.sha256;
-  const observedArchitecture = agent.binary_observed?.architecture;
-  const availableArchitecture = agent.binary_available?.architecture;
-  const supportedArchitecture = (architecture: string | undefined) => architecture === "amd64" || architecture === "arm64";
-  return agent.installed && agent.binary_status === "current" && agent.binary_outdated === false &&
-    !!observed && !!available && /^[a-f0-9]{64}$/i.test(observed) &&
-    (observed.toLowerCase() === available.toLowerCase() || isNewerAgentVersion(agent.binary_observed?.version, agent.binary_available?.version)) &&
-    supportedArchitecture(observedArchitecture) && supportedArchitecture(availableArchitecture) && observedArchitecture === availableArchitecture;
-}
-
 function DeleteServerDialog({ server, onDone }: { server: Schemas["Server"]; onDone: () => void }) {
   const qc = useQueryClient();
   const remove = useMutation({
@@ -1957,7 +1925,14 @@ function EditServerModal({
   onConfigureFrigate: (server: Schemas["Server"]) => void;
   onDelete: (server: Schemas["Server"]) => void;
 }) {
+  const t = useT();
   const qc = useQueryClient();
+  const navigate = useNavigate();
+  const [frigateEditorOpen, setFrigateEditorOpen] = useState(false);
+  const onEditCameras = () => {
+    void navigate({ to: "/cameras", search: { server_id: server.id } });
+    onDone();
+  };
   const initialAlarmMode: Schemas["EventAlarmMode"] = server.event_alarm_mode ?? "rules_only";
   const [form, setForm] = useState({
     name: server.name,
@@ -1992,77 +1967,114 @@ function EditServerModal({
     },
   });
   return (
-    <Modal title={`Editar servidor ${server.name}`} onClose={onDone}>
-      <form
-        onSubmit={(e: FormEvent) => {
-          e.preventDefault();
-          save.mutate();
-        }}
-        className="flex flex-col gap-4"
-      >
-        <div className="grid gap-4 sm:grid-cols-2">
-          <Field label="Nombre">
-            <TextInput required value={form.name} onChange={set("name")} />
-          </Field>
-          <Field label="Sitio">
-            <Select required value={form.site_id} onChange={set("site_id")}>
-              {sites.map((s) => (
-                <option key={s.id} value={s.id}>
-                  {s.name}
-                </option>
-              ))}
-            </Select>
-          </Field>
-          <Field label="Acceso a Frigate">
-            <Select value={form.auth_mode} onChange={(e) => setForm({ ...form, auth_mode: e.target.value as Schemas["AuthMode"] })}>
-              <option value="credentials">Con usuario y contraseña (puerto 8971)</option>
-              <option value="none">Sin login (puerto 5000, solo redes de confianza)</option>
-            </Select>
-          </Field>
-          <Field label="URL de Frigate" hint="Si cambia la conexión se vuelve a probar contra Frigate antes de guardar.">
-            <TextInput required type="url" value={form.base_url} onChange={set("base_url")} />
-          </Field>
-          {creds && (
-            <>
-              <Field label="Usuario de Frigate">
-                <TextInput required value={form.username} onChange={set("username")} autoComplete="off" />
-              </Field>
-              <Field label="Contraseña" hint="Dejala en blanco para conservar la actual.">
-                <TextInput type="password" value={form.password} onChange={set("password")} autoComplete="new-password" />
-              </Field>
-            </>
-          )}
-          <Field label="Modo de alarmas de eventos">
-            <Select
-              value={form.event_alarm_mode}
-              onChange={(e) => setForm({ ...form, event_alarm_mode: e.target.value as Schemas["EventAlarmMode"] })}
-            >
-              <option value="rules_only">Solo por reglas</option>
-              <option value="all_alerts">Todas las alertas de Frigate</option>
-            </Select>
-          </Field>
-          <Switch className="self-center" label="Aceptar certificado autofirmado" checked={form.tls_skip_verify} onChange={(next) => setForm({ ...form, tls_skip_verify: next })} />
-        </div>
-        <ErrorNote error={save.error} />
-        <div className="flex justify-end gap-2">
-          <Button variant="text" onClick={onDone}>Cancelar</Button>
-          <Button type="submit" variant="primary" disabled={save.isPending}>
-            {save.isPending ? "Guardando…" : "Guardar"}
-          </Button>
-        </div>
-      </form>
-      <ServerActionsPanel
-        server={server}
-        canInstall={canInstallAgent(me, server)}
-        installPermissionMissing={hasServerInstallPermission(me, "servers.manage", server) && !hasServerInstallPermission(me, "servers.config.secrets", server)}
-        canManage={can(me, "servers.manage")}
-        canRestart={can(me, "servers.restart")}
-        installControls={<AgentSSHControls server={server} mode="panel" />}
-        restartControl={<RestartButton server={server} />}
-        syncControl={<SyncButton server={server} />}
-        onConfigureFrigate={onConfigureFrigate}
-        onDelete={onDelete}
+    <Modal title={`Editar servidor ${server.name}`} onClose={onDone} className="max-w-5xl">
+      <ServerDetailTabs
+        label={t("servers.detailTabsLabel")}
+        tabs={[
+          {
+            id: "summary",
+            label: t("servers.tabSummary"),
+            content: <ServerSummaryTab server={server} onEditCameras={onEditCameras} />,
+          },
+          {
+            id: "connection",
+            label: t("servers.tabConnection"),
+            content: (
+              <form
+                onSubmit={(e: FormEvent) => {
+                  e.preventDefault();
+                  save.mutate();
+                }}
+                className="flex flex-col gap-4"
+              >
+                <div className="grid gap-4 sm:grid-cols-2">
+                  <Field label="Nombre">
+                    <TextInput required value={form.name} onChange={set("name")} />
+                  </Field>
+                  <Field label="Sitio">
+                    <Select required value={form.site_id} onChange={set("site_id")}>
+                      {sites.map((s) => (
+                        <option key={s.id} value={s.id}>
+                          {s.name}
+                        </option>
+                      ))}
+                    </Select>
+                  </Field>
+                  <Field label="Acceso a Frigate">
+                    <Select value={form.auth_mode} onChange={(e) => setForm({ ...form, auth_mode: e.target.value as Schemas["AuthMode"] })}>
+                      <option value="credentials">Con usuario y contraseña (puerto 8971)</option>
+                      <option value="none">Sin login (puerto 5000, solo redes de confianza)</option>
+                    </Select>
+                  </Field>
+                  <Field label="URL de Frigate" hint="Si cambia la conexión se vuelve a probar contra Frigate antes de guardar.">
+                    <TextInput required type="url" value={form.base_url} onChange={set("base_url")} />
+                  </Field>
+                  {creds && (
+                    <>
+                      <Field label="Usuario de Frigate">
+                        <TextInput required value={form.username} onChange={set("username")} autoComplete="off" />
+                      </Field>
+                      <Field label="Contraseña" hint="Dejala en blanco para conservar la actual.">
+                        <TextInput type="password" value={form.password} onChange={set("password")} autoComplete="new-password" />
+                      </Field>
+                    </>
+                  )}
+                  <Field label="Modo de alarmas de eventos">
+                    <Select
+                      value={form.event_alarm_mode}
+                      onChange={(e) => setForm({ ...form, event_alarm_mode: e.target.value as Schemas["EventAlarmMode"] })}
+                    >
+                      <option value="rules_only">Solo por reglas</option>
+                      <option value="all_alerts">Todas las alertas de Frigate</option>
+                    </Select>
+                  </Field>
+                  <Switch className="self-center" label="Aceptar certificado autofirmado" checked={form.tls_skip_verify} onChange={(next) => setForm({ ...form, tls_skip_verify: next })} />
+                </div>
+                <ErrorNote error={save.error} />
+                <div className="flex justify-end gap-2">
+                  <Button variant="text" onClick={onDone}>Cancelar</Button>
+                  <Button type="submit" variant="primary" disabled={save.isPending}>
+                    {save.isPending ? "Guardando…" : "Guardar"}
+                  </Button>
+                </div>
+              </form>
+            ),
+          },
+          {
+            id: "frigate",
+            label: t("servers.tabFrigate"),
+            content: (
+              <ServerFrigateTab server={server} canReadConfig={can(me, "servers.config.secrets")} onOpenEditor={() => setFrigateEditorOpen(true)} />
+            ),
+          },
+          {
+            id: "actions",
+            label: t("servers.tabActions"),
+            content: (
+              <ServerActionsPanel
+                server={server}
+                canInstall={canInstallAgent(me, server)}
+                installPermissionMissing={hasServerInstallPermission(me, "servers.manage", server) && !hasServerInstallPermission(me, "servers.config.secrets", server)}
+                canManage={can(me, "servers.manage")}
+                canRestart={can(me, "servers.restart")}
+                installControls={<AgentSSHControls server={server} mode="panel" />}
+                restartControl={<RestartButton server={server} />}
+                syncControl={<SyncButton server={server} />}
+                onConfigureFrigate={onConfigureFrigate}
+                onDelete={onDelete}
+              />
+            ),
+          },
+        ]}
       />
+      {frigateEditorOpen && (
+        <ServerFrigateConfigModal
+          server={server}
+          open={frigateEditorOpen}
+          onClose={() => setFrigateEditorOpen(false)}
+          canRestart={can(me, "servers.restart")}
+        />
+      )}
     </Modal>
   );
 }
