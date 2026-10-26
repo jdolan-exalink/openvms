@@ -1063,6 +1063,30 @@ export interface paths {
         patch: operations["patchCameraFrigateConfig"];
         trace?: never;
     };
+    "/api/v1/camera-config/object-catalog": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Get the normalized object catalog
+         * @description Any authenticated actor may read it. Returns the ordered OpenVMS categories and objects
+         *     (Spanish labels) instead of an engine's raw label list. `supported` is true or false when
+         *     the model labels of `server_id` are readable and null (unknown) otherwise; an object the
+         *     engine has no label for is always false. Raw labels the catalog does not know are never
+         *     listed here: they stay visible as `detection.raw` of the camera model.
+         */
+        get: operations["getObjectCatalog"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/cameras/{cameraId}/normalized-config": {
         parameters: {
             query?: never;
@@ -4841,7 +4865,16 @@ export interface components {
             };
             detection: {
                 enabled?: boolean;
+                /** @description Raw engine labels being tracked */
                 objects: string[];
+                /** @description Catalog object ids collapsed from the tracked labels */
+                selection?: string[];
+                /** @description Catalog categories whose every engine-supported object is selected */
+                categories?: string[];
+                /** @description Tracked labels the catalog does not know */
+                raw?: string[];
+                /** @description Labels the engine model supports; omitted when unknown */
+                available_labels?: string[];
             };
             analytics: {
                 lpr?: boolean;
@@ -4882,7 +4915,10 @@ export interface components {
         /**
          * @description Sparse change to the normalized model; omitted fields stay as they are. The fields that can
          *     be changed today are `detection.enabled` (boolean), `detection.objects` (raw engine object
-         *     labels until the object catalog lands), `recording.enabled` (boolean) and `analytics.lpr`
+         *     labels), `detection.selection` (catalog object or category ids from
+         *     `/api/v1/camera-config/object-catalog`, expanded to the engine labels its model supports;
+         *     sending it together with `detection.objects` is a 400, and ids the model cannot honor are
+         *     listed in the review `unsupported` and rejected on apply), `recording.enabled` (boolean) and `analytics.lpr`
          *     (boolean). The schema is deliberately open so the server can reject every other field,
          *     nested ones included, with 400 instead of dropping it silently.
          * @example {
@@ -4903,6 +4939,24 @@ export interface components {
          */
         CameraConfigPatch: {
             [key: string]: unknown;
+        };
+        ObjectCatalog: {
+            engine: string;
+            categories: {
+                /** @example vehicle */
+                id: string;
+                /** @example Vehículos */
+                label: string;
+                objects: {
+                    /** @example vehicle.truck */
+                    id: string;
+                    /** @example Camión */
+                    label: string;
+                    requires_model: boolean;
+                    /** @description null means unknown */
+                    supported: boolean | null;
+                }[];
+            }[];
         };
         CameraConfigReview: {
             changes: {
@@ -8795,6 +8849,31 @@ export interface operations {
             403: components["responses"]["Forbidden"];
             404: components["responses"]["NotFound"];
             502: components["responses"]["FrigateUnreachable"];
+        };
+    };
+    getObjectCatalog: {
+        parameters: {
+            query?: {
+                engine?: "frigate";
+                server_id?: string;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The catalog */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ObjectCatalog"];
+                };
+            };
+            400: components["responses"]["BadRequest"];
+            401: components["responses"]["Unauthorized"];
         };
     };
     getCameraConfig: {

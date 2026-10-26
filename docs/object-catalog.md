@@ -29,3 +29,10 @@ Add an entry to the object's `Engine` map in `default.go` (`"provision": {"vehic
 ## Adding a category or object
 
 Append to `Default()` in the position the UI should show it, with a unique id (`<category>.<name>`), then run `go test ./internal/camconfig/catalog/...`.
+
+## API and selection semantics
+
+- `GET /api/v1/camera-config/object-catalog?engine=frigate[&server_id=...]` (any authenticated actor) returns the ordered categories and objects with `id`, Spanish `label`, `requires_model` and `supported`. `supported` is `false` when the engine has no label for the object, `true`/`false` when the model labels of `server_id` are readable, and `null` (unknown) otherwise. Today the Frigate adapter does not expose its model labels, so without them mapped objects read as unknown; engines that implement `camconfig.ModelLabelSource` light this up with no API change.
+- Read side (`GET .../normalized-config`): `detection.objects` keeps the raw engine labels (unchanged, for audit and advanced search); `detection.selection` and `detection.categories` are the catalog view collapsed from them; `detection.raw` holds tracked labels the catalog does not know; `detection.available_labels` lists the model labels when the engine can report them (absent = unknown).
+- Write side: patch `detection.selection` (object or category ids) instead of `detection.objects`. Sending both, or an unknown id, is a 400. The selection is expanded to engine labels with `ExpandForModel` and applied through the `detection.objects` path, so the audit trail stores the raw labels. Ids the model cannot honor (for example `vehicle.pickup` on Frigate) are listed in the review `unsupported` and the apply is rejected with 400; a category id (`vehicle`) skips members the engine cannot report instead of failing.
+- Review lines for a selection patch use catalog labels: one per category that flips completely (`Vehículos`, from `false` to `true`) and one per object (`Camión`), besides the raw `detection.objects` line.

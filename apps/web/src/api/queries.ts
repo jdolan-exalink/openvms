@@ -139,6 +139,19 @@ export const cameraConfigQuery = (cameraId: string) =>
       unwrap(await api.GET("/api/v1/cameras/{cameraId}/normalized-config", { params: { path: { cameraId } } })),
   });
 
+/** Normalized object catalog (categories and objects in Spanish); server_id flags per-object model support. */
+export const objectCatalogQuery = (engine: "frigate" = "frigate", serverId?: string) =>
+  queryOptions({
+    queryKey: ["camera-config", "object-catalog", engine, serverId ?? null],
+    queryFn: async () =>
+      unwrap(
+        await api.GET("/api/v1/camera-config/object-catalog", {
+          params: { query: { engine, ...(serverId ? { server_id: serverId } : {}) } },
+        }),
+      ),
+    staleTime: 5 * 60_000,
+  });
+
 /** Full effective Frigate config of a camera (schema-driven editor). */
 export const cameraFrigateDocQuery = (cameraId: string) =>
   queryOptions({
