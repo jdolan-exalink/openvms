@@ -21,7 +21,7 @@ const reviewReport = {
 };
 
 function mount(routes: Record<string, () => Response> = {}, target: React.ComponentProps<typeof BulkConfigureDialog>["target"] = { groupId: "g1" }) {
-  const sent: { path: string; body: any }[] = [];
+  const sent: { path: string; body: { group_id?: string; patch?: unknown; origin?: string } }[] = [];
   const api = stubApi({
     "/api/v1/camera-config/bulk/review": () => json(reviewReport),
     "/api/v1/camera-config/bulk/apply": () => json({ ...reviewReport, totals: totals({ will_apply: 0, applied: 1, failed: 1 }), rows: [row("c1", "Entrada", "applied"), row("c2", "Patio", "failed", { reason: "El motor rechazó el cambio" })] }),
