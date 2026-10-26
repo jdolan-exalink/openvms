@@ -12,6 +12,11 @@ The version of OpenVMS lives in `VERSION` and the version of the edge agent in
 
 ### Added
 
+- Granular camera permissions (`cameras.config.view|edit|video|recording|analytics|ptz|advanced|yaml`,
+  `cameras.web.access`, `cameras.restart`): migration 00078 mirrors legacy grants so nobody loses or gains
+  access; the normalized config now needs the permission of each section it touches, the camera web
+  session needs `cameras.web.access` (the old pair still works) and its denials are audited. See
+  docs/camera-config-permissions.md.
 - Camera editor: PTZ tab (pad with speed, presets list and go, stored tours per camera, contextual
   controls over the preview) and a Fisheye tab that separates the original stream and recording from the
   dewarped view; tours use migration 00079 and `/api/v1/cameras/{id}/ptz/tours`. Preset editing and home
