@@ -25,6 +25,9 @@ type FrigateAdapter struct {
 	Engine FrigateEngine
 	// Writer applies section patches; nil means the adapter can only read.
 	Writer SectionWriter
+	// Video reaches the camera's ONVIF video settings: it enriches the streams on Read and
+	// applies stream patches. Nil means the camera's own video is not consulted.
+	Video *VideoLink
 }
 
 var _ Adapter = FrigateAdapter{}
@@ -63,6 +66,7 @@ func (a FrigateAdapter) Read(ctx context.Context, in Inventory) (Camera, error) 
 		applyFrigateDoc(&cam, in, doc, codecs)
 	}
 	finish(&cam, in, doc)
+	enrichVideo(ctx, &cam, a.Video)
 	return cam, nil
 }
 

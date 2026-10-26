@@ -90,13 +90,16 @@ type Streams struct {
 
 // Stream describes one video stream. URL never carries credentials or query strings.
 type Stream struct {
-	Name   string   `json:"name,omitempty"`
-	URL    string   `json:"url,omitempty"`
-	Codec  string   `json:"codec,omitempty"`
-	Width  int      `json:"width,omitempty"`
-	Height int      `json:"height,omitempty"`
-	FPS    float64  `json:"fps,omitempty"`
-	Roles  []string `json:"roles"`
+	Name   string  `json:"name,omitempty"`
+	URL    string  `json:"url,omitempty"`
+	Codec  string  `json:"codec,omitempty"`
+	Width  int     `json:"width,omitempty"`
+	Height int     `json:"height,omitempty"`
+	FPS    float64 `json:"fps,omitempty"`
+	// BitrateKbps and GOP come from the camera (ONVIF) when it could be read.
+	BitrateKbps int      `json:"bitrate_kbps,omitempty"`
+	GOP         int      `json:"gop,omitempty"`
+	Roles       []string `json:"roles"`
 }
 
 // Recording is the recording policy; Enabled is nil when unknown.
