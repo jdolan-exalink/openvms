@@ -1451,6 +1451,26 @@ describe("Servers", () => {
       await waitFor(() => expect(screen.queryByRole("tooltip")).not.toBeInTheDocument());
     });
 
+    it("LanNetworkMeters shows only the LAN and CCTV interfaces, however many the host has", async () => {
+      clearNetworkHistory();
+      renderPage(() => (
+        <LanNetworkMeters
+          serverId="srv-extra"
+          interfaces={[
+            { name: "eth0", rx_bytes_per_second: 1000, tx_bytes_per_second: 1000, is_default: true, role: "monitoring" as const },
+            { name: "eth1", rx_bytes_per_second: 2000, tx_bytes_per_second: 2000, is_default: false, role: "cameras" as const },
+            { name: "eth2", rx_bytes_per_second: 3000, tx_bytes_per_second: 3000 },
+            { name: "br0", rx_bytes_per_second: 4000, tx_bytes_per_second: 4000, role: "lan" as const },
+          ]}
+          sampledAt={new Date().toISOString()}
+        />
+      ));
+      expect(await screen.findByText("eth0")).toBeInTheDocument();
+      expect(screen.getByText("eth1")).toBeInTheDocument();
+      expect(screen.queryByText("eth2")).not.toBeInTheDocument();
+      expect(screen.queryByText("br0")).not.toBeInTheDocument();
+    });
+
     it("LanNetworkMeters displays cameras and monitoring roles with IP and subnet metadata", async () => {
       clearNetworkHistory();
       const multiNicInterfaces = [
