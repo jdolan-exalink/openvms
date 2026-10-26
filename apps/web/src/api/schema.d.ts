@@ -1084,6 +1084,28 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/cameras/{cameraId}/lpr/test": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                cameraId: string;
+            };
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Check the plate-reading chain of an LPR camera
+         * @description Read-only check of how a camera's plates reach OpenVMS. For Provision cameras it walks camera -> agent -> central ingestion (agent configured and reachable, receiver, registration, keepalives, readings); for cameras read by Frigate it checks the Frigate LPR setting, the server capability and recent reads. With wait_seconds it polls the agent until a fresh keepalive arrives. It never registers the camera, writes to the agent or creates reads. Requires cameras.view on the camera and servers.manage on its server.
+         */
+        post: operations["testCameraLpr"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/cameras/{cameraId}/onvif/snapshot": {
         parameters: {
             query?: never;
@@ -4151,6 +4173,42 @@ export interface components {
             /** @enum {string} */
             status: "advertised";
             topics: string[];
+        };
+        CameraLprTestRequest: {
+            /**
+             * @description Seconds to wait for a keepalive newer than the call (Provision cameras).
+             * @default 0
+             */
+            wait_seconds: number;
+        };
+        CameraLprTestCheck: {
+            id: string;
+            /** @enum {string} */
+            status: "pass" | "fail" | "warn" | "skip";
+            message: string;
+            detail?: string;
+        };
+        CameraLprTestObserved: {
+            /** Format: date-time */
+            last_seen?: string;
+            /** Format: int64 */
+            keepalive_count?: number;
+            /** Format: int64 */
+            event_count?: number;
+            last_plate?: string;
+            /** Format: date-time */
+            last_event_time?: string;
+            reads_24h?: number;
+            /** Format: date-time */
+            last_read_at?: string;
+        };
+        CameraLprTest: {
+            /** @enum {string} */
+            engine: "provision" | "frigate" | "none";
+            passed: boolean;
+            checks: components["schemas"]["CameraLprTestCheck"][];
+            hints: string[];
+            observed: components["schemas"]["CameraLprTestObserved"];
         };
         CameraOnvifCheckRequest: {
             endpoint?: string;
@@ -8470,6 +8528,37 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["Camera"];
+                };
+            };
+            400: components["responses"]["BadRequest"];
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+            502: components["responses"]["FrigateUnreachable"];
+        };
+    };
+    testCameraLpr: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                cameraId: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: {
+            content: {
+                "application/json": components["schemas"]["CameraLprTestRequest"];
+            };
+        };
+        responses: {
+            /** @description Result of the checks */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["CameraLprTest"];
                 };
             };
             400: components["responses"]["BadRequest"];

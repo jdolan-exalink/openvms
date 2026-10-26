@@ -1318,6 +1318,30 @@ paths:
         "403": { $ref: "#/components/responses/Forbidden" }
         "404": { $ref: "#/components/responses/NotFound" }
         "502": { $ref: "#/components/responses/FrigateUnreachable" }
+  /api/v1/cameras/{cameraId}/lpr/test:
+    parameters:
+      - { name: cameraId, in: path, required: true, schema: { type: string, format: uuid } }
+    post:
+      tags: [cameras]
+      operationId: testCameraLpr
+      summary: Check the plate-reading chain of an LPR camera
+      description: Read-only check of how a camera's plates reach OpenVMS. For Provision cameras it walks camera -> agent -> central ingestion (agent configured and reachable, receiver, registration, keepalives, readings); for cameras read by Frigate it checks the Frigate LPR setting, the server capability and recent reads. With wait_seconds it polls the agent until a fresh keepalive arrives. It never registers the camera, writes to the agent or creates reads. Requires cameras.view on the camera and servers.manage on its server.
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/CameraLprTestRequest" }
+      responses:
+        "200":
+          description: Result of the checks
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/CameraLprTest" }
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { $ref: "#/components/responses/NotFound" }
+        "502": { $ref: "#/components/responses/FrigateUnreachable" }
   /api/v1/cameras/{cameraId}/onvif/snapshot:
     parameters:
       - { name: cameraId, in: path, required: true, schema: { type: string, format: uuid } }
@@ -5377,6 +5401,47 @@ components:
         source: { type: string, enum: [onvif_events] }
         status: { type: string, enum: [advertised] }
         topics: { type: array, items: { type: string } }
+    CameraLprTestRequest:
+      type: object
+      additionalProperties: false
+      properties:
+        wait_seconds:
+          type: integer
+          minimum: 0
+          maximum: 30
+          default: 0
+          description: Seconds to wait for a keepalive newer than the call (Provision cameras).
+    CameraLprTestCheck:
+      type: object
+      required: [id, status, message]
+      properties:
+        id: { type: string }
+        status: { type: string, enum: [pass, fail, warn, skip] }
+        message: { type: string }
+        detail: { type: string }
+    CameraLprTestObserved:
+      type: object
+      properties:
+        last_seen: { type: string, format: date-time }
+        keepalive_count: { type: integer, format: int64 }
+        event_count: { type: integer, format: int64 }
+        last_plate: { type: string }
+        last_event_time: { type: string, format: date-time }
+        reads_24h: { type: integer }
+        last_read_at: { type: string, format: date-time }
+    CameraLprTest:
+      type: object
+      required: [engine, passed, checks, hints, observed]
+      properties:
+        engine: { type: string, enum: [provision, frigate, none] }
+        passed: { type: boolean }
+        checks:
+          type: array
+          items: { $ref: "#/components/schemas/CameraLprTestCheck" }
+        hints:
+          type: array
+          items: { type: string }
+        observed: { $ref: "#/components/schemas/CameraLprTestObserved" }
     CameraOnvifCheckRequest:
       type: object
       additionalProperties: false
