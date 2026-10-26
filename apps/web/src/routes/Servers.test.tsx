@@ -17,6 +17,13 @@ const server = (id: string, name: string, site_id: string, extra: object = {}) =
   ...extra,
 });
 
+/** openServerActions opens "Editar servidor", where every action that left the server row now lives. */
+async function openServerActions(name = "frigate-h01") {
+  const row = (await screen.findByText(name)).closest("li")!;
+  fireEvent.click(await within(row).findByRole("button", { name: "Editar" }));
+  return screen.findByRole("dialog", { name: /Editar servidor/ });
+}
+
 function stub() {
   vi.stubGlobal(
     "fetch",
@@ -88,13 +95,14 @@ describe("Servers", () => {
       stubApi({
         "/api/v1/servers": () => json({ items: [server("a", "frigate-h01", "s1")] }),
         "/api/v1/sites": () => json({ items: [{ id: "s1", name: "Helvecia" }] }),
-        "/api/v1/me": () => json({ id: "u", tenant_id: "t", grants: [{ permission: "servers.restart", effect: "allow" }] }),
+        "/api/v1/me": () => json({ id: "u", tenant_id: "t", grants: [{ permission: "servers.manage", effect: "allow" }, { permission: "servers.restart", effect: "allow" }] }),
         "/api/v1/servers/a/restart": () => json({ success: true }),
       }),
     );
     vi.stubGlobal("fetch", fetchMock);
     renderPage(Servers);
 
+    await openServerActions();
     const restartBtn = await screen.findByRole("button", { name: /Reiniciar/i });
     expect(restartBtn).toBeInTheDocument();
 
@@ -109,6 +117,22 @@ describe("Servers", () => {
 
     const postCall = fetchMock.mock.calls.find(([r]) => (r as Request).method === "POST" && (r as Request).url.includes("/api/v1/servers/a/restart"));
     expect(postCall).toBeDefined();
+  });
+
+  it("keeps the restart button in the row for a user who can restart but not manage servers", async () => {
+    const fetchMock = vi.fn(
+      stubApi({
+        "/api/v1/servers": () => json({ items: [server("a", "frigate-h01", "s1")] }),
+        "/api/v1/sites": () => json({ items: [{ id: "s1", name: "Helvecia" }] }),
+        "/api/v1/me": () => json({ id: "u", tenant_id: "t", grants: [{ permission: "servers.restart", effect: "allow" }] }),
+        "/api/v1/servers/a/restart": () => json({ success: true }),
+      }),
+    );
+    vi.stubGlobal("fetch", fetchMock);
+    renderPage(Servers);
+
+    expect(await screen.findByRole("button", { name: /Reiniciar/i })).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Editar servidor" })).not.toBeInTheDocument();
   });
 
   it("does not show restart button without servers.restart permission", async () => {
@@ -195,6 +219,7 @@ describe("Servers", () => {
     it("does not request a manual SSH fingerprint", async () => {
       setupAgentInstall();
       renderPage(Servers);
+      await openServerActions();
       fireEvent.click(await screen.findByRole("button", { name: /Instalar agente vía SSH/i }));
       const dialog = await screen.findByRole("dialog", { name: /Instalar agente OpenVMS/ });
       expect(within(dialog).queryByLabelText(/Huella SHA-256 SSH verificada/i)).not.toBeInTheDocument();
@@ -205,6 +230,7 @@ describe("Servers", () => {
       vi.stubGlobal("location", { protocol: "https:", origin: "https://localhost" });
       const { calls } = setupAgentInstall(installGrants, async () => json({ id: "job-1", status: "queued", stage: "validating" }, 202), undefined, undefined, undefined, async () => json({ state: "present", version: "0.2.1", ownership: "unknown" }));
       renderPage(Servers);
+      await openServerActions();
       fireEvent.click(await screen.findByRole("button", { name: /Instalar agente vía SSH/i }));
       const dialog = await screen.findByRole("dialog", { name: /Instalar agente OpenVMS/ });
       fireEvent.change(within(dialog).getByLabelText("Host SSH IPv4"), { target: { value: "10.20.30.44" } });
@@ -220,6 +246,7 @@ describe("Servers", () => {
       vi.stubGlobal("location", { protocol: "https:", origin: "https://localhost" });
       const { calls } = setupAgentInstall(installGrants, async () => json({ id: "job-1", status: "queued", stage: "validating" }, 202), undefined, undefined, undefined, async () => json({ state: "unknown", ownership: "unknown" }));
       renderPage(Servers);
+      await openServerActions();
       fireEvent.click(await screen.findByRole("button", { name: /Instalar agente vía SSH/i }));
       const dialog = await screen.findByRole("dialog", { name: /Instalar agente OpenVMS/ });
       fireEvent.change(within(dialog).getByLabelText("Host SSH IPv4"), { target: { value: "10.20.30.44" } });
@@ -244,6 +271,7 @@ describe("Servers", () => {
         return json(result);
       });
       renderPage(Servers);
+      await openServerActions();
       fireEvent.click(await screen.findByRole("button", { name: /Instalar agente vía SSH/i }));
       const dialog = await screen.findByRole("dialog", { name: /Instalar agente OpenVMS/ });
       fireEvent.change(within(dialog).getByLabelText("Host SSH IPv4"), { target: { value: "10.20.30.44" } });
@@ -263,6 +291,7 @@ describe("Servers", () => {
         return json({ id: "job-1", status: "queued", stage: "validating" }, 202);
       }, undefined, undefined, undefined, async () => json({ state: "present", ownership: "unknown" }));
       renderPage(Servers);
+      await openServerActions();
       fireEvent.click(await screen.findByRole("button", { name: /Instalar agente vía SSH/i }));
       const dialog = await screen.findByRole("dialog", { name: /Instalar agente OpenVMS/ });
       fireEvent.change(within(dialog).getByLabelText("Host SSH IPv4"), { target: { value: "10.20.30.44" } });
@@ -285,6 +314,7 @@ describe("Servers", () => {
         return json({ id: "job-2", status: "queued", stage: "validating" }, 202);
       }, undefined, undefined, undefined, async () => json({ state: "present", ownership: "unknown" }));
       renderPage(Servers);
+      await openServerActions();
       fireEvent.click(await screen.findByRole("button", { name: /Instalar agente vía SSH/i }));
       const dialog = await screen.findByRole("dialog", { name: /Instalar agente OpenVMS/ });
       fireEvent.change(within(dialog).getByLabelText("Host SSH IPv4"), { target: { value: "10.20.30.44" } });
@@ -307,6 +337,7 @@ describe("Servers", () => {
         async () => failPoll ? json({ code: "not_found", message: "unknown" }, 404) : json({ id: "job-1", status: "queued", stage: "validating" }),
       );
       renderPage(Servers);
+      await openServerActions();
       fireEvent.click(await screen.findByRole("button", { name: /Instalar agente vía SSH/i }));
       const dialog = await screen.findByRole("dialog", { name: /Instalar agente OpenVMS/ });
       fireEvent.change(within(dialog).getByLabelText("Host SSH IPv4"), { target: { value: "10.20.30.44" } });
@@ -330,21 +361,22 @@ describe("Servers", () => {
     it("requires both matching scoped grants and respects an explicit deny", async () => {
       setupAgentInstall([installGrants[0]!]);
       renderPage(Servers);
-      await screen.findByText("frigate-h01");
+      const dialog = await openServerActions();
       expect(screen.queryByRole("button", { name: /Instalar agente vía SSH/i })).not.toBeInTheDocument();
-      expect(screen.getByRole("note")).toHaveTextContent(/servers\.manage y servers\.config\.secrets/i);
+      expect(within(dialog).getByRole("note")).toHaveTextContent(/servers\.manage y servers\.config\.secrets/i);
     });
 
     it("does not offer installation when a matching server deny overrides both allows", async () => {
       setupAgentInstall([...installGrants, { permission: "servers.manage", effect: "deny", scope_type: "server", scope_id: "a" }]);
       renderPage(Servers);
-      await screen.findByText("frigate-h01");
+      await openServerActions();
       expect(screen.queryByRole("button", { name: /Instalar agente vía SSH/i })).not.toBeInTheDocument();
     });
 
     it("does not submit root credentials from an HTTP browser", async () => {
       setupAgentInstall();
       renderPage(Servers);
+      await openServerActions();
       fireEvent.click(await screen.findByRole("button", { name: /Instalar agente vía SSH/i }));
       const dialog = await screen.findByRole("dialog", { name: /Instalar agente OpenVMS/ });
       expect(within(dialog).getByLabelText("Host SSH IPv4")).toHaveValue("");
@@ -359,7 +391,7 @@ describe("Servers", () => {
       expect(Array.from({ length: sessionStorage.length }, (_, index) => sessionStorage.getItem(sessionStorage.key(index) ?? "") ?? "").join(" ")).not.toContain("secret-root-password");
       expect((globalThis.fetch as ReturnType<typeof vi.fn>).mock.calls.some(([request]) => (request as Request).method === "POST" && new URL((request as Request).url).pathname.includes("/agent/install"))).toBe(false);
       fireEvent.click(within(dialog).getByRole("button", { name: "Cancelar" }));
-      expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
+      expect(screen.queryByRole("dialog", { name: /Instalar agente OpenVMS/ })).not.toBeInTheDocument();
       expect(document.body).not.toHaveTextContent("secret-root-password");
     });
 
@@ -374,6 +406,7 @@ describe("Servers", () => {
         return new Response("9443", { status: 200, headers: { "Content-Type": "text/plain" } });
       });
       renderPage(Servers);
+      await openServerActions();
       fireEvent.click(await screen.findByRole("button", { name: /Instalar agente vía SSH/i }));
       const dialog = await screen.findByRole("dialog", { name: /Instalar agente OpenVMS/ });
       fireEvent.change(within(dialog).getByLabelText("Contraseña SSH root"), { target: { value: "secret-root-password" } });
@@ -398,6 +431,7 @@ describe("Servers", () => {
       vi.stubGlobal("location", { protocol: "http:", origin: "http://openvms.example:8000", href: "http://openvms.example:8000/servers", assign });
       setupAgentInstall(installGrants, undefined, undefined, async () => new Response("65536", { status: 200, headers: { "Content-Type": "text/plain" } }));
       renderPage(Servers);
+      await openServerActions();
       fireEvent.click(await screen.findByRole("button", { name: /Instalar agente vía SSH/i }));
       const dialog = await screen.findByRole("dialog", { name: /Instalar agente OpenVMS/ });
       fireEvent.click(within(dialog).getByRole("button", { name: /Abrir OpenVMS por HTTPS/i }));
@@ -410,6 +444,7 @@ describe("Servers", () => {
       vi.stubGlobal("location", { protocol: "http:", origin: "http://openvms.example:8000", href: "http://openvms.example:8000/servers", assign });
       setupAgentInstall(installGrants, undefined, undefined, async () => new Response("unavailable", { status: 503, headers: { "Content-Type": "text/plain" } }));
       renderPage(Servers);
+      await openServerActions();
       fireEvent.click(await screen.findByRole("button", { name: /Instalar agente vía SSH/i }));
       const dialog = await screen.findByRole("dialog", { name: /Instalar agente OpenVMS/ });
       fireEvent.click(within(dialog).getByRole("button", { name: /Abrir OpenVMS por HTTPS/i }));
@@ -422,6 +457,7 @@ describe("Servers", () => {
       vi.stubGlobal("location", { protocol: "http:", origin: "http://openvms.example:8000", href: "http://openvms.example:8000/servers", assign });
       setupAgentInstall(installGrants, undefined, undefined, async () => new Response("9".repeat(64 * 1024), { status: 200, headers: { "Content-Type": "text/plain" } }));
       renderPage(Servers);
+      await openServerActions();
       fireEvent.click(await screen.findByRole("button", { name: /Instalar agente vía SSH/i }));
       const dialog = await screen.findByRole("dialog", { name: /Instalar agente OpenVMS/ });
       fireEvent.click(within(dialog).getByRole("button", { name: /Abrir OpenVMS por HTTPS/i }));
@@ -444,6 +480,7 @@ describe("Servers", () => {
         return new Promise((_resolve, reject) => request.signal.addEventListener("abort", () => reject(new DOMException("aborted", "AbortError")), { once: true }));
       });
       renderPage(Servers);
+      await openServerActions();
       fireEvent.click(await screen.findByRole("button", { name: /Instalar agente vía SSH/i }));
       const dialog = await screen.findByRole("dialog", { name: /Instalar agente OpenVMS/ });
       fireEvent.click(within(dialog).getByRole("button", { name: /Abrir OpenVMS por HTTPS/i }));
@@ -464,6 +501,7 @@ describe("Servers", () => {
         return new Promise((_resolve, reject) => request.signal.addEventListener("abort", () => reject(new DOMException("aborted", "AbortError")), { once: true }));
       });
       renderPage(Servers);
+      await openServerActions();
       fireEvent.click(await screen.findByRole("button", { name: /Instalar agente vía SSH/i }));
       const dialog = await screen.findByRole("dialog", { name: /Instalar agente OpenVMS/ });
       fireEvent.click(within(dialog).getByRole("button", { name: /Abrir OpenVMS por HTTPS/i }));
@@ -481,6 +519,7 @@ describe("Servers", () => {
         return json({ id: "job-1", status: "queued", stage: "validating" }, 202);
       });
       renderPage(Servers);
+      await openServerActions();
       fireEvent.click(await screen.findByRole("button", { name: /Instalar agente vía SSH/i }));
       const dialog = await screen.findByRole("dialog", { name: /Instalar agente OpenVMS/ });
       expect(within(dialog).queryByRole("button", { name: /Abrir OpenVMS por HTTPS/i })).not.toBeInTheDocument();
@@ -508,6 +547,7 @@ describe("Servers", () => {
         return json({ id: "job-1", status: "succeeded", stage: "complete" });
       }, undefined, () => agent);
       renderPage(Servers);
+      await openServerActions();
       fireEvent.click(await screen.findByRole("button", { name: /Instalar agente vía SSH/i }));
       const dialog = await screen.findByRole("dialog", { name: /Instalar agente OpenVMS/ });
       fireEvent.change(within(dialog).getByLabelText("Host SSH IPv4"), { target: { value: "10.20.30.44" } });
@@ -535,6 +575,7 @@ describe("Servers", () => {
           : json({ id: "job-1", status: "succeeded", stage: "complete" })),
       );
       renderPage(Servers);
+      await openServerActions();
       fireEvent.click(await screen.findByRole("button", { name: /Instalar agente vía SSH/i }));
       const dialog = await screen.findByRole("dialog", { name: /Instalar agente OpenVMS/ });
       fireEvent.change(within(dialog).getByLabelText("Host SSH IPv4"), { target: { value: "10.20.30.44" } });
@@ -559,6 +600,7 @@ describe("Servers", () => {
       let respond: ((response: Response) => void) | undefined;
       setupAgentInstall(undefined, async () => new Promise((resolve) => { respond = resolve; }));
       renderPage(Servers);
+      await openServerActions();
       fireEvent.click(await screen.findByRole("button", { name: /Instalar agente vía SSH/i }));
       const dialog = await screen.findByRole("dialog", { name: /Instalar agente OpenVMS/ });
       fireEvent.change(within(dialog).getByLabelText("Host SSH IPv4"), { target: { value: "10.20.30.44" } });
@@ -581,6 +623,7 @@ describe("Servers", () => {
         return new Promise((_resolve, reject) => request.signal.addEventListener("abort", () => reject(new DOMException("aborted", "AbortError")), { once: true }));
       });
       renderPage(Servers);
+      const editDialog = await openServerActions();
       fireEvent.click(await screen.findByRole("button", { name: /Instalar agente vía SSH/i }));
       const dialog = await screen.findByRole("dialog", { name: /Instalar agente OpenVMS/ });
       fireEvent.change(within(dialog).getByLabelText("Host SSH IPv4"), { target: { value: "10.20.30.44" } });
@@ -591,10 +634,13 @@ describe("Servers", () => {
       await waitFor(() => expect(pollRequest).toBeDefined());
       expect((await pollRequest!.clone().json().catch(() => null))).toBeNull();
       fireEvent.click(within(dialog).getAllByRole("button", { name: "Cerrar" }).at(-1)!);
-      expect(await screen.findByText(/La instalación continúa en segundo plano/i)).toBeInTheDocument();
+      expect(await within(editDialog).findByText(/La instalación continúa en segundo plano/i)).toBeInTheDocument();
       fireEvent.click(await screen.findByRole("button", { name: /Ver progreso de instalación/i }));
       const reopened = await screen.findByRole("dialog", { name: /Instalar agente OpenVMS/ });
       expect(within(reopened).getByText(/Cerrar esta ventana no cancela/i)).toBeInTheDocument();
+      // Close the install dialog and then the edit modal so the filter below can drop the row.
+      fireEvent.keyDown(document, { key: "Escape" });
+      fireEvent.keyDown(document, { key: "Escape" });
       fireEvent.change(screen.getByLabelText("Buscar servidor"), { target: { value: "frigate-r01" } });
       await waitFor(() => expect(screen.queryByRole("dialog")).not.toBeInTheDocument());
       expect(pollRequest!.signal.aborted).toBe(false);
@@ -605,6 +651,7 @@ describe("Servers", () => {
       vi.stubGlobal("location", { protocol: "https:", origin: "https://localhost" });
       setupAgentInstall(undefined, async () => json({ id: "job-1", status: "queued", stage: "validating" }, 202), async () => json({ code: "not_found", message: "secret-root-password" }, 404));
       renderPage(Servers);
+      await openServerActions();
       fireEvent.click(await screen.findByRole("button", { name: /Instalar agente vía SSH/i }));
       const dialog = await screen.findByRole("dialog", { name: /Instalar agente OpenVMS/ });
       fireEvent.change(within(dialog).getByLabelText("Host SSH IPv4"), { target: { value: "10.20.30.44" } });
@@ -619,6 +666,7 @@ describe("Servers", () => {
       vi.stubGlobal("location", { protocol: "https:", origin: "https://localhost" });
       setupAgentInstall(undefined, async () => json({ id: "job-101", status: "running", stage: "transferring", message: "Transferring agent files over SFTP" }, 202));
       renderPage(Servers);
+      await openServerActions();
       fireEvent.click(await screen.findByRole("button", { name: /Instalar agente vía SSH/i }));
       const dialog = await screen.findByRole("dialog", { name: /Instalar agente OpenVMS/ });
       fireEvent.change(within(dialog).getByLabelText("Host SSH IPv4"), { target: { value: "10.20.30.44" } });
@@ -673,6 +721,7 @@ describe("Servers", () => {
     it("shows one install action for a server with no registered agent", async () => {
       const { calls } = setup(undefined, undefined, grants, undefined, { installed: false, binary_status: "not_installed", binary_upgrade_available: false });
       renderPage(Servers);
+      await openServerActions();
       expect(await screen.findByRole("button", { name: /Instalar agente vía SSH/i })).toBeEnabled();
       expect(screen.queryByRole("button", { name: /Actualizar agente/i })).not.toBeInTheDocument();
       expect(calls.filter((request) => request.method === "POST" && /agent\/(install|update-ssh)$/.test(new URL(request.url).pathname))).toHaveLength(0);
@@ -1136,7 +1185,8 @@ describe("Servers", () => {
     it("asks for confirmation and deletes only after confirming", async () => {
       const fetchMock = setup(manager);
       renderPage(Servers);
-      fireEvent.click(await screen.findByRole("button", { name: "Eliminar" }));
+      const editDialog = await openServerActions();
+      fireEvent.click(within(editDialog).getByRole("button", { name: "Eliminar" }));
       const dialog = await screen.findByRole("dialog", { name: "Eliminar servidor" });
       expect(dialog).toHaveTextContent("¿Está seguro de eliminar el servidor «frigate-h01»?");
       expect(dialog).toHaveTextContent("Esta acción no se puede deshacer.");
@@ -1152,11 +1202,115 @@ describe("Servers", () => {
     it("cancelling the confirmation does not delete", async () => {
       const fetchMock = setup(manager);
       renderPage(Servers);
-      fireEvent.click(await screen.findByRole("button", { name: "Eliminar" }));
+      const editDialog = await openServerActions();
+      fireEvent.click(within(editDialog).getByRole("button", { name: "Eliminar" }));
       const dialog = await screen.findByRole("dialog", { name: "Eliminar servidor" });
       fireEvent.click(within(dialog).getByRole("button", { name: "Cancelar" }));
       await waitFor(() => expect(screen.queryByRole("dialog")).not.toBeInTheDocument());
       expect(writes(fetchMock, "DELETE")).toHaveLength(0);
+    });
+  });
+
+  describe("row layout and server actions panel", () => {
+    const allow = (permission: string) => ({ permission, effect: "allow", scope_type: "server", scope_id: "a" });
+    const full = [allow("servers.manage"), allow("servers.config.secrets"), allow("servers.restart")];
+    const same = { sha256: "1".repeat(64), architecture: "amd64", version: "0.4.4" };
+    const installedAgent = { installed: true, version: "0.4.4", binary_status: "current", binary_outdated: false, binary_upgrade_available: false, binary_observed: same, binary_available: same };
+    const updatable = { ...installedAgent, binary_status: "update_available", binary_outdated: true, binary_upgrade_available: true };
+    const notInstalled = { installed: false, binary_status: "not_installed", binary_upgrade_available: false };
+    function setupLayout(grants: object[], agent: object) {
+      vi.stubGlobal("fetch", vi.fn(stubApi({
+        "/api/v1/servers": () => json({ items: [server("a", "frigate-h01", "s1")] }),
+        "/api/v1/sites": () => json({ items: [{ id: "s1", name: "Helvecia" }] }),
+        "/api/v1/me": () => json({ id: "u", tenant_id: "t", grants }),
+        "/api/v1/servers/a/agent": () => json(agent),
+        "/api/v1/servers/a/frigate/config": () => json({ config: {} }),
+      })));
+    }
+    const rowButtons = (row: HTMLElement) => within(row).getAllByRole("button").map((b) => b.textContent?.trim());
+    const MOVED = [/Instalar agente vía SSH/i, /Conectar agente existente/i, /Reiniciar/i, /Sincronizar/i, /Configurar Frigate/i, /^Eliminar$/];
+
+    it("keeps only update, uninstall and edit in the row of a server with an installed agent", async () => {
+      setupLayout(full, updatable);
+      renderPage(Servers);
+      const row = (await screen.findByText("frigate-h01")).closest("li")!;
+      await within(row).findByRole("button", { name: /^Actualizar agente$/i });
+      expect(rowButtons(row)).toEqual(["Actualizar agente", "Desinstalar agente", "Editar"]);
+      for (const name of MOVED) expect(within(row).queryByRole("button", { name })).not.toBeInTheDocument();
+      expect(within(row).queryByRole("note")).not.toBeInTheDocument();
+    });
+
+    it("keeps only edit and uninstall when the installed agent is current", async () => {
+      setupLayout(full, installedAgent);
+      renderPage(Servers);
+      const row = (await screen.findByText("frigate-h01")).closest("li")!;
+      await within(row).findByRole("button", { name: "Desinstalar agente" });
+      expect(rowButtons(row)).toEqual(["Desinstalar agente", "Editar"]);
+    });
+
+    it("shows only edit in the row of a server without an agent", async () => {
+      setupLayout(full, notInstalled);
+      renderPage(Servers);
+      const row = (await screen.findByText("frigate-h01")).closest("li")!;
+      await waitFor(() => expect(rowButtons(row)).toEqual(["Editar"]));
+    });
+
+    it("shows each moved action in the edit modal only with its permission", async () => {
+      setupLayout(full, notInstalled);
+      const view = renderPage(Servers);
+      let dialog = await openServerActions();
+      for (const name of MOVED) expect(await within(dialog).findByRole("button", { name })).toBeInTheDocument();
+      view.unmount();
+
+      setupLayout([allow("servers.manage")], notInstalled);
+      renderPage(Servers);
+      dialog = await openServerActions();
+      expect(await within(dialog).findByRole("button", { name: /Sincronizar/i })).toBeInTheDocument();
+      expect(within(dialog).getByRole("button", { name: /Configurar Frigate/i })).toBeInTheDocument();
+      expect(within(dialog).getByRole("button", { name: /^Eliminar$/ })).toBeInTheDocument();
+      expect(within(dialog).getByRole("note")).toHaveTextContent(/servers\.manage y servers\.config\.secrets/i);
+      for (const name of [/Instalar agente vía SSH/i, /Conectar agente existente/i, /Reiniciar/i]) {
+        expect(within(dialog).queryByRole("button", { name })).not.toBeInTheDocument();
+      }
+    });
+
+    it("hides the SSH install in the modal when the agent is already installed", async () => {
+      setupLayout(full, installedAgent);
+      renderPage(Servers);
+      const dialog = await openServerActions();
+      expect(await within(dialog).findByRole("button", { name: /Conectar agente existente/i })).toBeInTheDocument();
+      expect(within(dialog).queryByRole("button", { name: /Instalar agente vía SSH/i })).not.toBeInTheDocument();
+      expect(within(dialog).queryByRole("button", { name: "Desinstalar agente" })).not.toBeInTheDocument();
+    });
+
+    it("closes the edit modal and opens the delete confirmation from Eliminar", async () => {
+      setupLayout(full, notInstalled);
+      renderPage(Servers);
+      const dialog = await openServerActions();
+      fireEvent.click(within(dialog).getByRole("button", { name: /^Eliminar$/ }));
+      expect(await screen.findByRole("dialog", { name: "Eliminar servidor" })).toBeInTheDocument();
+      expect(screen.queryByRole("dialog", { name: /Editar servidor/ })).not.toBeInTheDocument();
+    });
+
+    it("closes the edit modal and opens the Frigate config editor from Configurar Frigate", async () => {
+      setupLayout(full, notInstalled);
+      renderPage(Servers);
+      const dialog = await openServerActions();
+      fireEvent.click(within(dialog).getByRole("button", { name: /Configurar Frigate/i }));
+      await waitFor(() => expect(screen.queryByRole("dialog", { name: /Editar servidor/ })).not.toBeInTheDocument());
+      expect(await screen.findByRole("dialog")).toBeInTheDocument();
+    });
+
+    it("closes only the nested dialog when Escape is pressed inside it", async () => {
+      setupLayout(full, notInstalled);
+      renderPage(Servers);
+      const dialog = await openServerActions();
+      fireEvent.click(await within(dialog).findByRole("button", { name: /Conectar agente existente/i }));
+      const nested = await screen.findByRole("dialog", { name: /Conectar agente/i });
+      expect(nested).not.toBe(dialog);
+      fireEvent.keyDown(document, { key: "Escape" });
+      await waitFor(() => expect(screen.queryByRole("dialog", { name: /Conectar agente/i })).not.toBeInTheDocument());
+      expect(screen.getByRole("dialog", { name: /Editar servidor/ })).toBeInTheDocument();
     });
   });
 
