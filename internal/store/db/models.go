@@ -220,6 +220,17 @@ type CameraOutage struct {
 	Since    time.Time
 }
 
+type CameraPtzTour struct {
+	ID          uuid.UUID
+	TenantID    uuid.UUID
+	CameraID    uuid.UUID
+	Name        string
+	Steps       json.RawMessage
+	RepeatCount int32
+	CreatedAt   time.Time
+	UpdatedAt   time.Time
+}
+
 type CameraZone struct {
 	ID           uuid.UUID
 	TenantID     uuid.UUID

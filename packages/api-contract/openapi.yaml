@@ -1666,6 +1666,79 @@ paths:
         "403": { $ref: "#/components/responses/Forbidden" }
         "404": { $ref: "#/components/responses/NotFound" }
         "502": { $ref: "#/components/responses/FrigateUnreachable" }
+  /api/v1/cameras/{cameraId}/ptz/tours:
+    parameters:
+      - { name: cameraId, in: path, required: true, schema: { type: string, format: uuid } }
+    get:
+      tags: [cameras]
+      operationId: listCameraPtzTours
+      summary: List the PTZ tours stored for a camera
+      description: Requires cameras.view. Tours are a stored sequence of device presets; this API does not run them.
+      responses:
+        "200":
+          description: PTZ tours
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/CameraPtzTourList" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { $ref: "#/components/responses/NotFound" }
+    post:
+      tags: [cameras]
+      operationId: createCameraPtzTour
+      summary: Store a PTZ tour for a camera
+      description: Requires cameras.manage. Names are unique per camera.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/CameraPtzTourInput" }
+      responses:
+        "201":
+          description: Created tour
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/CameraPtzTour" }
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { $ref: "#/components/responses/NotFound" }
+        "409": { $ref: "#/components/responses/Conflict" }
+  /api/v1/cameras/{cameraId}/ptz/tours/{tourId}:
+    parameters:
+      - { name: cameraId, in: path, required: true, schema: { type: string, format: uuid } }
+      - { name: tourId, in: path, required: true, schema: { type: string, format: uuid } }
+    put:
+      tags: [cameras]
+      operationId: updateCameraPtzTour
+      summary: Replace a stored PTZ tour
+      description: Requires cameras.manage.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/CameraPtzTourInput" }
+      responses:
+        "200":
+          description: Updated tour
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/CameraPtzTour" }
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { $ref: "#/components/responses/NotFound" }
+        "409": { $ref: "#/components/responses/Conflict" }
+    delete:
+      tags: [cameras]
+      operationId: deleteCameraPtzTour
+      summary: Delete a stored PTZ tour
+      description: Requires cameras.manage.
+      responses:
+        "204": { description: Tour deleted }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { $ref: "#/components/responses/NotFound" }
   /api/v1/cameras/{cameraId}/zones:
     parameters:
       - { name: cameraId, in: path, required: true, schema: { type: string, format: uuid } }
@@ -6149,6 +6222,47 @@ components:
               readOnly: true
               description: State of synchronization to Frigate; failed and conflict can be retried with retryCameraZoneSync.
             sync_error: { type: string, readOnly: true, description: Last synchronization failure or conflict reason; absent unless failed or conflicted. }
+    CameraPtzTourStep:
+      type: object
+      additionalProperties: false
+      required: [preset_token, dwell_seconds, speed]
+      properties:
+        preset_token: { type: string, minLength: 1, maxLength: 128 }
+        preset_name: { type: string, maxLength: 128 }
+        dwell_seconds: { type: integer, minimum: 0, maximum: 3600 }
+        speed: { type: number, minimum: 0, maximum: 1 }
+    CameraPtzTourInput:
+      type: object
+      additionalProperties: false
+      required: [name, steps]
+      properties:
+        name: { type: string, minLength: 1, maxLength: 128 }
+        steps:
+          type: array
+          minItems: 1
+          maxItems: 64
+          items: { $ref: "#/components/schemas/CameraPtzTourStep" }
+        repeat_count: { type: integer, minimum: 0, maximum: 1000, description: 0 repeats until stopped. }
+    CameraPtzTour:
+      type: object
+      required: [id, camera_id, name, steps, repeat_count, created_at, updated_at]
+      properties:
+        id: { type: string, format: uuid }
+        camera_id: { type: string, format: uuid }
+        name: { type: string }
+        steps:
+          type: array
+          items: { $ref: "#/components/schemas/CameraPtzTourStep" }
+        repeat_count: { type: integer }
+        created_at: { type: string, format: date-time }
+        updated_at: { type: string, format: date-time }
+    CameraPtzTourList:
+      type: object
+      required: [tours]
+      properties:
+        tours:
+          type: array
+          items: { $ref: "#/components/schemas/CameraPtzTour" }
     CameraZoneList:
       type: object
       required: [zones]
