@@ -348,3 +348,141 @@ func TestCameraConfigStateIsTenantIsolated(t *testing.T) {
 		t.Fatalf("cross-tenant apply = %v, want not found", err)
 	}
 }
+
+// grantAt gives a fresh tenant user the permissions at tenant scope and returns it.
+func grantAt(t *testing.T, env *demofix.Env, name string, tenant uuid.UUID, perms ...authz.Permission) authz.Actor {
+	t.Helper()
+	u, _, err := bootstrap.TenantUser(context.Background(), env.Store, tenant, name)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, p := range perms {
+		if _, err := env.Svc.CreateGrant(context.Background(), env.Admin, inventory.GrantInput{
+			SubjectType: "user", SubjectID: u.UserID, Permission: p,
+			Effect: authz.Allow, ScopeType: authz.ScopeTenant, ScopeID: &tenant,
+		}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	return u
+}
+
+func TestCameraConfigSectionPermissions(t *testing.T) {
+	env := demofix.Setup(t)
+	eng := newFakeEngine()
+	useEngine(env, eng)
+	cam := env.Cameras["frigate-h01/acceso_norte"]
+	ctx := context.Background()
+	multi := camconfig.Patch{
+		Detection: &camconfig.DetectionPatch{Enabled: bptr(true)},
+		Recording: &camconfig.RecordingPatch{Enabled: bptr(false)},
+		Analytics: &camconfig.AnalyticsPatch{LPR: bptr(true)},
+	}
+	recordingOnly := camconfig.Patch{Recording: &camconfig.RecordingPatch{Enabled: bptr(false)}}
+
+	// Legacy holder (servers.config only): everything keeps working exactly as before.
+	legacy := grantAt(t, env, "legacy", cam.TenantID, authz.CamerasView, authz.ServersConfig)
+	res, err := env.Svc.ApplyCameraConfig(ctx, legacy, cam.ID, inventory.ConfigApplyInput{Patch: multi})
+	if err != nil {
+		t.Fatalf("legacy servers.config holder lost access: %v", err)
+	}
+	rev := res.State.DesiredRevision
+
+	// cameras.manage alone and cameras.view alone never gain config writes.
+	for name, perms := range map[string][]authz.Permission{"manage": {authz.CamerasView, authz.CamerasManage}, "view": {authz.CamerasView}} {
+		u := grantAt(t, env, "only-"+name, cam.TenantID, perms...)
+		if _, err := env.Svc.ApplyCameraConfig(ctx, u, cam.ID, inventory.ConfigApplyInput{Patch: recordingOnly}); !errors.Is(err, access.ErrForbidden) {
+			t.Errorf("%s alone: err = %v, want forbidden", name, err)
+		}
+	}
+
+	// A granular actor needs EVERY touched section; denied ones are listed, nothing else.
+	gran := grantAt(t, env, "gran", cam.TenantID, authz.CamerasView, authz.ServersConfig, authz.CamerasConfigView, authz.CamerasConfigEdit, authz.CamerasConfigRecording)
+	patches := eng.patches
+	_, err = env.Svc.ApplyCameraConfig(ctx, gran, cam.ID, inventory.ConfigApplyInput{Patch: multi, ExpectedRevision: rev})
+	var sf *inventory.SectionsForbiddenError
+	if !errors.As(err, &sf) || !errors.Is(err, access.ErrForbidden) {
+		t.Fatalf("multi-section apply err = %v, want SectionsForbiddenError", err)
+	}
+	if len(sf.Sections) != 1 || sf.Sections[0] != "analytics" {
+		t.Fatalf("denied sections = %v, want [analytics]", sf.Sections)
+	}
+	if _, err := env.Svc.ReviewCameraConfig(ctx, gran, cam.ID, multi); !errors.As(err, &sf) {
+		t.Fatalf("review must enforce sections too: %v", err)
+	}
+	if eng.patches != patches {
+		t.Fatal("a denied section must not write anything")
+	}
+	allowed := camconfig.Patch{Detection: multi.Detection, Recording: multi.Recording}
+	res, err = env.Svc.ApplyCameraConfig(ctx, gran, cam.ID, inventory.ConfigApplyInput{Patch: allowed, ExpectedRevision: rev})
+	if err != nil {
+		t.Fatalf("granted sections refused: %v", err)
+	}
+	rev = res.State.DesiredRevision
+
+	// Revoking one granular grant takes effect even for a servers.config holder; a deny wins.
+	noVideo := grantAt(t, env, "novideo", cam.TenantID, authz.CamerasView, authz.ServersConfig, authz.CamerasConfigEdit)
+	if _, err := env.Svc.ApplyCameraConfig(ctx, noVideo, cam.ID, inventory.ConfigApplyInput{Patch: recordingOnly}); !errors.Is(err, access.ErrForbidden) {
+		t.Fatalf("revoked section err = %v", err)
+	}
+	denied := grantAt(t, env, "denied", cam.TenantID, authz.CamerasView, authz.ServersConfig)
+	if _, err := env.Svc.CreateGrant(ctx, env.Admin, inventory.GrantInput{
+		SubjectType: "user", SubjectID: denied.UserID, Permission: authz.CamerasConfigRecording,
+		Effect: authz.Deny, ScopeType: authz.ScopeTenant, ScopeID: &cam.TenantID,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := env.Svc.ApplyCameraConfig(ctx, denied, cam.ID, inventory.ConfigApplyInput{Patch: recordingOnly}); !errors.Is(err, access.ErrForbidden) {
+		t.Fatalf("denied section err = %v", err)
+	}
+	if _, err := env.Svc.ApplyCameraConfig(ctx, denied, cam.ID, inventory.ConfigApplyInput{Patch: detectionOn(), ExpectedRevision: rev}); err != nil {
+		t.Fatalf("a deny on recording must not block detection: %v", err)
+	}
+}
+
+func TestCameraWebAccessPermission(t *testing.T) {
+	env := demofix.Setup(t)
+	cam := env.Cameras["frigate-h01/acceso_norte"]
+	ctx := context.Background()
+	check := func(u authz.Actor) error { return env.Svc.RequireCameraWebAccess(ctx, u, cam.ID) }
+
+	if err := check(grantAt(t, env, "pair", cam.TenantID, authz.ServersManage, authz.ServersConfigSecrets)); err != nil {
+		t.Errorf("legacy pair lost web access: %v", err)
+	}
+	if err := check(grantAt(t, env, "half", cam.TenantID, authz.ServersManage)); !errors.Is(err, access.ErrForbidden) {
+		t.Errorf("servers.manage alone: %v", err)
+	}
+	if err := check(grantAt(t, env, "cfg", cam.TenantID, authz.ServersConfig, authz.CamerasManage)); !errors.Is(err, access.ErrForbidden) {
+		t.Errorf("servers.config + cameras.manage must not open the camera web: %v", err)
+	}
+	if err := check(grantAt(t, env, "web", cam.TenantID, authz.CamerasWebAccess)); err != nil {
+		t.Errorf("cameras.web.access refused: %v", err)
+	}
+	other, err := env.Svc.CreateTenant(ctx, env.Admin, "otro-web", "Otro")
+	if err != nil {
+		t.Fatal(err)
+	}
+	foreign := grantAt(t, env, "foreign", other.ID, authz.CamerasWebAccess)
+	if err := check(foreign); err == nil {
+		t.Error("a grant in another tenant must not open this camera's web")
+	}
+}
+
+func TestCameraPTZPermission(t *testing.T) {
+	env := demofix.Setup(t)
+	cam := env.Cameras["frigate-h01/acceso_norte"]
+	ctx := context.Background()
+	if err := env.Svc.RequireCameraPTZ(ctx, grantAt(t, env, "mgr", cam.TenantID, authz.CamerasManage), cam.ID); err != nil {
+		t.Errorf("legacy cameras.manage lost PTZ: %v", err)
+	}
+	if err := env.Svc.RequireCameraPTZ(ctx, grantAt(t, env, "viewer", cam.TenantID, authz.CamerasView), cam.ID); !errors.Is(err, access.ErrForbidden) {
+		t.Errorf("cameras.view alone: %v", err)
+	}
+	if err := env.Svc.RequireCameraPTZ(ctx, grantAt(t, env, "ptz", cam.TenantID, authz.CamerasConfigPTZ), cam.ID); err != nil {
+		t.Errorf("cameras.config.ptz refused: %v", err)
+	}
+	strict := grantAt(t, env, "strict", cam.TenantID, authz.CamerasManage, authz.CamerasConfigEdit)
+	if err := env.Svc.RequireCameraPTZ(ctx, strict, cam.ID); !errors.Is(err, access.ErrForbidden) {
+		t.Errorf("a granular actor without config.ptz must be refused: %v", err)
+	}
+}

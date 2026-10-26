@@ -36,8 +36,12 @@ func (s *Service) AuditCameraOnvifMutation(ctx context.Context, actor authz.Acto
 		if err != nil {
 			return notFoundOr(err)
 		}
-		if err := checker.Require(authz.CamerasManage, cameraResource(cam)); err != nil {
-			return err
+		required := checker.Require(authz.CamerasManage, cameraResource(cam))
+		if operation == "ptz" {
+			required = checker.RequireCompat(authz.CamerasConfigPTZ, cameraResource(cam))
+		}
+		if required != nil {
+			return required
 		}
 		return audit(ctx, q, actor, &cam.TenantID, ActionOnvifMutation, "camera", cameraID, map[string]any{
 			"operation_id":   operationID,

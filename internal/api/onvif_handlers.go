@@ -761,6 +761,11 @@ func (h *Handlers) ControlCameraOnvifPTZ(ctx context.Context, r gen.ControlCamer
 		}, nil
 	}
 
+	if string(r.Body.Action) != "get_presets" {
+		if err := h.Inv.RequireCameraPTZ(ctx, a, cam.ID); err != nil {
+			return nil, err
+		}
+	}
 	ep, user, pass := h.resolveCameraOnvifCredentials(ctx, a, cam, r.Body.Endpoint, r.Body.Username, r.Body.Password)
 	if ep == "" {
 		return gen.ControlCameraOnvifPTZ400JSONResponse{

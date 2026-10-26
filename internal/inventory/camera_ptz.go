@@ -113,7 +113,7 @@ func (s *Service) ListCameraPTZTours(ctx context.Context, actor authz.Actor, cam
 	return tours, err
 }
 
-// CreateCameraPTZTour stores a tour; it requires cameras.manage on the camera.
+// CreateCameraPTZTour stores a tour; it requires cameras.config.ptz (or legacy cameras.manage) on the camera.
 func (s *Service) CreateCameraPTZTour(ctx context.Context, actor authz.Actor, cameraID uuid.UUID, input PTZTourInput) (PTZTour, error) {
 	in, err := normalizePTZTour(input)
 	if err != nil {
@@ -125,7 +125,7 @@ func (s *Service) CreateCameraPTZTour(ctx context.Context, actor authz.Actor, ca
 		if err != nil {
 			return notFoundOr(err)
 		}
-		if err := checker.Require(authz.CamerasManage, cameraResource(cam)); err != nil {
+		if err := checker.RequireCompat(authz.CamerasConfigPTZ, cameraResource(cam)); err != nil {
 			return err
 		}
 		row, err := q.CreateCameraPTZTour(ctx, db.CreateCameraPTZTourParams{TenantID: cam.TenantID, CameraID: cam.ID, Name: in.Name, Steps: mustJSON(in.Steps), RepeatCount: repeatInt32(in.RepeatCount)})
@@ -138,7 +138,7 @@ func (s *Service) CreateCameraPTZTour(ctx context.Context, actor authz.Actor, ca
 	return out, err
 }
 
-// UpdateCameraPTZTour replaces a tour; it requires cameras.manage on the camera.
+// UpdateCameraPTZTour replaces a tour; it requires cameras.config.ptz (or legacy cameras.manage) on the camera.
 func (s *Service) UpdateCameraPTZTour(ctx context.Context, actor authz.Actor, cameraID, tourID uuid.UUID, input PTZTourInput) (PTZTour, error) {
 	in, err := normalizePTZTour(input)
 	if err != nil {
@@ -150,7 +150,7 @@ func (s *Service) UpdateCameraPTZTour(ctx context.Context, actor authz.Actor, ca
 		if err != nil {
 			return notFoundOr(err)
 		}
-		if err := checker.Require(authz.CamerasManage, cameraResource(cam)); err != nil {
+		if err := checker.RequireCompat(authz.CamerasConfigPTZ, cameraResource(cam)); err != nil {
 			return err
 		}
 		row, err := q.UpdateCameraPTZTour(ctx, db.UpdateCameraPTZTourParams{TenantID: cam.TenantID, CameraID: cam.ID, ID: tourID, Name: in.Name, Steps: mustJSON(in.Steps), RepeatCount: repeatInt32(in.RepeatCount)})
@@ -163,14 +163,14 @@ func (s *Service) UpdateCameraPTZTour(ctx context.Context, actor authz.Actor, ca
 	return out, err
 }
 
-// DeleteCameraPTZTour removes a tour; it requires cameras.manage on the camera.
+// DeleteCameraPTZTour removes a tour; it requires cameras.config.ptz (or legacy cameras.manage) on the camera.
 func (s *Service) DeleteCameraPTZTour(ctx context.Context, actor authz.Actor, cameraID, tourID uuid.UUID) error {
 	return s.tx(ctx, actor, func(q *db.Queries, checker *access.Checker) error {
 		cam, err := q.GetCamera(ctx, cameraID)
 		if err != nil {
 			return notFoundOr(err)
 		}
-		if err := checker.Require(authz.CamerasManage, cameraResource(cam)); err != nil {
+		if err := checker.RequireCompat(authz.CamerasConfigPTZ, cameraResource(cam)); err != nil {
 			return err
 		}
 		n, err := q.DeleteCameraPTZTour(ctx, db.DeleteCameraPTZTourParams{TenantID: cam.TenantID, CameraID: cam.ID, ID: tourID})
@@ -187,4 +187,16 @@ func (s *Service) DeleteCameraPTZTour(ctx context.Context, actor authz.Actor, ca
 // repeatInt32 narrows a repeat count already bounded to 0..maxPTZTourRepeat by normalizePTZTour.
 func repeatInt32(n int) int32 {
 	return int32(min(max(n, 0), maxPTZTourRepeat)) //nolint:gosec // clamped to a small range on the line above
+}
+
+// RequireCameraPTZ requires cameras.config.ptz on the camera; legacy cameras.manage holders keep
+// access until they receive granular grants (authz.CompatFor).
+func (s *Service) RequireCameraPTZ(ctx context.Context, actor authz.Actor, cameraID uuid.UUID) error {
+	return s.tx(ctx, actor, func(q *db.Queries, c *access.Checker) error {
+		cam, err := q.GetCamera(ctx, cameraID)
+		if err != nil {
+			return notFoundOr(err)
+		}
+		return c.RequireCompat(authz.CamerasConfigPTZ, cameraResource(cam))
+	})
 }
