@@ -104,7 +104,7 @@ func (s *Service) AgentStatus(ctx context.Context, actor authz.Actor, serverID u
 		status := classifyAgentBinaryStatus(true, out.BinaryAvailable, out.BinaryObserved, false)
 		out.BinaryStatus, out.BinaryOutdated, out.BinaryUpgradeAvailable = status.Status, status.Outdated, status.UpgradeAvailable
 	} else {
-		status := classifyAgentBinaryStatus(true, out.BinaryAvailable, nil, errors.Is(healthErr, errAgentHealthUnreachable))
+		status := classifyWithoutIdentity(out.BinaryAvailable, snap.Version, healthErr)
 		out.BinaryStatus, out.BinaryOutdated, out.BinaryUpgradeAvailable = status.Status, status.Outdated, status.UpgradeAvailable
 	}
 	if snap.Version != "" && snap.Version != row.Version {
