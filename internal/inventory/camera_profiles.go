@@ -317,7 +317,7 @@ func (s *Service) reviewProfile(ctx context.Context, actor authz.Actor, cameraID
 	var target, current *db.CameraConfigProfile
 	err := s.tx(ctx, actor, func(q *db.Queries, c *access.Checker) error {
 		var err error
-		if t, err = s.loadConfigTarget(ctx, cameraID, q, c); err != nil {
+		if t, err = s.loadConfigTarget(ctx, cameraID, q, c, camconfig.Patch{}); err != nil {
 			return err
 		}
 		if err = c.Require(authz.CamerasManage, cameraResource(t.cam)); err != nil {
@@ -338,6 +338,12 @@ func (s *Service) reviewProfile(ctx context.Context, actor authz.Actor, cameraID
 				return store.ErrNotFound
 			}
 			target = &p
+			// Assigning changes the sections the profile defines on top of the overrides, so the
+			// actor needs the permission of each one, like any other patch.
+			inherited := camconfig.Subtract(decodeProfilePatch(p.Patch), StoredConfigState(&st).Desired)
+			if err = requireSections(c, t.cam, inherited); err != nil {
+				return err
+			}
 		}
 		if st.ProfileID != nil {
 			p, err := q.GetCameraConfigProfile(ctx, *st.ProfileID)

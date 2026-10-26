@@ -252,3 +252,42 @@ func TestProfilesAreTenantIsolatedAndNamesUnique(t *testing.T) {
 		t.Fatalf("other tenant sees %d profiles", len(list))
 	}
 }
+
+// Assigning a profile changes the sections it defines, so it needs the permission of each of
+// them exactly like a direct patch does: a granular actor without cameras.config.analytics
+// cannot assign a profile that sets LPR, and nothing is written.
+func TestProfileAssignNeedsThePermissionOfEachSection(t *testing.T) {
+	env := demofix.Setup(t)
+	eng := newFakeEngine()
+	useEngine(env, eng)
+	admin := tenantAdmin(t, env)
+	ctx := context.Background()
+	cam := env.Cameras["frigate-h01/acceso_norte"]
+
+	p, err := env.Svc.CreateConfigProfile(ctx, admin, inventory.ProfileInput{
+		Name: "Con LPR", Patch: camconfig.Patch{Analytics: &camconfig.AnalyticsPatch{LPR: bptr(true)}},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	in := inventory.ProfileAssignInput{ProfileID: &p.ID}
+
+	noAnalytics := grantAt(t, env, "no-analytics", cam.TenantID, authz.CamerasView, authz.CamerasManage, authz.ServersConfig,
+		authz.CamerasConfigView, authz.CamerasConfigEdit, authz.CamerasConfigRecording)
+	var sf *inventory.SectionsForbiddenError
+	if _, err := env.Svc.ReviewCameraProfile(ctx, noAnalytics, cam.ID, in, nil); !errors.As(err, &sf) {
+		t.Fatalf("review err = %v, want SectionsForbiddenError", err)
+	}
+	if _, err := env.Svc.ApplyCameraProfile(ctx, noAnalytics, cam.ID, in, nil); !errors.As(err, &sf) {
+		t.Fatalf("apply err = %v, want SectionsForbiddenError", err)
+	}
+	if eng.patches != 0 {
+		t.Fatal("a denied section must not write anything")
+	}
+
+	withAnalytics := grantAt(t, env, "with-analytics", cam.TenantID, authz.CamerasView, authz.CamerasManage, authz.ServersConfig,
+		authz.CamerasConfigView, authz.CamerasConfigAnalytics)
+	if _, err := env.Svc.ReviewCameraProfile(ctx, withAnalytics, cam.ID, in, nil); err != nil {
+		t.Fatalf("granted section refused: %v", err)
+	}
+}
