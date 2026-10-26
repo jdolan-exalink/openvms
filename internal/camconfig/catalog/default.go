@@ -4,6 +4,21 @@ func fr(labels ...string) map[string][]string {
 	return map[string][]string{EngineFrigate: labels}
 }
 
+func pr(labels ...string) map[string][]string {
+	return map[string][]string{EngineProvision: labels}
+}
+
+// both merges engine label maps of one object.
+func both(maps ...map[string][]string) map[string][]string {
+	out := map[string][]string{}
+	for _, m := range maps {
+		for k, v := range m {
+			out[k] = append(out[k], v...)
+		}
+	}
+	return out
+}
+
 // carrierLabels are the parcel-carrier classes of Frigate+ models.
 var carrierLabels = []string{
 	"package", "amazon", "ups", "fedex", "dhl", "usps", "an_post", "purolator",
@@ -39,6 +54,9 @@ func Default() Catalog {
 			{ID: "vehicle.motorcycle", Label: "Moto", Engine: fr("motorcycle")},
 			{ID: "vehicle.bicycle", Label: "Bicicleta", Engine: fr("bicycle")},
 			{ID: "vehicle.other", Label: "Otros", Engine: fr("airplane", "boat", "train")},
+			// Provision reports a vehicle without saying which kind: this is the only vehicle
+			// object it can back, so "Vehículos" is honest without inventing car or truck.
+			{ID: "vehicle.generic", Label: "Vehículo (sin tipo)", Engine: pr("vehicle")},
 		}},
 		{ID: "animal", Label: "Animales", Objects: []Object{
 			{ID: "animal.dog", Label: "Perro", Engine: fr("dog")},
@@ -59,7 +77,7 @@ func Default() Catalog {
 		{ID: "other", Label: "Otros", Objects: []Object{
 			// LPR and face are analytics modules (see U6); listed so their
 			// labels classify cleanly instead of falling to Raw.
-			{ID: "other.license_plate", Label: "Matrícula", Engine: fr("license_plate")},
+			{ID: "other.license_plate", Label: "Matrícula", Engine: both(fr("license_plate"), pr("license_plate"))},
 			{ID: "other.face", Label: "Rostro", Engine: fr("face")},
 			{ID: "other.misc", Label: "Otros objetos", Engine: fr(otherCOCO...)},
 		}},
