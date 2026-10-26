@@ -40,6 +40,14 @@ func (h *Handlers) GetCameraConfig(ctx context.Context, r gen.GetCameraConfigReq
 	if ce.Adapter != nil {
 		ad.Engine = ce.Adapter
 	}
+	if h.canLinkVideo() {
+		// Without the permission to use the camera's credentials the video simply is not read.
+		link, lerr := h.videoLinker()(ctx, a, ce.Camera)
+		if lerr != nil {
+			link = camconfig.VideoLink{Reason: camconfig.VideoNoCredential}
+		}
+		ad.Video = &link
+	}
 	model, err := ad.Read(ctx, cameraInventory(ce))
 	if err != nil {
 		return nil, err
@@ -119,7 +127,12 @@ func (h *Handlers) ReviewCameraConfig(ctx context.Context, r gen.ReviewCameraCon
 	if err != nil {
 		return nil, err
 	}
-	review, err := h.configWriter().ReviewCameraConfig(ctx, a, r.CameraId, patch)
+	var review camconfig.Review
+	if vw, ok := h.configWriter().(videoConfigWriter); ok {
+		review, err = vw.ReviewCameraConfigWith(ctx, a, r.CameraId, patch, h.inventoryLinker(a))
+	} else {
+		review, err = h.configWriter().ReviewCameraConfig(ctx, a, r.CameraId, patch)
+	}
 	if err != nil {
 		return nil, err
 	}
@@ -150,7 +163,12 @@ func (h *Handlers) ApplyCameraConfig(ctx context.Context, r gen.ApplyCameraConfi
 	if r.Body.Origin != nil {
 		in.Origin = string(*r.Body.Origin)
 	}
-	res, err := h.configWriter().ApplyCameraConfig(ctx, a, r.CameraId, in)
+	var res inventory.ConfigApplyResult
+	if vw, ok := h.configWriter().(videoConfigWriter); ok {
+		res, err = vw.ApplyCameraConfigWith(ctx, a, r.CameraId, in, h.inventoryLinker(a))
+	} else {
+		res, err = h.configWriter().ApplyCameraConfig(ctx, a, r.CameraId, in)
+	}
 	if err != nil {
 		return nil, err
 	}

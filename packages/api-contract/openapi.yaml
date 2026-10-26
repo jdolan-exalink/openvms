@@ -1407,6 +1407,36 @@ paths:
         "403": { $ref: "#/components/responses/Forbidden" }
         "404": { $ref: "#/components/responses/NotFound" }
         "409": { $ref: "#/components/responses/Conflict" }
+  /api/v1/cameras/{cameraId}/video-options:
+    parameters:
+      - { name: cameraId, in: path, required: true, schema: { type: string, format: uuid } }
+    get:
+      tags: [cameras]
+      operationId: getCameraVideoOptions
+      summary: Video settings the camera really supports, per stream
+      description: |
+        Asks the camera itself (ONVIF) for the current video settings and the values it supports
+        for the primary and detection streams, so clients offer only combinations the device can
+        do. It uses the camera's ONVIF credentials, so it needs cameras.view on the camera plus
+        servers.manage and servers.config.secrets on its server (the permissions of the ONVIF
+        probe); credentials and device addresses are never returned. When the camera cannot be
+        asked the answer is still 200 with `available: false` and a reason code: `no_onvif`
+        (no ONVIF endpoint), `no_credentials` (none stored), `unreachable` (the camera did not
+        answer) or `unsupported` (it does not expose the settings, or the stream's ONVIF profile
+        could not be identified). `apply_via` tells, per field, whether a change goes to the
+        camera (`onvif`), to Frigate's detect section (`frigate`) or cannot be made (`none`).
+        Applying changes goes through the normalized-config review and apply endpoints with
+        `streams.primary` / `streams.detection`; a change that restarts the stream says so in
+        the review's impact before anything is saved.
+      responses:
+        "200":
+          description: Supported video values per stream
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/CameraVideoOptions" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { $ref: "#/components/responses/NotFound" }
   /api/v1/cameras/{cameraId}/onvif/check:
     parameters:
       - { name: cameraId, in: path, required: true, schema: { type: string, format: uuid } }
@@ -6226,7 +6256,10 @@ components:
             default_live_quality: { type: string }
         sources:
           type: array
-          description: Where each part of the model came from and whether it could be read.
+          description: |
+            Where each part of the model came from and whether it could be read. The `onvif` source
+            (present when the caller may use the camera's ONVIF credentials) carries a video reason
+            code in `detail` when the camera's own video settings could not be read.
           items:
             type: object
             required: [name, status]
@@ -6235,6 +6268,73 @@ components:
               status: { type: string, enum: [ok, unavailable] }
               detail: { type: string }
         warnings: { type: array, items: { type: string } }
+    CameraVideoReason:
+      type: string
+      enum: [no_onvif, no_credentials, unreachable, unsupported]
+    CameraVideoOptions:
+      type: object
+      required: [camera_id, available, streams]
+      properties:
+        camera_id: { type: string, format: uuid }
+        available: { type: boolean, description: True when at least one stream could be read. }
+        reason: { $ref: "#/components/schemas/CameraVideoReason" }
+        streams:
+          type: array
+          items: { $ref: "#/components/schemas/CameraStreamVideoOptions" }
+    CameraStreamVideoOptions:
+      type: object
+      required: [role, available, codecs, apply_via]
+      properties:
+        role: { type: string, enum: [primary, detection] }
+        profile_token: { type: string }
+        profile_name: { type: string }
+        available: { type: boolean }
+        reason: { $ref: "#/components/schemas/CameraVideoReason" }
+        current:
+          type: object
+          description: Values the stream uses now; an item the camera did not report is omitted.
+          properties:
+            codec: { type: string, example: h264 }
+            width: { type: integer }
+            height: { type: integer }
+            fps: { type: number }
+            bitrate_kbps: { type: integer }
+            bitrate_mode: { type: string }
+            gop: { type: integer }
+        codecs:
+          type: array
+          items:
+            type: object
+            required: [codec, resolutions, frame_rates, bitrate_modes]
+            properties:
+              codec: { type: string, example: h264 }
+              resolutions:
+                type: array
+                items:
+                  type: object
+                  required: [width, height]
+                  properties: { width: { type: integer }, height: { type: integer } }
+              frame_rates: { type: array, items: { type: number }, description: Discrete FPS values when the camera lists them. }
+              fps: { $ref: "#/components/schemas/CameraVideoRange" }
+              bitrate_kbps: { $ref: "#/components/schemas/CameraVideoRange" }
+              gop: { $ref: "#/components/schemas/CameraVideoRange" }
+              bitrate_modes: { type: array, items: { type: string } }
+        apply_via:
+          type: object
+          required: [resolution, fps, codec, bitrate_kbps, gop]
+          properties:
+            resolution: { $ref: "#/components/schemas/CameraVideoApplyVia" }
+            fps: { $ref: "#/components/schemas/CameraVideoApplyVia" }
+            codec: { $ref: "#/components/schemas/CameraVideoApplyVia" }
+            bitrate_kbps: { $ref: "#/components/schemas/CameraVideoApplyVia" }
+            gop: { $ref: "#/components/schemas/CameraVideoApplyVia" }
+    CameraVideoRange:
+      type: object
+      required: [min, max]
+      properties: { min: { type: number }, max: { type: number } }
+    CameraVideoApplyVia:
+      type: string
+      enum: [onvif, frigate, none]
     CameraConfigOrigin:
       type: string
       description: Where a configuration change comes from. Defaults to ui.
@@ -6247,8 +6347,13 @@ components:
         labels), `detection.selection` (catalog object or category ids from
         `/api/v1/camera-config/object-catalog`, expanded to the engine labels its model supports;
         sending it together with `detection.objects` is a 400, and ids the model cannot honor are
-        listed in the review `unsupported` and rejected on apply), `recording.enabled` (boolean) and `analytics.lpr`
-        (boolean). The schema is deliberately open so the server can reject every other field,
+        listed in the review `unsupported` and rejected on apply), `recording.enabled` (boolean),
+        `analytics.lpr` (boolean) and `streams.primary` / `streams.detection`, each a sparse object
+        with `resolution` ({width, height}), `fps`, `codec` (h264, h265, mjpeg, mpeg4),
+        `bitrate_kbps` and `gop`. Stream fields are written to the camera over ONVIF; the detection
+        stream's `resolution` and `fps` go to Frigate's detect section when it has no ONVIF profile
+        of its own (see getCameraVideoOptions `apply_via`). The schema is deliberately open so the
+        server can reject every other field,
         nested ones included, with 400 instead of dropping it silently.
       additionalProperties: true
       example:
@@ -6298,7 +6403,7 @@ components:
             type: object
             required: [code, message]
             properties:
-              code: { type: string, enum: [engine_reload, engine_restart, recording_interruption] }
+              code: { type: string, enum: [engine_reload, engine_restart, recording_interruption, stream_restart] }
               message: { type: string, example: "Frigate recargará configuración;" }
         unsupported:
           type: array
@@ -6342,6 +6447,8 @@ components:
         width: { type: integer }
         height: { type: integer }
         fps: { type: number }
+        bitrate_kbps: { type: integer, description: Read from the camera (ONVIF) when reachable. }
+        gop: { type: integer, description: Read from the camera (ONVIF) when reachable. }
         roles: { type: array, items: { type: string } }
     CameraFrigateConfig:
       type: object
