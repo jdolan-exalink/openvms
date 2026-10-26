@@ -17,7 +17,6 @@ import (
 type uninstallRecorder struct {
 	events   []string
 	saved    string
-	savedRst bool
 	script   string
 	scriptOK bool
 }

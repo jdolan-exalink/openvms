@@ -173,6 +173,7 @@ func (h *Handlers) UninstallServerAgentOverSSH(ctx context.Context, r gen.Uninst
 // agentUninstallStartRequest maps the body; an omitted config_action means keep and an omitted
 // discard_backup means false. An unknown config_action is rejected later by the provision service.
 func agentUninstallStartRequest(body *gen.ServerAgentUninstallRequest) provision.AgentUninstallStartRequest {
+	// #nosec G115 -- the caller rejects an ssh_port outside 1..65535 before mapping the body.
 	out := provision.AgentUninstallStartRequest{SSHPort: uint16(body.SshPort), Password: *body.SshPassword, ConfigAction: provision.ConfigActionKeep}
 	if body.ConfigAction != nil {
 		out.ConfigAction = string(*body.ConfigAction)
