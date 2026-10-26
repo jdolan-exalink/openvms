@@ -172,6 +172,19 @@ type Camera struct {
 	HqCodec            string
 }
 
+type CameraConfigProfile struct {
+	ID          uuid.UUID
+	TenantID    uuid.UUID
+	Name        string
+	Description string
+	Patch       json.RawMessage
+	Version     int64
+	CreatedBy   *uuid.UUID
+	CreatedAt   time.Time
+	UpdatedBy   *uuid.UUID
+	UpdatedAt   time.Time
+}
+
 type CameraConfigState struct {
 	CameraID        uuid.UUID
 	TenantID        uuid.UUID
@@ -183,6 +196,8 @@ type CameraConfigState struct {
 	LastAppliedAt   *time.Time
 	UpdatedBy       *uuid.UUID
 	UpdatedAt       time.Time
+	ProfileID       *uuid.UUID
+	ProfileVersion  *int64
 }
 
 type CameraFolder struct {
