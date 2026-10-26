@@ -11,6 +11,7 @@ import { BodyClassifySwitch } from "@/components/BodyClassifySwitch";
 import { ConfirmDialog } from "@/components/ConfirmDialog";
 import { Icon } from "@/components/Icon";
 import { Modal } from "@/components/Modal";
+import { AgentUpdateButton } from "@/components/servers/AgentUpdateButton";
 import { ConnectAgentControls } from "@/components/servers/ConnectAgentControls";
 import { ServerFrigateConfigModal } from "@/components/servers/ServerFrigateConfigModal";
 import { calculateAttainableDays, calculateUsableStorage, formatBytes } from "@/components/servers/storageRetention";
@@ -215,6 +216,7 @@ function hasServerInstallPermission(me: Schemas["Me"] | undefined, permission: s
 function AgentSSHControls({ server }: { server: Schemas["Server"] }) {
   const t = useT();
   const { jobs } = useAgentJobs();
+  const me = useQuery(meQuery);
   const status = useQuery({
     queryKey: ["server-agent", server.id],
     queryFn: async () => unwrap(await api.GET("/api/v1/servers/{serverId}/agent", { params: { path: { serverId: server.id } } })),
@@ -222,7 +224,7 @@ function AgentSSHControls({ server }: { server: Schemas["Server"] }) {
     retry: false,
   });
   const refreshAgentStatus = status.refetch;
-  const [deployment, setDeployment] = useState<{ kind: "install" | "update" | "uninstall"; job?: Schemas["ServerAgentInstallJob"] } | null>(null);
+  const [deployment, setDeployment] = useState<{ kind: "install" | "uninstall"; job?: Schemas["ServerAgentInstallJob"] } | null>(null);
   const refreshedTerminalJob = useRef<string | null>(null);
   const tracked = jobs.filter((entry) => entry.serverId === server.id).sort((a, b) => a.changedAt - b.changedAt).at(-1);
   useEffect(() => {
@@ -238,14 +240,6 @@ function AgentSSHControls({ server }: { server: Schemas["Server"] }) {
       void refreshAgentStatus();
     }
   }, [refreshAgentStatus]);
-  const onUpdateJob = useCallback((job: Schemas["ServerAgentInstallJob"]) => {
-    if (job.status === "succeeded") {
-      setDeployment(null);
-      void refreshAgentStatus();
-      return;
-    }
-    setDeployment({ kind: "update", job });
-  }, [refreshAgentStatus]);
   const onUninstallJob = useCallback((job: Schemas["ServerAgentInstallJob"]) => {
     if (job.status === "succeeded") {
       setDeployment(null);
@@ -255,10 +249,8 @@ function AgentSSHControls({ server }: { server: Schemas["Server"] }) {
     setDeployment({ kind: "uninstall", job });
   }, [refreshAgentStatus]);
   const onInstallStart = useCallback(() => setDeployment({ kind: "install" }), []);
-  const onUpdateStart = useCallback(() => setDeployment({ kind: "update" }), []);
   const onUninstallStart = useCallback(() => setDeployment({ kind: "uninstall" }), []);
   const onInstallFailure = useCallback(() => setDeployment((current) => current?.kind === "install" && !current.job ? null : current), []);
-  const onUpdateFailure = useCallback(() => setDeployment((current) => current?.kind === "update" && !current.job ? null : current), []);
   const onUninstallFailure = useCallback(() => setDeployment((current) => current?.kind === "uninstall" && !current.job ? null : current), []);
   const trackedNeedsAttention = tracked && (
     tracked.outcome === "unknown" || tracked.job.status === "queued" || tracked.job.status === "running" || tracked.job.status === "failed"
@@ -293,19 +285,8 @@ function AgentSSHControls({ server }: { server: Schemas["Server"] }) {
 
   return (
     <div className="flex flex-wrap items-center gap-2">
-      {visibleDeployment?.kind === "update" || (!status.isPending && status.data?.installed && status.data.binary_upgrade_available) ? (
-        <>
-          {status.data?.binary_status !== "update_available" && <span role="status" className="text-xs text-muted">{t("servers.agentLifecycleUpgradeUnverified")}</span>}
-          <AgentUpdateControl
-            key={`update-${server.id}`}
-            server={server}
-            busy={false}
-            ownActive={active && visibleDeployment?.kind === "update"}
-            onJob={onUpdateJob}
-            onStart={onUpdateStart}
-            onFailure={onUpdateFailure}
-          />
-        </>
+      {agent?.installed && agent.binary_status === "update_available" && hasServerInstallPermission(me.data, "servers.manage", server) ? (
+        <AgentUpdateButton key={`update-${server.id}`} server={server} />
       ) : (agent && isAgentBinaryCurrent(agent)) ? (
         null
       ) : (
@@ -386,28 +367,6 @@ function AgentInstallControl({
       <AgentInstallDialog server={server} open={open} onClose={() => setOpen(false)} job={visibleJob} onJob={updateJob} otherOperationActive={otherOperationActive} onStart={onStart} onFailure={onFailure} />
     </>
   );
-}
-
-function AgentUpdateControl({ server, busy, ownActive, onJob, onStart, onFailure }: {
-  server: Schemas["Server"];
-  busy: boolean;
-  ownActive: boolean;
-  onJob: (job: Schemas["ServerAgentInstallJob"]) => void;
-  onStart: () => void;
-  onFailure: () => void;
-}) {
-  const t = useT();
-  const [open, setOpen] = useState(false);
-  const { jobs } = useAgentJobs();
-  const tracked = jobs.filter((entry) => entry.kind === "update" && entry.serverId === server.id).sort((a, b) => a.changedAt - b.changedAt).at(-1);
-  const active = ownActive || tracked?.job.status === "queued" || tracked?.job.status === "running";
-  return <>
-    <Button size="sm" variant="outlined" onClick={() => setOpen(true)} disabled={busy}>
-      {active ? t("servers.agentUpdateSSHViewProgress") : t("servers.agentUpdateSSHAction")}
-    </Button>
-    {busy && <span role="status" className="text-xs text-muted">{t("servers.agentUpdateSSHBusy")}</span>}
-    <AgentUpdateDialog server={server} open={open} onClose={() => setOpen(false)} onJob={onJob} otherOperationActive={busy} onStart={onStart} onFailure={onFailure} initialJob={tracked?.job ?? null} />
-  </>;
 }
 
 function AgentUninstallControl({ server, busy, ownActive, onJob, onStart, onFailure }: {
@@ -551,7 +510,7 @@ function useAgentJobLogs({
 }: {
   job: Schemas["ServerAgentInstallJob"] | null | undefined;
   isPending: boolean;
-  kind: "install" | "update" | "uninstall";
+  kind: "install" | "uninstall";
   outcomeUnknown?: boolean;
   t: ReturnType<typeof useT>;
 }) {
@@ -586,8 +545,6 @@ function useAgentJobLogs({
           message:
             kind === "uninstall"
               ? t("servers.agentLogStartingUninstall")
-              : kind === "update"
-              ? t("servers.agentLogStartingUpdate")
               : t("servers.agentLogStartingInstall"),
         },
       ]);
@@ -661,19 +618,13 @@ function useAgentJobLogs({
         message:
           kind === "uninstall"
             ? t("servers.agentLogUninstallSucceeded")
-            : kind === "update"
-            ? t("servers.agentLogUpdateSucceeded")
             : t("servers.agentLogInstallSucceeded"),
       });
     }
 
     if (job.status === "failed" && !seenStatusesRef.current.has("failed")) {
       seenStatusesRef.current.add("failed");
-      const failMsg = job.message
-        ? kind === "update"
-          ? agentUpdateFailureMessage(job.message, t)
-          : job.message
-        : t("servers.agentLogFailed");
+      const failMsg = job.message || t("servers.agentLogFailed");
       newEntries.push({
         id: `failed-${job.id}`,
         timestamp: now,
@@ -821,143 +772,6 @@ function AgentJobLogConsole({
       </div>
     </div>
   );
-}
-
-function AgentUpdateDialog({ server, open, onClose, onJob, otherOperationActive, onStart, onFailure, initialJob }: {
-  server: Schemas["Server"];
-  open: boolean;
-  onClose: () => void;
-  onJob: (job: Schemas["ServerAgentInstallJob"]) => void;
-  otherOperationActive: boolean;
-  onStart: () => void;
-  onFailure: () => void;
-  initialJob: Schemas["ServerAgentInstallJob"] | null;
-}) {
-  const t = useT();
-  const { jobs, registerJob } = useAgentJobs();
-  const [job, setJob] = useState<Schemas["ServerAgentInstallJob"] | null>(initialJob);
-  const tracked = jobs.find((entry) => entry.kind === "update" && entry.serverId === server.id && entry.job.id === job?.id);
-  const snapshot = tracked?.job ?? job;
-  const [port, setPort] = useState("22");
-  const passwordInputRef = useRef<HTMLInputElement>(null);
-  const pendingPasswordRef = useRef("");
-  const [acceptedAt, setAcceptedAt] = useState<number | null>(null);
-  const secureBrowser = location.protocol === "https:";
-  const httpsRedirect = useHTTPSRedirect(passwordInputRef, pendingPasswordRef);
-  const updateJob = useCallback((next: Schemas["ServerAgentInstallJob"]) => {
-    setJob(next);
-    onJob(next);
-  }, [onJob]);
-  const start = useMutation({
-    mutationFn: async ({ port, password }: { port: number; password: string }) => {
-      return unwrap(await api.POST("/api/v1/servers/{serverId}/agent/update-ssh", {
-        params: { path: { serverId: server.id } },
-        body: { ssh_port: port, ssh_password: password },
-      }));
-    },
-    onSuccess: (next) => {
-      setAcceptedAt(next.status === "queued" || next.status === "running" ? performance.now() : null);
-      updateJob(next);
-      registerJob({ kind: "update", serverId: server.id, serverName: server.name, job: next });
-    },
-    onError: () => { pendingPasswordRef.current = ""; onFailure(); },
-  });
-  const pollBudgetExpired = tracked?.outcome === "unknown";
-  const submitted = !!job?.id || start.isPending;
-  const timerActive = (snapshot?.status === "queued" || snapshot?.status === "running") && !pollBudgetExpired;
-  const elapsedSeconds = useElapsedJob(acceptedAt, timerActive);
-  const logs = useAgentJobLogs({ job: snapshot, isPending: start.isPending, kind: "update", outcomeUnknown: pollBudgetExpired, t });
-  const close = () => {
-    if (start.isPending) return;
-    httpsRedirect.cancel();
-    pendingPasswordRef.current = "";
-    if (passwordInputRef.current) passwordInputRef.current.value = "";
-    onClose();
-  };
-  useEffect(() => () => {
-    pendingPasswordRef.current = "";
-    if (passwordInputRef.current) passwordInputRef.current.value = "";
-  }, []);
-
-  if (!open) return null;
-  return <Modal title={t("servers.agentUpdateSSHTitle", { server: server.name })} onClose={close}>
-    {!submitted ? <form className="flex flex-col gap-4" aria-label={t("servers.agentUpdateSSHForm")} onSubmit={(event: FormEvent) => {
-      event.preventDefault();
-      if (!secureBrowser || otherOperationActive) return;
-      const password = passwordInputRef.current?.value ?? "";
-      if (!password) return;
-      if (passwordInputRef.current) passwordInputRef.current.value = "";
-      pendingPasswordRef.current = "";
-      onStart();
-      start.mutate({ port: Number(port), password });
-    }}>
-      <p className="rounded-m3-lg bg-warn/10 p-3 text-sm">{t("servers.agentUpdateSSHScope")}</p>
-      {!secureBrowser && <div className="flex flex-col gap-2">
-        <p role="alert" className="rounded-m3-lg bg-bad/10 p-3 text-sm text-bad">{t("servers.agentInstallHttpsRequired")}</p>
-        <Button type="button" variant="outlined" disabled={httpsRedirect.pending} onClick={() => { void httpsRedirect.redirect(); }}>
-          {httpsRedirect.pending ? t("servers.agentHttpsRedirectChecking") : t("servers.agentHttpsRedirectAction")}
-        </Button>
-        {httpsRedirect.failed && <p role="alert" className="text-sm text-bad">{t("servers.agentHttpsRedirectFailed")}</p>}
-      </div>}
-      <p className="text-sm text-muted">
-        Host SSH de destino: <span className="font-mono font-bold text-on-surface">{extractServerHost(server.base_url) || "Servidor conectado"}</span> ({t("servers.agentUpdateSSHHostFixed")})
-      </p>
-      <p className="rounded-m3-lg bg-warn/10 p-3 text-sm">{t("servers.agentSSHHostKeyTOFU")}</p>
-      <div className="grid gap-4 sm:grid-cols-2">
-        <Field label={t("servers.agentInstallPortLabel")}><TextInput required aria-label={t("servers.agentInstallPortLabel")} type="number" min={1} max={65535} step={1} value={port} onChange={(event) => setPort(event.target.value)} autoComplete="off" /></Field>
-        <Field label={t("servers.agentInstallPasswordLabel")} hint={t("servers.agentInstallPasswordHint")}>
-          <input ref={passwordInputRef} required aria-label={t("servers.agentInstallPasswordLabel")} type="password" className="h-12 w-full rounded-m3-md border border-transparent bg-surface-2 px-3 text-sm focus-visible:outline-2 focus-visible:outline-primary" autoComplete="off" maxLength={4096} />
-        </Field>
-      </div>
-      {start.error && <p role="alert" className="text-sm text-bad">{agentUpdateStartError(start.error, t)}</p>}
-      <div className="flex justify-end gap-2">
-        <Button type="button" variant="text" onClick={close}>{t("common.cancel")}</Button>
-        <Button type="submit" variant="primary" disabled={start.isPending || otherOperationActive || !isValidSSHPort(port) || !secureBrowser}>{t("servers.agentUpdateSSHSubmit")}</Button>
-      </div>
-    </form> : <section aria-label={t("servers.agentUpdateSSHProgress")} className="flex flex-col gap-4">
-      {start.isPending ? <JobBusyState label={t("servers.agentStarting")} /> : <p aria-live="polite">{installJobStatusText(snapshot?.status, snapshot?.stage, t)}</p>}
-      <AgentJobProgressBar status={snapshot?.status} stage={snapshot?.stage} isPending={start.isPending} />
-      {acceptedAt != null && <JobBusyState busy={timerActive} elapsed={elapsedSeconds} label={t("servers.agentElapsed", { elapsed: formatElapsed(elapsedSeconds) })} />}
-      <AgentJobLogConsole logs={logs} isRunning={start.isPending || timerActive} status={snapshot?.status} />
-      {snapshot?.status === "succeeded" && !pollBudgetExpired && <p role="status" className="rounded-m3-lg bg-ok/10 p-3 text-sm">{t("servers.agentUpdateSSHSuccess")}</p>}
-      {snapshot?.status === "failed" && (
-        <div className="flex flex-col gap-3">
-          <p role="alert" className="rounded-m3-lg bg-bad/10 p-3 text-sm text-bad font-medium">
-            {snapshot.message && (
-              snapshot.message.toLowerCase().includes("auth failed") ||
-              snapshot.message.toLowerCase().includes("authentication failed") ||
-              snapshot.message.toLowerCase().includes("invalid password") ||
-              snapshot.message.toLowerCase().includes("unable to authenticate")
-            )
-              ? "Error de contraseña o autenticación SSH. Verificá la contraseña e intentá de nuevo."
-              : agentUpdateFailureMessage(snapshot.message, t)}
-          </p>
-          <div className="flex flex-wrap items-center justify-end gap-2">
-            {isRetryableAgentUpdateFailure(snapshot) && (
-              <Button
-                variant="primary"
-                onClick={() => {
-                  setJob(null);
-                  setAcceptedAt(null);
-                  onStart();
-                  setTimeout(() => {
-                    passwordInputRef.current?.focus();
-                  }, 50);
-                }}
-              >
-                <Icon icon={RefreshCw} size="xs" />
-                {t("servers.agentUpdateSSHFreshPasswordRetry")}
-              </Button>
-            )}
-            <Button onClick={close}>{t("common.close")}</Button>
-          </div>
-        </div>
-      )}
-      {pollBudgetExpired && <p role="alert" className="text-sm text-warn">{t("servers.agentInstallOutcomeUnknown")}</p>}
-      {(snapshot?.status === "queued" || snapshot?.status === "running") && <p className="text-sm text-muted">{t("servers.agentInstallCloseDoesNotCancel")}</p>}
-      <Button className="self-end" onClick={close}>{t("common.close")}</Button>
-    </section>}
-  </Modal>;
 }
 
 function AgentInstallDialog({
@@ -1521,32 +1335,6 @@ function agentInstallStartError(error: unknown, t: ReturnType<typeof useT>) {
   return t("servers.agentInstallStartError");
 }
 
-function agentUpdateStartError(error: unknown, t: ReturnType<typeof useT>) {
-  if (error instanceof ApiError) {
-    if (error.code === "secure_transport_required") return t("servers.agentInstallHttpsRequired");
-    if (error.code === "forbidden") return t("servers.agentInstallPermissionRequired");
-    if (error.code === "conflict") return t("servers.agentUpdateSSHConflict");
-  }
-  return t("servers.agentUpdateSSHFailed");
-}
-
-function agentUpdateFailureMessage(message: string | undefined, t: ReturnType<typeof useT>) {
-  const safeMessages: Record<string, string> = {
-    "SSH host key changed since first use; verify the server identity before retrying.": "servers.agentUpdateDiagSSHHostKeyMismatch",
-    "Could not establish SSH. Verify reachability and root SSH access, then inspect the target before retrying.": "servers.agentUpdateDiagSSHConnectionFailed",
-    "The target failed agent-update preflight; inspect OS, architecture, and service state before retrying.": "servers.agentUpdateDiagPreflightFailed",
-    "Staging ownership could not be confirmed; inspect the target before retrying.": "servers.agentUpdateDiagStagingUncertain",
-    "Agent files could not be transferred; inspect the target before retrying.": "servers.agentUpdateDiagTransferFailed",
-    "Agent activation failed; the previous files were restored.": "servers.agentUpdateDiagActivationRestored",
-    "Agent activation failed and rollback could not be confirmed; inspect the target before retrying.": "servers.agentUpdateDiagActivationUncertain",
-    "HTTPS health verification failed; the previous agent files were restored.": "servers.agentUpdateDiagHealthRestored",
-    "HTTPS health verification failed and rollback could not be confirmed; inspect the target before retrying.": "servers.agentUpdateDiagHealthUncertain",
-    "Agent health was verified, but update staging cleanup failed; inspect the target before retrying.": "servers.agentUpdateDiagCleanupFailed",
-    "Agent HTTPS health succeeded, but trust registration failed; inspect server configuration before retrying.": "servers.agentUpdateDiagTLSRegistrationFailed",
-  };
-  return t((safeMessages[message ?? ""] ?? "servers.agentUpdateSSHFailed") as Parameters<typeof t>[0]);
-}
-
 function Fact({ label, className, children }: { label: string; className?: string; children: ReactNode }) {
   return (
     <div className={cn("flex min-w-0 flex-col gap-1 rounded-m3-lg bg-surface-2 p-3", className)}>
@@ -2047,19 +1835,6 @@ function isAgentBinaryCurrent(agent: Schemas["ServerAgent"]) {
     !!observed && !!available && /^[a-f0-9]{64}$/i.test(observed) &&
     (observed.toLowerCase() === available.toLowerCase() || isNewerAgentVersion(agent.binary_observed?.version, agent.binary_available?.version)) &&
     supportedArchitecture(observedArchitecture) && supportedArchitecture(availableArchitecture) && observedArchitecture === availableArchitecture;
-}
-
-function isRetryableAgentUpdateFailure(job: Schemas["ServerAgentInstallJob"] | null | undefined) {
-  if (job?.status !== "failed" || !job.message) return false;
-  if (job.message.includes("SSH host key changed")) return false;
-  const msg = job.message.toLowerCase();
-  return (
-    job.message === "Could not establish SSH. Verify reachability and root SSH access, then inspect the target before retrying." ||
-    msg.includes("auth failed") ||
-    msg.includes("authentication failed") ||
-    msg.includes("invalid password") ||
-    msg.includes("unable to authenticate")
-  );
 }
 
 function DeleteServerDialog({ server, onDone }: { server: Schemas["Server"]; onDone: () => void }) {
