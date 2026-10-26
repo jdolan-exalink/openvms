@@ -248,6 +248,22 @@ func toServer(s inventory.ServerView) gen.Server {
 		up := int(hs.UptimeSeconds)
 		out.UptimeSeconds = &up
 	}
+	if len(hs.Problems) > 0 {
+		problems := make([]gen.ServerProblem, 0, len(hs.Problems))
+		for _, p := range hs.Problems {
+			sp := gen.ServerProblem{Code: gen.ServerProblemCode(p.Code)}
+			if len(p.Cameras) > 0 {
+				cams := p.Cameras
+				sp.Cameras = &cams
+			}
+			if p.UsedPercent > 0 {
+				used := p.UsedPercent
+				sp.UsedPercent = &used
+			}
+			problems = append(problems, sp)
+		}
+		out.Problems = &problems
+	}
 	if r := hs.Recordings; r != nil {
 		out.Storage = &gen.ServerStorage{TotalMb: float32(r.TotalMB), UsedMb: float32(r.UsedMB), FreeMb: float32(r.FreeMB)}
 	}
