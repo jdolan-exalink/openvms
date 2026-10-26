@@ -181,6 +181,7 @@ func run() error {
 	handlers := &api.Handlers{
 		Inv:           inv,
 		Provision:     provisioner,
+		CameraWeb:     api.NewCameraWebService(inv, provisioner),
 		AgentEnroll:   agentEnroll,
 		Events:        &events.Service{Store: st, Blobs: store, Adapters: adapters, Log: log},
 		Faces:         &faces.Service{Store: st, Blobs: store, Adapters: adapters, Log: log},
