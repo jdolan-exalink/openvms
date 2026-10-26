@@ -11,6 +11,8 @@ export const FISHEYE = "__fisheye";
 export const PROVISION = "__provision";
 export const CAMERA_WEB = "__camera_web";
 export const ONVIF_INFO = "__onvif_info";
+/** Status of the backend integrations (Frigate, ONVIF, Provision ISR); first section of Integraciones. */
+export const INTEGRATIONS_STATUS = "__integrations_status";
 export const PTZ_CONTROL = "__ptz_control";
 /** Analytics modules (switch + detail per analytic); the raw Frigate/Provision panels stay after it as "Avanzado". */
 export const ANALYTICS_MODULES = "__analytics_modules";
@@ -54,7 +56,7 @@ export function buildCameraTabs(input: CameraTabsInput): CameraTab[] {
   tabs.push({ id: "zones", label: "Zonas", sections: ZONES });
   if (input.ptz) tabs.push({ id: "ptz", label: "PTZ", sections: [PTZ_CONTROL, ...known(PTZ)] });
   if (input.fisheye) tabs.push({ id: "fisheye", label: "Fisheye", sections: [FISHEYE] });
-  tabs.push({ id: "integrations", label: "Integraciones", sections: [...(input.cameraWeb ? [CAMERA_WEB] : []), ONVIF_INFO] });
+  tabs.push({ id: "integrations", label: "Integraciones", sections: [INTEGRATIONS_STATUS, ...(input.cameraWeb ? [CAMERA_WEB] : []), ONVIF_INFO] });
 
   const owned = new Set([...tabs.flatMap((t) => t.sections), ...(input.generalSections ?? [])]);
   tabs.push({

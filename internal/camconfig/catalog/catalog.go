@@ -15,7 +15,12 @@ import (
 )
 
 // Engine kinds with a mapping in the default catalog.
-const EngineFrigate = "frigate"
+const (
+	EngineFrigate = "frigate"
+	// EngineProvision is the camera-side analytics of Provision ISR cameras. Its events carry
+	// a plate and, at most, a coarse "vehicle" class (see internal/agent/provisionlpr).
+	EngineProvision = "provision"
+)
 
 // Object is one selectable OpenVMS object.
 type Object struct {

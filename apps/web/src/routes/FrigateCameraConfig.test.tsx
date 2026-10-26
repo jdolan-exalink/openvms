@@ -391,9 +391,23 @@ describe("FrigateCameraConfig", () => {
       expect(screen.getByRole("button", { name: "Abrir" })).toBeInTheDocument();
     });
 
+    it("opens Integraciones on the status of each backend", async () => {
+      const integrations = [
+        { name: "frigate", enabled: true, id: "frigate", label: "Frigate", status: "connected" },
+        { name: "onvif", enabled: true, id: "onvif", label: "ONVIF", status: "connected" },
+        { name: "provision_isr", enabled: false, id: "provision_isr", label: "Provision ISR", status: "not_configured" },
+      ];
+      mountFull({}, { "/api/v1/cameras/c1/normalized-config": () => json({ integrations, state: { desired_revision: 0, applied_revision: 0, sync_state: "synced", last_error: "", drift: [] } }) });
+      await goTo("Integraciones");
+      expect(await screen.findByTestId("integration-provision_isr")).toHaveTextContent("No configurado");
+      expect(screen.getByTestId("integration-frigate")).toHaveTextContent("Conectado");
+      expect(screen.getByRole("button", { name: /^Capacidades ONVIF/ })).toBeInTheDocument();
+    });
+
     it("hides the camera web view entry when the user cannot manage the camera", async () => {
       mountFull({}, { "/api/v1/me": () => json({ id: "u", tenant_id: "t", grants: [{ permission: "cameras.view", effect: "allow" }] }) });
       await goTo("Integraciones");
+      fireEvent.click(await screen.findByRole("button", { name: /^Capacidades ONVIF/ }));
       expect(await screen.findByRole("region", { name: "Capacidades ONVIF" })).toBeInTheDocument();
       expect(screen.queryByRole("region", { name: "Acceso web a la cámara" })).not.toBeInTheDocument();
       expect(screen.queryByRole("button", { name: /^Web de la cámara/ })).not.toBeInTheDocument();

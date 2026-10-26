@@ -72,6 +72,9 @@ type Handlers struct {
 
 	// camConfig replaces the camera config model's lookups in tests; nil uses Inv.
 	camConfig camConfigSource
+	// camProvision replaces the Provision agent status lookup of the camera config model in
+	// tests; nil uses Provision.
+	camProvision provisionAgentStatus
 	// camConfigWrite replaces the review/apply service in tests; nil uses Inv.
 	camConfigWrite camConfigWriter
 	// camVideo replaces the ONVIF video link lookup in tests; nil uses the camera's credentials.

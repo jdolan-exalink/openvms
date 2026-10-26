@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"strings"
 
 	"github.com/jdolan-exalink/openvms/internal/api/gen"
 	"github.com/jdolan-exalink/openvms/internal/authz"
@@ -36,18 +37,7 @@ func (h *Handlers) GetCameraConfig(ctx context.Context, r gen.GetCameraConfigReq
 	if err != nil {
 		return nil, err
 	}
-	var ad camconfig.FrigateAdapter
-	if ce.Adapter != nil {
-		ad.Engine = ce.Adapter
-	}
-	if h.canLinkVideo() {
-		// Without the permission to use the camera's credentials the video simply is not read.
-		link, lerr := h.videoLinker()(ctx, a, ce.Camera)
-		if lerr != nil {
-			link = camconfig.VideoLink{Reason: camconfig.VideoNoCredential}
-		}
-		ad.Video = &link
-	}
+	ad := h.composedAdapter(ctx, a, ce)
 	model, err := ad.Read(ctx, cameraInventory(ce))
 	if err != nil {
 		return nil, err
@@ -127,6 +117,15 @@ func (h *Handlers) ReviewCameraConfig(ctx context.Context, r gen.ReviewCameraCon
 	if err != nil {
 		return nil, err
 	}
+	if unsupported, perr := h.provisionUnsupported(ctx, a, r.CameraId, patch); perr != nil {
+		return nil, perr
+	} else if len(unsupported) > 0 {
+		out, gerr := toGen[gen.CameraConfigReview](camconfig.Review{Changes: []camconfig.Change{}, Impact: []camconfig.ImpactItem{}, Unsupported: unsupported})
+		if gerr != nil {
+			return nil, gerr
+		}
+		return gen.ReviewCameraConfig200JSONResponse(out), nil
+	}
 	var review camconfig.Review
 	if vw, ok := h.configWriter().(videoConfigWriter); ok {
 		review, err = vw.ReviewCameraConfigWith(ctx, a, r.CameraId, patch, h.inventoryLinker(a))
@@ -158,11 +157,7 @@ func (h *Handlers) guardAnalyticsModules(ctx context.Context, a authz.Actor, id 
 	if err != nil {
 		return err
 	}
-	var ad camconfig.FrigateAdapter
-	if ce.Adapter != nil {
-		ad.Engine = ce.Adapter
-	}
-	current, err := ad.Read(ctx, cameraInventory(ce))
+	current, err := h.composedAdapter(ctx, a, ce).Read(ctx, cameraInventory(ce))
 	if err != nil {
 		return err
 	}
@@ -191,6 +186,11 @@ func (h *Handlers) ApplyCameraConfig(ctx context.Context, r gen.ApplyCameraConfi
 	}
 	if patch, err = h.resolveCatalogSelection(ctx, a, r.CameraId, patch); err != nil {
 		return nil, err
+	}
+	if unsupported, perr := h.provisionUnsupported(ctx, a, r.CameraId, patch); perr != nil {
+		return nil, perr
+	} else if len(unsupported) > 0 {
+		return nil, &inventory.ValidationError{Msg: strings.Join(unsupported, "; ")}
 	}
 	if err = h.guardAnalyticsModules(ctx, a, r.CameraId, patch); err != nil {
 		return nil, err

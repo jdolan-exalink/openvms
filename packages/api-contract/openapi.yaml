@@ -6218,6 +6218,7 @@ components:
             categories: { type: array, items: { type: string }, description: Catalog categories whose every engine-supported object is selected }
             raw: { type: array, items: { type: string }, description: Tracked labels the catalog does not know }
             available_labels: { type: array, items: { type: string }, description: Labels the engine model supports; omitted when unknown }
+            notes: { type: array, items: { type: string }, description: Limits of what the engine reports (for example Provision does not tell vehicle types apart); omitted when none }
         analytics:
           type: object
           required: [modules]
@@ -6249,12 +6250,19 @@ components:
             supported: { type: boolean }
         integrations:
           type: array
+          description: |
+            Features wired to the camera and, with an `id`, the status of each backend integration
+            (frigate, onvif, provision_isr). Statuses come from evidence OpenVMS already has.
           items:
             type: object
             required: [name, enabled]
             properties:
               name: { type: string }
               enabled: { type: boolean }
+              id: { type: string, enum: [frigate, onvif, provision_isr] }
+              label: { type: string }
+              status: { type: string, enum: [connected, not_configured, error, unknown] }
+              detail: { type: string }
         overrides:
           type: object
           properties:
