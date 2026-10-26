@@ -933,6 +933,36 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/servers/{serverId}/agent/backup": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                serverId: string;
+            };
+            cookie?: never;
+        };
+        /**
+         * Whether the agent keeps the original Frigate configuration
+         * @description Reads the metadata of the original config.yml that the edge agent keeps on its host. The
+         *     configuration itself is never returned. Requires servers.manage on the server.
+         */
+        get: operations["getServerAgentBackup"];
+        put?: never;
+        /**
+         * Make the agent keep the original Frigate configuration
+         * @description Stores, on the agent's host, the Frigate config.yml as it was before OpenVMS changed it. The
+         *     agent keeps the first copy it receives and never replaces it, so calling this again returns
+         *     the stored metadata. Requires servers.manage and servers.config.secrets on the server. The
+         *     409 code agent_backup_unsupported means the agent is older than the release with backups.
+         */
+        post: operations["ensureServerAgentBackup"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/cameras": {
         parameters: {
             query?: never;
@@ -4425,6 +4455,22 @@ export interface components {
              */
             sampled_at?: string;
             error?: string;
+        };
+        ServerAgentBackup: {
+            /** @description False when the agent holds no original configuration yet. */
+            exists: boolean;
+            /**
+             * Format: date-time
+             * @description UTC time the agent stored the copy.
+             */
+            saved_at?: string | null;
+            frigate_version: string;
+            /** @description Free text saying which OpenVMS registered the server. */
+            registered_by: string;
+            /** @description Hex digest of the stored config.yml. */
+            sha256: string;
+            /** @description Size of the stored config.yml in bytes. */
+            size: number;
         };
         ServerAgentNetworkInterface: {
             name: string;
@@ -8147,6 +8193,60 @@ export interface operations {
             401: components["responses"]["Unauthorized"];
             403: components["responses"]["Forbidden"];
             404: components["responses"]["NotFound"];
+            502: components["responses"]["FrigateUnreachable"];
+        };
+    };
+    getServerAgentBackup: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                serverId: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Backup state */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ServerAgentBackup"];
+                };
+            };
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+            409: components["responses"]["Conflict"];
+            502: components["responses"]["FrigateUnreachable"];
+        };
+    };
+    ensureServerAgentBackup: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                serverId: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Backup state after the call */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ServerAgentBackup"];
+                };
+            };
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+            409: components["responses"]["Conflict"];
             502: components["responses"]["FrigateUnreachable"];
         };
     };

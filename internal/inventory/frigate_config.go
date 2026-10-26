@@ -17,6 +17,7 @@ import (
 	"github.com/jdolan-exalink/openvms/internal/access"
 	"github.com/jdolan-exalink/openvms/internal/authz"
 	"github.com/jdolan-exalink/openvms/internal/frigate"
+	"github.com/jdolan-exalink/openvms/internal/store"
 	"github.com/jdolan-exalink/openvms/internal/store/db"
 )
 
@@ -282,6 +283,58 @@ func (s *Service) GetServerFrigateRaw(ctx context.Context, actor authz.Actor, se
 		return "", &FrigateError{Err: err}
 	}
 	return text, nil
+}
+
+// ActionAgentBackupSaved is the audit action written when the original Frigate configuration is
+// stored on a host for the first time.
+const ActionAgentBackupSaved = "AGENT_BACKUP_SAVED"
+
+// OriginalFrigateConfig returns the config.yml as it was before OpenVMS changed it, with the Frigate
+// version of the server. It is the before_yaml of the earliest stored revision that recorded one; a
+// server OpenVMS never wrote to has no such revision, and then the current config.yml read from
+// Frigate is the original. Requires servers.config.secrets, like any read of the raw config.
+func (s *Service) OriginalFrigateConfig(ctx context.Context, actor authz.Actor, serverID uuid.UUID) (string, string, error) {
+	srv, err := s.secretsServer(ctx, actor, serverID, false)
+	if err != nil {
+		return "", "", err
+	}
+	var before string
+	err = s.tx(ctx, actor, func(q *db.Queries, _ *access.Checker) error {
+		var err error
+		before, err = q.GetEarliestFrigateConfigBefore(ctx, serverID)
+		return err
+	})
+	switch {
+	case err == nil:
+		return before, srv.FrigateVersion, nil
+	case !errors.Is(store.Classify(err), store.ErrNotFound):
+		return "", "", err
+	}
+	a, err := s.frigateAdapter(ctx, srv)
+	if err != nil {
+		return "", "", err
+	}
+	text, err := a.RawConfig(ctx)
+	if err != nil {
+		return "", "", &FrigateError{Err: err}
+	}
+	version := a.Version()
+	if version == "" {
+		version = srv.FrigateVersion
+	}
+	return text, version, nil
+}
+
+// AuditAgentBackupSaved records that the original configuration of a server was stored on its host.
+// Only the digest is recorded, never the configuration.
+func (s *Service) AuditAgentBackupSaved(ctx context.Context, actor authz.Actor, serverID uuid.UUID, sha256 string) error {
+	return s.tx(ctx, actor, func(q *db.Queries, _ *access.Checker) error {
+		srv, err := q.GetServer(ctx, serverID)
+		if err != nil {
+			return notFoundOr(err)
+		}
+		return audit(ctx, q, actor, &srv.TenantID, ActionAgentBackupSaved, "server", srv.ID, map[string]any{"sha256": sha256})
+	})
 }
 
 // secretsServer loads the server and requires servers.config.secrets (and servers.config for

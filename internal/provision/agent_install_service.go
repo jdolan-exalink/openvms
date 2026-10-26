@@ -419,6 +419,8 @@ func (s *Service) runServerAgentInstall(parent context.Context, actor authz.Acto
 	} else {
 		job.update("succeeded", "complete", "Agent files reconciled and credentials registered after HTTPS health verification")
 	}
+	// Best effort: keep the original Frigate config on the host.
+	s.ensureBackupInBackground(ctx, actor, job.serverID, "install")
 	if s.OnAgentInstalled != nil {
 		// #nosec G118 -- background task outlives caller request context
 		go s.OnAgentInstalled(context.WithoutCancel(ctx), actor, job.serverID)

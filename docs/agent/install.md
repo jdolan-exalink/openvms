@@ -93,3 +93,8 @@ Registering the printed address and token in OpenVMS is the next step: `docs/age
    (`tools/agent_version.sh`, the CI job "Agent version").
 
 The Frigate compose bundle (`deploy/agent/install.sh`) is a different thing and keeps working as before.
+
+## The original Frigate configuration
+
+When a server is registered, the agent keeps the Frigate `config.yml` as it was before OpenVMS touched it,
+on the host itself. See `docs/agent/backup.md`.

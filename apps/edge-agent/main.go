@@ -20,6 +20,7 @@ import (
 	"time"
 
 	"github.com/jdolan-exalink/openvms/internal/agent"
+	"github.com/jdolan-exalink/openvms/internal/agent/backup"
 	"github.com/jdolan-exalink/openvms/internal/agent/mtls"
 	"github.com/jdolan-exalink/openvms/internal/agent/onvifdiscover"
 	"github.com/jdolan-exalink/openvms/internal/agent/provisionlpr"
@@ -148,6 +149,8 @@ func main() {
 		replace = newUpdateReplacer(updater)
 	}
 	mux := buildMuxWithAuth(auth, variant, sampler, discoveryHandler, probeHandler, opsHandler, lprReceiver, replace, func() { go restart() })
+	// The original Frigate config.yml, kept on the host so it travels with it (see internal/agent/backup).
+	mountBackup(mux, auth, backup.New(stateDir))
 	if capture == captureEverything {
 		log.Warn("Provision-ISR capture-all is on: POSTs on any path are accepted and kept; turn it off once the camera protocol is known")
 		mux.Handle("/", postsAnywhere(lprReceiver))

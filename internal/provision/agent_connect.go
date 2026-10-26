@@ -226,6 +226,8 @@ func (s *Service) ConnectAgent(ctx context.Context, actor authz.Actor, serverID 
 	if err != nil {
 		return ConnectAgentResult{}, err
 	}
+	// Best effort: keep the original Frigate config on the host, without delaying the answer.
+	s.ensureBackupInBackground(ctx, actor, serverID, "connect")
 	return ConnectAgentResult{BaseURL: p.endpoint.BaseURL(), Version: version, Scopes: scopes}, nil
 }
 

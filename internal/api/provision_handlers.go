@@ -243,6 +243,42 @@ func (h *Handlers) UpdateServerAgent(ctx context.Context, r gen.UpdateServerAgen
 	return gen.UpdateServerAgent200JSONResponse(serverAgent(view)), nil
 }
 
+func (h *Handlers) GetServerAgentBackup(ctx context.Context, r gen.GetServerAgentBackupRequestObject) (gen.GetServerAgentBackupResponseObject, error) {
+	a, err := actor(ctx)
+	if err != nil {
+		return nil, err
+	}
+	backup, err := h.Provision.GetAgentBackup(ctx, a, r.ServerId)
+	if err != nil {
+		return nil, err
+	}
+	return gen.GetServerAgentBackup200JSONResponse(serverAgentBackup(backup)), nil
+}
+
+func (h *Handlers) EnsureServerAgentBackup(ctx context.Context, r gen.EnsureServerAgentBackupRequestObject) (gen.EnsureServerAgentBackupResponseObject, error) {
+	a, err := actor(ctx)
+	if err != nil {
+		return nil, err
+	}
+	backup, err := h.Provision.EnsureOriginalConfigBackup(ctx, a, r.ServerId)
+	if err != nil {
+		return nil, err
+	}
+	return gen.EnsureServerAgentBackup200JSONResponse(serverAgentBackup(backup)), nil
+}
+
+// serverAgentBackup is the metadata of the backup; the configuration itself never leaves the agent.
+func serverAgentBackup(in provision.AgentBackup) gen.ServerAgentBackup {
+	out := gen.ServerAgentBackup{
+		Exists: in.Exists, FrigateVersion: in.FrigateVersion, RegisteredBy: in.RegisteredBy, Sha256: in.SHA256, Size: in.Size,
+	}
+	if !in.SavedAt.IsZero() {
+		saved := in.SavedAt
+		out.SavedAt = &saved
+	}
+	return out
+}
+
 func serverProvision(s provision.Snapshot) gen.ServerProvision {
 	out := gen.ServerProvision{Id: s.ID, Status: gen.ServerProvisionStatus(s.Status)}
 	if s.Error != "" {
