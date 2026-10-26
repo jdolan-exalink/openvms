@@ -4913,6 +4913,8 @@ export interface components {
             analytics: {
                 lpr?: boolean;
                 audio?: boolean;
+                /** @description Analytics handled as modules, in display order. A module is available only with positive evidence. */
+                modules: components["schemas"]["CameraAnalyticsModule"][];
             };
             zones: {
                 name: string;
@@ -5006,6 +5008,30 @@ export interface components {
          * @enum {string}
          */
         CameraConfigOrigin: "ui" | "profile" | "group" | "api" | "sync" | "yaml" | "external_device";
+        CameraAnalyticsModule: {
+            /** @enum {string} */
+            id: "lpr" | "face_detection" | "face_recognition" | "vehicle_classification" | "vehicle_color" | "clothing_color" | "similar_search";
+            /** @example Matrículas (LPR) */
+            label: string;
+            available: boolean;
+            enabled: boolean;
+            /** @description OpenVMS can switch the module through its engine */
+            writable: boolean;
+            /** @enum {string} */
+            engine: "frigate" | "provision" | "native" | "none";
+            /** @description Why the module cannot be switched on from here */
+            reason?: string;
+            /** @description Only fields with a real backing in the engine */
+            settings: {
+                /** @description Smallest object area */
+                min_area?: number;
+            };
+            /** @description Read-only summary of the engine-specific parameters */
+            advanced: {
+                label: string;
+                value: string;
+            }[];
+        };
         /**
          * @description Sparse change to the normalized model; omitted fields stay as they are. The fields that can
          *     be changed today are `detection.enabled` (boolean), `detection.objects` (raw engine object
@@ -5013,7 +5039,11 @@ export interface components {
          *     `/api/v1/camera-config/object-catalog`, expanded to the engine labels its model supports;
          *     sending it together with `detection.objects` is a 400, and ids the model cannot honor are
          *     listed in the review `unsupported` and rejected on apply), `recording.enabled` (boolean),
-         *     `analytics.lpr` (boolean) and `streams.primary` / `streams.detection`, each a sparse object
+         *     `analytics.lpr` (boolean), `analytics.modules.<id>.enabled` (boolean; `lpr` is the same
+         *     switch as `analytics.lpr`) and `analytics.modules.<id>.settings.min_area` (lpr and
+         *     face_recognition), where an unknown module id is a 400 and so is a module that is not
+         *     available or not configurable for the camera (for example Provision LPR), and
+         *     `streams.primary` / `streams.detection`, each a sparse object
          *     with `resolution` ({width, height}), `fps`, `codec` (h264, h265, mjpeg, mpeg4),
          *     `bitrate_kbps` and `gop`. Stream fields are written to the camera over ONVIF; the detection
          *     stream's `resolution` and `fps` go to Frigate's detect section when it has no ONVIF profile

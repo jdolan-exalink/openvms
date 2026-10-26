@@ -6220,9 +6220,14 @@ components:
             available_labels: { type: array, items: { type: string }, description: Labels the engine model supports; omitted when unknown }
         analytics:
           type: object
+          required: [modules]
           properties:
             lpr: { type: boolean }
             audio: { type: boolean }
+            modules:
+              type: array
+              description: Analytics handled as modules, in display order. A module is available only with positive evidence.
+              items: { $ref: "#/components/schemas/CameraAnalyticsModule" }
         zones:
           type: array
           items:
@@ -6339,6 +6344,31 @@ components:
       type: string
       description: Where a configuration change comes from. Defaults to ui.
       enum: [ui, profile, group, api, sync, yaml, external_device]
+    CameraAnalyticsModule:
+      type: object
+      required: [id, label, available, enabled, writable, engine, settings, advanced]
+      properties:
+        id: { type: string, enum: [lpr, face_detection, face_recognition, vehicle_classification, vehicle_color, clothing_color, similar_search] }
+        label: { type: string, example: Matrículas (LPR) }
+        available: { type: boolean }
+        enabled: { type: boolean }
+        writable: { type: boolean, description: OpenVMS can switch the module through its engine }
+        engine: { type: string, enum: [frigate, provision, native, none] }
+        reason: { type: string, description: Why the module cannot be switched on from here, example No disponible con este motor }
+        settings:
+          type: object
+          description: Only fields with a real backing in the engine
+          properties:
+            min_area: { type: integer, description: Smallest object area, in pixels, the engine analyses }
+        advanced:
+          type: array
+          description: Read-only summary of the engine-specific parameters
+          items:
+            type: object
+            required: [label, value]
+            properties:
+              label: { type: string }
+              value: { type: string }
     CameraConfigPatch:
       type: object
       description: |
@@ -6348,7 +6378,11 @@ components:
         `/api/v1/camera-config/object-catalog`, expanded to the engine labels its model supports;
         sending it together with `detection.objects` is a 400, and ids the model cannot honor are
         listed in the review `unsupported` and rejected on apply), `recording.enabled` (boolean),
-        `analytics.lpr` (boolean) and `streams.primary` / `streams.detection`, each a sparse object
+        `analytics.lpr` (boolean), `analytics.modules.<id>.enabled` (boolean; `lpr` is the same
+        switch as `analytics.lpr`) and `analytics.modules.<id>.settings.min_area` (lpr and
+        face_recognition), where an unknown module id is a 400 and so is a module that is not
+        available or not configurable for the camera (for example Provision LPR), and
+        `streams.primary` / `streams.detection`, each a sparse object
         with `resolution` ({width, height}), `fps`, `codec` (h264, h265, mjpeg, mpeg4),
         `bitrate_kbps` and `gop`. Stream fields are written to the camera over ONVIF; the detection
         stream's `resolution` and `fps` go to Frigate's detect section when it has no ONVIF profile

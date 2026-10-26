@@ -287,3 +287,48 @@ func TestGetCameraConfigCarriesState(t *testing.T) {
 		t.Fatalf("state = %+v", cfg.State)
 	}
 }
+
+func TestApplyCameraConfigGuardsAnalyticsModules(t *testing.T) {
+	apply := func(t *testing.T, ce inventory.CameraEngine, patch map[string]any) (*fakeCamConfigWriter, error) {
+		t.Helper()
+		w := &fakeCamConfigWriter{apply: inventory.ConfigApplyResult{Outcome: camconfig.Outcome{Result: camconfig.ResultOK}}}
+		h := &Handlers{camConfigWrite: w, camConfig: fakeCamConfigSource{ce: ce}}
+		body := gen.ApplyCameraConfigJSONRequestBody{Patch: patch, ExpectedRevision: 1}
+		_, err := h.ApplyCameraConfig(writerCtx(), gen.ApplyCameraConfigRequestObject{CameraId: uuid.New(), Body: &body})
+		return w, err
+	}
+	module := func(id string) map[string]any {
+		return map[string]any{"analytics": map[string]any{"modules": map[string]any{id: map[string]any{"enabled": true}}}}
+	}
+	frigateDoc := fakeFrigate{doc: map[string]any{"lpr": map[string]any{"enabled": false}}}
+
+	t.Run("frigate lpr is applied", func(t *testing.T) {
+		w, err := apply(t, camConfigFixture(frigateDoc), module("lpr"))
+		if err != nil || w.applyCalls != 1 {
+			t.Fatalf("err = %v, calls = %d", err, w.applyCalls)
+		}
+	})
+	t.Run("provision lpr is refused with the reason", func(t *testing.T) {
+		ce := camConfigFixture(frigateDoc)
+		ce.Camera.Tags = []string{"lpr_provision"}
+		w, err := apply(t, ce, module("lpr"))
+		var ve *inventory.ValidationError
+		if !errors.As(err, &ve) || !strings.Contains(ve.Msg, "Se configura en la cámara") || w.applyCalls != 0 {
+			t.Fatalf("err = %v, calls = %d", err, w.applyCalls)
+		}
+	})
+	t.Run("module without evidence is refused", func(t *testing.T) {
+		w, err := apply(t, camConfigFixture(frigateDoc), module("clothing_color"))
+		var ve *inventory.ValidationError
+		if !errors.As(err, &ve) || w.applyCalls != 0 {
+			t.Fatalf("err = %v, calls = %d", err, w.applyCalls)
+		}
+	})
+	t.Run("unknown module is a 400 before the service", func(t *testing.T) {
+		w, err := apply(t, camConfigFixture(frigateDoc), module("teleport"))
+		var ve *inventory.ValidationError
+		if !errors.As(err, &ve) || w.applyCalls != 0 {
+			t.Fatalf("err = %v, calls = %d", err, w.applyCalls)
+		}
+	})
+}

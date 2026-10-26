@@ -466,6 +466,32 @@ describe("FrigateCameraConfig", () => {
       expect(screen.queryByRole("button", { name: "Revisar cambios" })).not.toBeInTheDocument();
     });
 
+    describe("analytics modules", () => {
+      const modules = (lprAvailable: boolean) => [
+        { id: "lpr", label: "Matrículas (LPR)", available: lprAvailable, enabled: false, writable: lprAvailable, engine: lprAvailable ? "frigate" : "none", reason: lprAvailable ? undefined : "No disponible con este motor", settings: {}, advanced: [] },
+        { id: "face_detection", label: "Detección facial", available: false, enabled: false, writable: false, engine: "none", reason: "No disponible con este motor", settings: {}, advanced: [] },
+        { id: "face_recognition", label: "Reconocimiento facial", available: false, enabled: false, writable: false, engine: "none", reason: "No disponible con este motor", settings: {}, advanced: [] },
+      ];
+      const model = (lprAvailable: boolean) => () => json({ analytics: { modules: modules(lprAvailable) }, state: { desired_revision: 1, applied_revision: 1, sync_state: "synced", last_error: "", drift: [] } });
+
+      it("hides Analíticas when no module is available", async () => {
+        mountFull({}, { "/api/v1/cameras/c1/normalized-config": model(false) });
+        await screen.findByLabelText("Tipo de cámara");
+        await waitFor(() => expect(screen.queryByRole("tab", { name: /^Analíticas/ })).not.toBeInTheDocument());
+      });
+
+      it("shows Analíticas with the module cards when a module is available, and stages the LPR switch", async () => {
+        mountFull({ config: { lpr: { enabled: false } } }, { "/api/v1/cameras/c1/normalized-config": model(true) });
+        await goTo("Analíticas");
+        const card = await screen.findByTestId("module-lpr");
+        fireEvent.click(within(card).getByRole("switch"));
+        expect(await screen.findByRole("button", { name: "Revisar cambios" })).toBeInTheDocument();
+        expect(within(screen.getByTestId("module-face_recognition")).getByRole("switch")).toBeDisabled();
+        // The raw engine panel stays reachable behind the modules.
+        expect(screen.getByRole("button", { name: /Avanzado · LPR/ })).toBeInTheDocument();
+      });
+    });
+
     it("shows the Provision LPR section for a provision-typed camera", async () => {
       mountFull({}, { "/api/v1/cameras/c1": () => cam({ tags: ["lpr", "provision"] }) });
       await goTo("Analíticas");

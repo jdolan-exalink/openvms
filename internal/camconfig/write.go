@@ -79,6 +79,9 @@ type RecordingPatch struct {
 // AnalyticsPatch changes the analytics modules.
 type AnalyticsPatch struct {
 	LPR *bool `json:"lpr,omitempty"`
+	// Modules changes analytics modules by id (see patch_analytics.go). modules.lpr.enabled is
+	// the same switch as LPR.
+	Modules map[string]*ModulePatch `json:"modules,omitempty"`
 }
 
 var objectLabel = regexp.MustCompile(`^[a-z0-9_]+$`)
@@ -109,6 +112,9 @@ func (p Patch) Validate() error {
 	if err := p.Streams.validate(); err != nil {
 		return err
 	}
+	if err := p.Analytics.validate(); err != nil {
+		return err
+	}
 	if p.Detection != nil && p.Detection.Objects != nil {
 		for _, o := range *p.Detection.Objects {
 			if !objectLabel.MatchString(o) {
@@ -123,7 +129,7 @@ func (p Patch) Validate() error {
 func (p Patch) Empty() bool {
 	return (p.Detection == nil || (p.Detection.Enabled == nil && p.Detection.Objects == nil && p.Detection.Selection == nil)) &&
 		(p.Recording == nil || p.Recording.Enabled == nil) &&
-		(p.Analytics == nil || p.Analytics.LPR == nil) &&
+		analyticsEmpty(p.Analytics) &&
 		streamsEmpty(p.Streams)
 }
 
@@ -149,9 +155,7 @@ func (p Patch) Normalized() Patch {
 	if r := p.Recording; r != nil && r.Enabled != nil {
 		out.Recording = &RecordingPatch{Enabled: r.Enabled}
 	}
-	if a := p.Analytics; a != nil && a.LPR != nil {
-		out.Analytics = &AnalyticsPatch{LPR: a.LPR}
-	}
+	out.Analytics = p.Analytics.normalized()
 	out.Streams = p.Streams.normalized()
 	return out
 }
@@ -175,12 +179,7 @@ func Merge(base, over Patch) Patch {
 	if o.Recording != nil {
 		out.Recording = o.Recording
 	}
-	if o.Analytics != nil {
-		if out.Analytics == nil {
-			out.Analytics = &AnalyticsPatch{}
-		}
-		out.Analytics.LPR = o.Analytics.LPR
-	}
+	out.Analytics = mergeAnalytics(out.Analytics, o.Analytics)
 	out.Streams = mergeStreams(out.Streams, o.Streams)
 	return out
 }
@@ -271,6 +270,11 @@ func (a FrigateAdapter) Plan(ctx context.Context, current Camera, patch Patch) (
 	}
 	if p.Analytics != nil {
 		boolChange("lpr", "analytics.lpr", "lectura de matrículas (LPR)", current.Analytics.LPR, p.Analytics.LPR)
+		mods, unsup := planModules(current, p.Analytics)
+		for _, m := range mods {
+			add(m.section, m.change)
+		}
+		rev.Unsupported = append(rev.Unsupported, unsup...)
 	}
 	vp := a.planVideo(ctx, current, p.Streams)
 	rev.Changes = append(rev.Changes, vp.changes...)
@@ -354,7 +358,12 @@ func FrigateSections(patch Patch) (map[string]any, error) {
 		out["record"] = map[string]any{"enabled": *p.Recording.Enabled}
 	}
 	if p.Analytics != nil {
-		out["lpr"] = map[string]any{"enabled": *p.Analytics.LPR}
+		if p.Analytics.LPR != nil {
+			out["lpr"] = map[string]any{"enabled": *p.Analytics.LPR}
+		}
+		if err := addModuleSections(out, p.Analytics); err != nil {
+			return nil, err
+		}
 	}
 	return out, nil
 }
