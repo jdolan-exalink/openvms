@@ -88,6 +88,7 @@ func Diff(desired Patch, effective Camera) []Drift {
 	}
 	if d.Analytics != nil {
 		boolDiff("analytics.lpr", d.Analytics.LPR, effective.Analytics.LPR)
+		out = append(out, diffModules(d.Analytics, effective.Analytics)...)
 	}
 	return out
 }

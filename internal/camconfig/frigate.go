@@ -70,6 +70,7 @@ func (a FrigateAdapter) Read(ctx context.Context, in Inventory) (Camera, error) 
 	}
 	detectionView(&cam.Detection)
 	finish(&cam, in, doc)
+	deriveModules(&cam, in, doc)
 	enrichVideo(ctx, &cam, a.Video)
 	return cam, nil
 }

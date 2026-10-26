@@ -124,6 +124,9 @@ type Detection struct {
 type Analytics struct {
 	LPR   *bool `json:"lpr,omitempty"`
 	Audio *bool `json:"audio,omitempty"`
+	// Modules are the analytics modules (LPR, facial, vehicle...), each with its availability
+	// and engine; see analytics.go.
+	Modules []AnalyticsModule `json:"modules"`
 }
 
 // Zone is a named detection zone.
