@@ -11,6 +11,8 @@ import (
 
 	"github.com/jackc/pgx/v5"
 
+	"github.com/jdolan-exalink/openvms/internal/access"
+	"github.com/jdolan-exalink/openvms/internal/authz"
 	"github.com/jdolan-exalink/openvms/internal/camconfig"
 	"github.com/jdolan-exalink/openvms/internal/frigate"
 	"github.com/jdolan-exalink/openvms/internal/inventory"
@@ -46,7 +48,7 @@ type yamlEngine struct {
 func newYAMLEngine() *yamlEngine {
 	e := &yamlEngine{fakeEngine: newFakeEngine()}
 	e.doc["objects"] = map[string]any{"track": []any{"person"}}
-	e.doc["ffmpeg"] = map[string]any{"inputs": []any{map[string]any{"path": realPath, "roles": []any{"detect"}}}}
+	e.doc["ffmpeg"] = map[string]any{"retry_interval": 10.0, "inputs": []any{map[string]any{"path": realPath, "roles": []any{"detect"}}}}
 	e.doc["onvif"] = map[string]any{"host": "10.0.0.5", "user": "admin", "password": realPassword}
 	e.doc["zones"] = map[string]any{"ovms_door": map[string]any{"coordinates": "0,0,1,1"}, "mine": map[string]any{}}
 	return e
@@ -534,5 +536,161 @@ func TestCameraConfigApplyFailureCarriesPlainError(t *testing.T) {
 	hist, _ := env.Svc.ListCameraConfigHistory(ctx, env.Admin, cam.ID, 5)
 	if len(hist) != 1 || hist[0].Result != "error" || hist[0].Error == nil || hist[0].Error.Message != p.Message || hist[0].Rollbackable {
 		t.Fatalf("history = %+v", hist)
+	}
+}
+
+// TestCameraYAMLAndAdvancedPermissionMatrix pins who reaches the YAML editor and the advanced
+// panels: legacy holders keep access, nobody gains it, granular grants and denies are honored.
+func TestCameraYAMLAndAdvancedPermissionMatrix(t *testing.T) {
+	env := demofix.Setup(t)
+	eng := newYAMLEngine()
+	useYAMLEngine(env, eng)
+	cam := env.Cameras["frigate-h01/acceso_norte"]
+	ctx := context.Background()
+	tenant := cam.TenantID
+
+	yamlGet := func(u authz.Actor) error {
+		_, err := env.Svc.GetCameraYAMLSection(ctx, u, cam.ID, "detect")
+		return err
+	}
+	yamlValidate := func(u authz.Actor) error {
+		_, err := env.Svc.ValidateCameraYAML(ctx, u, cam.ID, "detect", "enabled: true\n")
+		return err
+	}
+	advanced := func(u authz.Actor) error {
+		_, err := env.Svc.GetCameraAdvanced(ctx, u, cam.ID)
+		return err
+	}
+	deny := func(u authz.Actor, p authz.Permission) {
+		t.Helper()
+		if _, err := env.Svc.CreateGrant(ctx, env.Admin, inventory.GrantInput{
+			SubjectType: "user", SubjectID: u.UserID, Permission: p, Effect: authz.Deny, ScopeType: authz.ScopeTenant, ScopeID: &tenant,
+		}); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	cases := []struct {
+		name         string
+		perms        []authz.Permission
+		yaml, adv    bool
+		denyYAML     bool
+		denyAdvanced bool
+	}{
+		// Nobody gains access.
+		{name: "no-grants", perms: nil},
+		{name: "view-only", perms: []authz.Permission{authz.CamerasView}},
+		{name: "manage-only", perms: []authz.Permission{authz.CamerasView, authz.CamerasManage}},
+		{name: "secrets-only", perms: []authz.Permission{authz.CamerasView, authz.ServersConfigSecrets}},
+		{name: "other-granular", perms: []authz.Permission{authz.CamerasView, authz.CamerasConfigEdit, authz.CamerasConfigVideo}},
+		// Legacy holders keep what they had.
+		{name: "legacy-servers-config", perms: []authz.Permission{authz.CamerasView, authz.ServersConfig}, adv: true},
+		{name: "legacy-yaml-pair", perms: []authz.Permission{authz.CamerasView, authz.ServersConfig, authz.ServersConfigSecrets}, yaml: true, adv: true},
+		// Granular grants.
+		{name: "granular-yaml", perms: []authz.Permission{authz.CamerasView, authz.CamerasConfigYAML}, yaml: true},
+		{name: "granular-advanced", perms: []authz.Permission{authz.CamerasView, authz.CamerasConfigAdvanced}, adv: true},
+		// Legacy counts only while there is no granular allow (the U12 rule): revoking works.
+		{name: "pair-plus-other-granular", perms: []authz.Permission{authz.CamerasView, authz.ServersConfig, authz.ServersConfigSecrets, authz.CamerasConfigEdit}},
+		// An explicit deny wins over the legacy pair and over a granular allow.
+		{name: "pair-denied-yaml", perms: []authz.Permission{authz.CamerasView, authz.ServersConfig, authz.ServersConfigSecrets}, adv: true, denyYAML: true},
+		{name: "pair-denied-advanced", perms: []authz.Permission{authz.CamerasView, authz.ServersConfig, authz.ServersConfigSecrets}, yaml: true, denyAdvanced: true},
+		{name: "granular-denied", perms: []authz.Permission{authz.CamerasView, authz.CamerasConfigYAML, authz.CamerasConfigAdvanced}, yaml: true, adv: true, denyYAML: true, denyAdvanced: true},
+	}
+	for _, c := range cases {
+		u := grantAt(t, env, "mx-"+c.name, tenant, c.perms...)
+		wantYAML, wantAdv := c.yaml && !c.denyYAML, c.adv && !c.denyAdvanced
+		if c.denyYAML {
+			deny(u, authz.CamerasConfigYAML)
+		}
+		if c.denyAdvanced {
+			deny(u, authz.CamerasConfigAdvanced)
+		}
+		for name, call := range map[string]func(authz.Actor) error{"yaml get": yamlGet, "yaml validate": yamlValidate} {
+			err := call(u)
+			if wantYAML && err != nil {
+				t.Errorf("%s: %s refused: %v", c.name, name, err)
+			}
+			if !wantYAML && !errors.Is(err, access.ErrForbidden) {
+				t.Errorf("%s: %s err = %v, want forbidden", c.name, name, err)
+			}
+		}
+		err := advanced(u)
+		if wantAdv && err != nil {
+			t.Errorf("%s: advanced refused: %v", c.name, err)
+		}
+		if !wantAdv && !errors.Is(err, access.ErrForbidden) {
+			t.Errorf("%s: advanced err = %v, want forbidden", c.name, err)
+		}
+	}
+
+	// A refused apply writes nothing.
+	nothing := grantAt(t, env, "mx-apply-nothing", tenant, authz.CamerasView, authz.ServersConfig)
+	if _, err := env.Svc.ApplyCameraYAML(ctx, nothing, cam.ID, inventory.YAMLApplyInput{Section: "detect", YAML: "fps: 9\n"}); !errors.Is(err, access.ErrForbidden) {
+		t.Fatalf("servers.config alone applied YAML: %v", err)
+	}
+	if eng.patches != 0 || len(configAudit(t, env, cam.ID)) != 0 {
+		t.Fatalf("refused YAML apply wrote something: patches=%d", eng.patches)
+	}
+
+	// A grant in another tenant opens nothing here.
+	other, err := env.Svc.CreateTenant(ctx, env.Admin, "otro-yaml", "Otro")
+	if err != nil {
+		t.Fatal(err)
+	}
+	foreign := grantAt(t, env, "mx-foreign", other.ID, authz.CamerasView, authz.CamerasConfigYAML, authz.CamerasConfigAdvanced)
+	if err := yamlGet(foreign); err == nil {
+		t.Error("a grant in another tenant opened the YAML")
+	}
+	if err := advanced(foreign); err == nil {
+		t.Error("a grant in another tenant opened the advanced panels")
+	}
+}
+
+// A holder of cameras.config.yaml without the secrets permission sees masked values, and saving
+// the section keeps the real credentials: the placeholder round-trips.
+func TestCameraYAMLGranularHolderWithoutSecretsKeepsRealCredentials(t *testing.T) {
+	env := demofix.Setup(t)
+	eng := newYAMLEngine()
+	useYAMLEngine(env, eng)
+	cam := env.Cameras["frigate-h01/acceso_norte"]
+	ctx := context.Background()
+	u := grantAt(t, env, "yaml-nosecrets", cam.TenantID, authz.CamerasView, authz.CamerasConfigYAML, authz.ServersConfig)
+
+	sec, err := env.Svc.GetCameraYAMLSection(ctx, u, cam.ID, "ffmpeg")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if sec.SecretsVisible || strings.Contains(sec.YAML, "hunter2") || !strings.Contains(sec.YAML, maskedPath) {
+		t.Fatalf("yaml = %q secrets=%v", sec.YAML, sec.SecretsVisible)
+	}
+	// Another key changes; the masked inputs stay as shown and are never sent.
+	if _, err := env.Svc.ApplyCameraYAML(ctx, u, cam.ID, inventory.YAMLApplyInput{Section: "ffmpeg", YAML: strings.Replace(sec.YAML, "retry_interval: 10", "retry_interval: 20", 1)}); err != nil {
+		t.Fatalf("saving with an untouched placeholder: %v", err)
+	}
+	ff := eng.section("ffmpeg")
+	in := ff["inputs"].([]any)[0].(map[string]any)
+	if ff["retry_interval"] != float64(20) || in["path"] != realPath {
+		t.Fatalf("engine ffmpeg = %v", ff)
+	}
+	// Changing the inputs list means writing the stream URL: that needs the secrets permission.
+	patches := eng.patches
+	_, err = env.Svc.ApplyCameraYAML(ctx, u, cam.ID, inventory.YAMLApplyInput{Section: "ffmpeg", YAML: strings.Replace(sec.YAML, "- detect", "- detect\n      - record", 1)})
+	if !errors.Is(err, access.ErrForbidden) || eng.patches != patches {
+		t.Fatalf("inputs edit err = %v", err)
+	}
+	onvif, err := env.Svc.GetCameraYAMLSection(ctx, u, cam.ID, "onvif")
+	if err != nil || strings.Contains(onvif.YAML, realPassword) {
+		t.Fatalf("onvif yaml = %q (%v)", onvif.YAML, err)
+	}
+	if _, err := env.Svc.ApplyCameraYAML(ctx, u, cam.ID, inventory.YAMLApplyInput{Section: "onvif", YAML: strings.Replace(onvif.YAML, "host: 10.0.0.5", "host: 10.0.0.7", 1)}); err != nil {
+		t.Fatal(err)
+	}
+	if on := eng.section("onvif"); on["host"] != "10.0.0.7" || on["password"] != realPassword || on["user"] != "admin" {
+		t.Fatalf("engine onvif = %v", on)
+	}
+	// Writing a new credential still needs the secrets permission.
+	_, err = env.Svc.ApplyCameraYAML(ctx, u, cam.ID, inventory.YAMLApplyInput{Section: "onvif", YAML: "password: another\n"})
+	if !errors.Is(err, access.ErrForbidden) || eng.section("onvif")["password"] != realPassword {
+		t.Fatalf("new credential err = %v", err)
 	}
 }

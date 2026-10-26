@@ -85,10 +85,13 @@ type AdvancedProvision struct {
 	Model        string
 }
 
-// requireAdvanced is the permission to read the advanced panels: servers.config on the
-// camera's server.
-func requireAdvanced(c *access.Checker, _ db.GetCameraRow, srv db.GetServerRow) error {
-	return c.Require(authz.ServersConfig, access.Server(srv.TenantID, srv.SiteID, srv.ID))
+// requireAdvanced is the permission to read the advanced panels: cameras.config.advanced on the
+// camera (legacy servers.config keeps it, see authz.DecideCompat) and viewing the camera.
+func requireAdvanced(c *access.Checker, cam db.GetCameraRow) error {
+	if err := c.Require(authz.CamerasView, cameraResource(cam)); err != nil {
+		return err
+	}
+	return c.RequireCompat(authz.CamerasConfigAdvanced, cameraResource(cam))
 }
 
 // GetCameraAdvanced returns the per-backend technical information of a camera.
@@ -102,13 +105,10 @@ func (s *Service) GetCameraAdvanced(ctx context.Context, actor authz.Actor, id u
 		if cam, err = q.GetCamera(ctx, id); err != nil {
 			return notFoundOr(err)
 		}
-		if err = c.Require(authz.CamerasView, cameraResource(cam)); err != nil {
-			return err
-		}
 		if srv, err = q.GetServer(ctx, cam.ServerID); err != nil {
 			return notFoundOr(err)
 		}
-		if err = requireAdvanced(c, cam, srv); err != nil {
+		if err = requireAdvanced(c, cam); err != nil {
 			return err
 		}
 		t.cam = cam

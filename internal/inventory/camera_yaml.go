@@ -99,14 +99,15 @@ type yamlTarget struct {
 	revision   int64
 }
 
-// requireYAML is the permission to read and edit the YAML of a camera: today the raw-YAML
-// rule, servers.config together with servers.config.secrets.
-func requireYAML(c *access.Checker, _ db.GetCameraRow, srv db.GetServerRow) error {
-	res := access.Server(srv.TenantID, srv.SiteID, srv.ID)
-	if err := c.Require(authz.ServersConfig, res); err != nil {
+// requireYAML is the permission to read and edit the YAML of a camera: cameras.config.yaml on
+// the camera. Holders of the legacy raw-YAML pair (servers.config + servers.config.secrets) keep
+// it through authz.DecideCompat while they hold no granular allow; nobody else gains it. Viewing
+// the camera stays a requirement, as it was for the document this YAML comes from.
+func requireYAML(c *access.Checker, cam db.GetCameraRow) error {
+	if err := c.Require(authz.CamerasView, cameraResource(cam)); err != nil {
 		return err
 	}
-	return c.Require(authz.ServersConfigSecrets, res)
+	return c.RequireCompat(authz.CamerasConfigYAML, cameraResource(cam))
 }
 
 func (s *Service) loadYAMLTarget(ctx context.Context, actor authz.Actor, id uuid.UUID) (yamlTarget, error) {
@@ -119,7 +120,7 @@ func (s *Service) loadYAMLTarget(ctx context.Context, actor authz.Actor, id uuid
 		if t.srv, err = q.GetServer(ctx, t.cam.ServerID); err != nil {
 			return notFoundOr(err)
 		}
-		if err := requireYAML(c, t.cam, t.srv); err != nil {
+		if err := requireYAML(c, t.cam); err != nil {
 			return err
 		}
 		t.canSecrets = c.Can(authz.ServersConfigSecrets, access.Server(t.srv.TenantID, t.srv.SiteID, t.srv.ID))

@@ -47,8 +47,8 @@ consumes these endpoints; none of them calls the camera itself.
 - **Audit.** `CAMERA_CONFIG_CHANGED` with `origin: yaml`, user, camera, `section`, `previous_values` /
   `new_values` keyed `section.path` (credentials removed), `managed_conflicts`, `marked_drift`,
   `frigate_revision_id` and `result`. Failures are audited too (`result: error`, `error_plain`).
-- **Permission.** `cameras.config.yaml` (legacy holders of `servers.config` + `servers.config.secrets`
-  keep it; nobody else gains it), see docs/camera-config-permissions.md. The apply also needs what the
+- **Permission.** `cameras.config.yaml` and `cameras.view` (legacy holders of `servers.config` +
+  `servers.config.secrets` keep it; nobody else gains it), see docs/camera-config-permissions.md. The apply also needs what the
   Frigate camera PATCH needs.
 
 ## History and rollback (S15)
