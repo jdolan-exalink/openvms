@@ -294,4 +294,20 @@ describe("CameraGroups", () => {
     fireEvent.click(within(dialog).getByRole("button", { name: "Reload latest" }));
     await waitFor(() => expect(screen.queryByRole("dialog")).not.toBeInTheDocument());
   });
+  it("launches the bulk configuration of a group only with camera edit permission", async () => {
+    const { writes } = setup(["cameras.config.edit"], false, {
+      routes: { "/api/v1/camera-config/bulk/review": () => json({ section: "detection", restarts: 0, totals: { cameras: 1, will_apply: 1, applied: 0, failed: 0, incompatible: 0, skipped: 0, unreachable: 0 }, rows: [] }) },
+    });
+    fireEvent.click(await screen.findByRole("button", { name: "Configurar cámaras de Perímetro" }));
+    const dialog = await screen.findByRole("dialog");
+    fireEvent.change(within(dialog).getByLabelText("Detección de objetos"), { target: { value: "on" } });
+    fireEvent.click(within(dialog).getByRole("button", { name: "Revisar" }));
+    await waitFor(() => expect(writes[0]).toMatchObject({ url: "/api/v1/camera-config/bulk/review", body: { group_id: "cg1", patch: { detection: { enabled: true } }, origin: "group" } }));
+  });
+
+  it("hides the bulk configuration without camera edit permission", async () => {
+    setup(["cameras.manage"]);
+    await screen.findByText("Perímetro");
+    expect(screen.queryByRole("button", { name: /Configurar cámaras de/ })).toBeNull();
+  });
 });
