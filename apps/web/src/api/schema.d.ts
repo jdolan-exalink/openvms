@@ -4909,6 +4909,8 @@ export interface components {
                 raw?: string[];
                 /** @description Labels the engine model supports; omitted when unknown */
                 available_labels?: string[];
+                /** @description Limits of what the engine reports (for example Provision does not tell vehicle types apart); omitted when none */
+                notes?: string[];
             };
             analytics: {
                 lpr?: boolean;
@@ -4927,9 +4929,19 @@ export interface components {
             fisheye: {
                 supported: boolean;
             };
+            /**
+             * @description Features wired to the camera and, with an `id`, the status of each backend integration
+             *     (frigate, onvif, provision_isr). Statuses come from evidence OpenVMS already has.
+             */
             integrations: {
                 name: string;
                 enabled: boolean;
+                /** @enum {string} */
+                id?: "frigate" | "onvif" | "provision_isr";
+                label?: string;
+                /** @enum {string} */
+                status?: "connected" | "not_configured" | "error" | "unknown";
+                detail?: string;
             }[];
             overrides: {
                 default_live_quality?: string;
