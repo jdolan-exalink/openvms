@@ -11,6 +11,7 @@ import (
 	"testing"
 )
 
+// #nosec G101 -- a fake RTSP URL used as a test fixture, not a credential.
 const sample = "mqtt:\n  enabled: false\ncameras:\n  front:\n    ffmpeg:\n      inputs:\n        - path: rtsp://admin:secret@10.0.0.5/stream\n"
 
 func TestSaveStoresTheConfigAndMetadataPrivately(t *testing.T) {
