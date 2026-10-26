@@ -119,6 +119,24 @@ describe("DetectionTab", () => {
   });
 });
 
+describe("DetectionTab with a Provision camera", () => {
+  it("renders the engine notes and offers vehicles only at category level", async () => {
+    mount({ notes: ["Provision no distingue el tipo de vehículo"], selection: [] }, {}, { origin: { engine: "provision", server_id: "s1" } });
+    expect(await screen.findByRole("list", { name: "Notas del motor" })).toHaveTextContent("Provision no distingue el tipo de vehículo");
+    const vehicles = within(screen.getByRole("group", { name: "Vehículos" }));
+    expect(vehicles.getByLabelText(/Auto/)).toBeDisabled();
+    expect(vehicles.getByLabelText(/Moto/)).toBeDisabled();
+    expect(vehicles.getAllByText("Solo a nivel categoría").length).toBe(2);
+    expect(within(screen.getByRole("group", { name: "Personas" })).getByLabelText("Persona")).toBeEnabled();
+  });
+
+  it("keeps every subtype selectable for a Frigate camera", async () => {
+    mount({}, {}, { origin: { engine: "frigate", server_id: "s1" } });
+    expect(await screen.findByLabelText("Moto")).toBeEnabled();
+    expect(screen.queryByRole("list", { name: "Notas del motor" })).toBeNull();
+  });
+});
+
 describe("filters helpers", () => {
   it("reads a shared value only when every tracked label agrees", () => {
     const o = { track: ["a", "b"], filters: { a: { min_score: 0.5 }, b: { min_score: 0.5 } } };

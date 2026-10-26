@@ -27,30 +27,33 @@ export function toggleCategory(selected: string[], c: Category): string[] {
  * Pick what to detect from the normalized catalog (never the engine's raw label list): a toggle
  * per category and a checkbox per object. Objects the model cannot honor are disabled with a hint.
  */
-export function ObjectCatalogPicker({ catalog, selected, onChange, disabled }: { catalog: ObjectCatalog; selected: string[]; onChange: (next: string[]) => void; disabled?: boolean }) {
+export function ObjectCatalogPicker({ catalog, selected, onChange, disabled, vehicleLevelOnly }: { catalog: ObjectCatalog; selected: string[]; onChange: (next: string[]) => void; disabled?: boolean; vehicleLevelOnly?: string }) {
+  // Engines that only report a coarse vehicle (Provision) back the category and vehicle.generic, never a subtype.
+  const levelOnly = (c: Category, o: CatalogObject) => !!vehicleLevelOnly && c.id === "vehicle" && o.id !== "vehicle.generic";
   return (
     <div className="grid gap-3 md:grid-cols-2">
       {catalog.categories.map((c) => {
-        const ids = c.objects.filter(isSelectable).map((o) => o.id);
+        const ids = c.objects.filter((o) => isSelectable(o) && !levelOnly(c, o)).map((o) => o.id);
         const all = ids.length > 0 && ids.every((id) => selected.includes(id));
         return (
           <fieldset key={c.id} className="flex flex-col gap-2 rounded-m3-lg bg-surface-2 p-3" aria-label={c.label}>
             <legend className="px-1 text-sm font-bold">{c.label}</legend>
             <label className="flex min-h-9 items-center gap-2 text-xs font-semibold">
-              <input type="checkbox" checked={all} disabled={disabled || ids.length === 0} onChange={() => onChange(toggleCategory(selected, c))} />
+              <input type="checkbox" checked={all} disabled={disabled || ids.length === 0} onChange={() => onChange(toggleCategory(selected, vehicleLevelOnly ? { ...c, objects: c.objects.filter((o) => !levelOnly(c, o)) } : c))} />
               {categoryToggleLabel(c)}
             </label>
             <div className="flex flex-wrap gap-2">
               {c.objects.map((o) => (
                 <label
                   key={o.id}
-                  title={o.supported === false ? UNSUPPORTED_HINT : undefined}
+                  title={o.supported === false ? UNSUPPORTED_HINT : levelOnly(c, o) ? vehicleLevelOnly : undefined}
                   className="inline-flex min-h-9 items-center gap-2 rounded-m3-lg bg-surface-1 px-3 text-xs aria-disabled:opacity-60"
-                  aria-disabled={o.supported === false || undefined}
+                  aria-disabled={o.supported === false || levelOnly(c, o) || undefined}
                 >
-                  <input type="checkbox" checked={selected.includes(o.id)} disabled={disabled || o.supported === false} onChange={() => onChange(toggleObject(selected, o.id))} />
+                  <input type="checkbox" checked={selected.includes(o.id)} disabled={disabled || o.supported === false || levelOnly(c, o)} onChange={() => onChange(toggleObject(selected, o.id))} />
                   {o.label}
                   {o.supported === false && <span className="text-muted">{UNSUPPORTED_HINT}</span>}
+                  {o.supported !== false && levelOnly(c, o) && <span className="text-muted">Solo a nivel categoría</span>}
                 </label>
               ))}
             </div>

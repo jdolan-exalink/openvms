@@ -31,6 +31,8 @@ export function DetectionTab({ serverId, readOnly, settings, onMotion, onObjects
   const enabled = draft.enabled ?? model?.enabled;
   const selected = draft.selection ?? model?.selection ?? [];
   const raw = model?.raw ?? [];
+  const notes = model?.notes ?? [];
+  const provisionOnly = change.config.data?.origin?.engine === "provision";
 
   return (
     <div className="flex flex-col gap-5">
@@ -47,7 +49,14 @@ export function DetectionTab({ serverId, readOnly, settings, onMotion, onObjects
         ) : catalog.isError || !catalog.data ? (
           <p role="alert" className="text-sm text-bad">No se pudo cargar el catálogo de objetos.</p>
         ) : (
-          <ObjectCatalogPicker catalog={catalog.data} selected={selected} disabled={readOnly || !model} onChange={(next) => change.setPatch({ detection: { selection: next } })} />
+          <ObjectCatalogPicker catalog={catalog.data} selected={selected} disabled={readOnly || !model} vehicleLevelOnly={provisionOnly ? notes[0] ?? "Provision no distingue el tipo de vehículo" : undefined} onChange={(next) => change.setPatch({ detection: { selection: next } })} />
+        )}
+        {notes.length > 0 && (
+          <ul aria-label="Notas del motor" className="flex flex-col gap-1 rounded-m3-lg bg-surface-2 p-3 text-xs text-muted">
+            {notes.map((n) => (
+              <li key={n}>{n}</li>
+            ))}
+          </ul>
         )}
         {raw.length > 0 && (
           <div className="rounded-m3-lg bg-surface-2 p-3">
