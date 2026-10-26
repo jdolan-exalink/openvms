@@ -775,4 +775,29 @@ describe("FrigateCameraConfig", () => {
       expect(screen.queryByTestId("sync-badge")).not.toBeInTheDocument();
     });
   });
+  describe("PTZ and Fisheye tabs", () => {
+    it("hides both tabs for a fixed camera", async () => {
+      mountFull({}, { "/api/v1/cameras/c1": () => cam({ onvif_capabilities: { has_ptz: false } }) });
+      await screen.findByRole("tab", { name: "General" });
+      expect(screen.queryByRole("tab", { name: /^PTZ/ })).not.toBeInTheDocument();
+      expect(screen.queryByRole("tab", { name: /^Fisheye/ })).not.toBeInTheDocument();
+    });
+
+    it("shows PTZ for a PTZ camera, with the pad and contextual preview controls only inside it", async () => {
+      mountFull({}, { "/api/v1/cameras/c1": () => cam({ onvif_capabilities: { has_ptz: true } }), "/api/v1/cameras/c1/onvif/ptz": () => json({ success: true, presets: [] }), "/api/v1/cameras/c1/ptz/tours": () => json({ tours: [] }) });
+      await screen.findByRole("tab", { name: "General" });
+      expect(screen.queryByRole("group", { name: "Controles PTZ de la vista previa" })).not.toBeInTheDocument();
+      await goTo("PTZ");
+      expect(await screen.findByRole("region", { name: "Movimiento" })).toBeInTheDocument();
+      expect(screen.getByRole("group", { name: "Controles PTZ de la vista previa" })).toBeInTheDocument();
+      await goTo("General");
+      expect(screen.queryByRole("group", { name: "Controles PTZ de la vista previa" })).not.toBeInTheDocument();
+    });
+
+    it("shows Fisheye only for a fisheye camera", async () => {
+      mountFull({}, { "/api/v1/cameras/c1": () => cam({ tags: ["fisheye"] }) });
+      await goTo("Fisheye");
+      expect(await screen.findByRole("region", { name: "Original y vista" })).toBeInTheDocument();
+    });
+  });
 });
