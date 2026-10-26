@@ -20,6 +20,7 @@ import { SyncStatusPanel } from "@/components/camera/SyncStatusPanel";
 import { CameraPreview } from "@/components/camera/CameraPreview";
 import { CameraSummaryCards } from "@/components/camera/CameraSummaryCards";
 import { AnalyticsTab } from "@/components/camera/analytics/AnalyticsTab";
+import { IntegrationsTab } from "@/components/camera/integrations/IntegrationsTab";
 import { CameraTabs } from "@/components/camera/CameraTabs";
 import { VideoTab } from "@/components/camera/video/VideoTab";
 import { CameraWebView } from "@/components/camera/CameraWebView";
@@ -57,7 +58,7 @@ import { pickerLabels } from "@/lib/labelEmoji";
 import { loadRestart, saveRestart } from "@/lib/frigateRestart";
 import { can } from "@/lib/perm";
 import {
-  ANALYTICS_MODULES, analyticsTabVisible, buildCameraTabs, CAMERA_WEB, type CameraTabId, FISHEYE, GENERAL, HISTORY, isFisheyeTagged, ONVIF_INFO, PROVISION, PTZ_CONTROL, tabOfSection,
+  ANALYTICS_MODULES, analyticsTabVisible, buildCameraTabs, CAMERA_WEB, type CameraTabId, FISHEYE, GENERAL, HISTORY, INTEGRATIONS_STATUS, isFisheyeTagged, ONVIF_INFO, PROVISION, PTZ_CONTROL, tabOfSection,
 } from "@/lib/cameraTabs";
 import { persistedToEditorValue, planManagedZoneChanges, splitFrigateZones, zoneSyncStates, type ZoneChangePlan } from "@/lib/cameraZones";
 
@@ -76,6 +77,7 @@ const SECTION_TITLES: Record<string, string> = {
   [PROVISION]: "Avanzado · Provision LPR",
   lpr: "Avanzado · LPR",
   face_recognition: "Avanzado · Reconocimiento facial",
+  [INTEGRATIONS_STATUS]: "Estado",
   [CAMERA_WEB]: "Web de la cámara",
   [ONVIF_INFO]: "Capacidades ONVIF",
   [PTZ_CONTROL]: "Control PTZ",
@@ -529,6 +531,8 @@ function FrigateCameraConfigScreen({ cameraId }: { cameraId: string }) {
               }}
             />
           )
+        ) : section === INTEGRATIONS_STATUS ? (
+          <IntegrationsTab integrations={change.config.data?.integrations} />
         ) : section === CAMERA_WEB ? (
           <CameraWebView cameraId={cameraId} />
         ) : section === ONVIF_INFO || section === PTZ_CONTROL ? (

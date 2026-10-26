@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { ANALYTICS_MODULES, analyticsTabVisible, buildCameraTabs, CAMERA_WEB, FISHEYE, GENERAL, HISTORY, isFisheyeTagged, ONVIF_INFO, PROVISION, PTZ_CONTROL, tabOfSection } from "./cameraTabs";
+import { ANALYTICS_MODULES, analyticsTabVisible, buildCameraTabs, CAMERA_WEB, FISHEYE, GENERAL, HISTORY, INTEGRATIONS_STATUS, isFisheyeTagged, ONVIF_INFO, PROVISION, PTZ_CONTROL, tabOfSection } from "./cameraTabs";
 
 const base = { sections: [], ptz: false, fisheye: false, analytics: false, provision: false, cameraWeb: false };
 const ids = (input: Partial<Parameters<typeof buildCameraTabs>[0]>) => buildCameraTabs({ ...base, ...input }).map((t) => t.id);
@@ -40,8 +40,8 @@ describe("buildCameraTabs", () => {
   });
 
   it("gates the camera web view and keeps the ONVIF information in Integraciones", () => {
-    expect(buildCameraTabs(base).find((t) => t.id === "integrations")!.sections).toEqual([ONVIF_INFO]);
-    expect(buildCameraTabs({ ...base, cameraWeb: true }).find((t) => t.id === "integrations")!.sections).toEqual([CAMERA_WEB, ONVIF_INFO]);
+    expect(buildCameraTabs(base).find((t) => t.id === "integrations")!.sections).toEqual([INTEGRATIONS_STATUS, ONVIF_INFO]);
+    expect(buildCameraTabs({ ...base, cameraWeb: true }).find((t) => t.id === "integrations")!.sections).toEqual([INTEGRATIONS_STATUS, CAMERA_WEB, ONVIF_INFO]);
   });
 
   it("sends every remaining section, Fisheye for non-fisheye cameras and the history to Avanzado", () => {
