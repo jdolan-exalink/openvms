@@ -13,7 +13,9 @@ import {
   TriangleAlert,
 } from "lucide-react";
 import { CameraEnabledSwitch, CameraTypeSelect } from "@/components/camera/CameraTopControls";
+import { CameraChangeProvider, useCameraChange } from "@/components/camera/CameraChangeProvider";
 import { CameraHeader } from "@/components/camera/CameraHeader";
+import { SyncStatusPanel } from "@/components/camera/SyncStatusPanel";
 import { CameraPreview } from "@/components/camera/CameraPreview";
 import { CameraSummaryCards } from "@/components/camera/CameraSummaryCards";
 import { CameraTabs } from "@/components/camera/CameraTabs";
@@ -91,8 +93,17 @@ function withMask(obj: Record<string, unknown> | undefined, server: unknown, nex
 }
 
 export function FrigateCameraConfig() {
-  const t = useT();
   const { cameraId } = useParams({ strict: false }) as { cameraId: string };
+  return (
+    <CameraChangeProvider cameraId={cameraId}>
+      <FrigateCameraConfigScreen cameraId={cameraId} />
+    </CameraChangeProvider>
+  );
+}
+
+function FrigateCameraConfigScreen({ cameraId }: { cameraId: string }) {
+  const t = useT();
+  const change = useCameraChange();
   const qc = useQueryClient();
   const me = useQuery(meQuery);
   const doc = useQuery(cameraFrigateDocQuery(cameraId));
@@ -338,7 +349,7 @@ export function FrigateCameraConfig() {
     setActive("onvif");
   };
   const openBulk = () => { setBulkTargets([cameraId]); setBulkResults([]); bulkApply.reset(); setBulkReviewing(true); };
-  const discard = () => { setEdits({}); apply.reset(); };
+  const discard = () => { setEdits({}); apply.reset(); change.discard(); };
   const canSave = !readOnly && dirty.length > 0 && errorCount === 0;
 
   return (
@@ -362,6 +373,7 @@ export function FrigateCameraConfig() {
       <CameraHeader
         name={doc.data.camera_name}
         serverName={server?.name}
+        syncState={change.config.data?.state.sync_state}
         chips={statusChips(cam, config)}
         actions={
           <>
@@ -378,6 +390,10 @@ export function FrigateCameraConfig() {
           </>
         }
       />
+
+      {change.config.data && (
+        <SyncStatusPanel state={change.config.data.state} busy={change.apply.isPending} applyError={change.apply.error?.message} onUseDesired={(patch) => change.apply.mutate(patch)} />
+      )}
 
       <div className="flex flex-col gap-3 lg:flex-row lg:items-stretch">
         <CameraPreview cameraId={cameraId} name={doc.data.camera_name} serverId={serverId} initialQuality={cam?.default_live_quality} />
@@ -480,7 +496,15 @@ export function FrigateCameraConfig() {
       </section>
 
       {!readOnly && (
-        <PendingChangesBar count={dirty.length} errorCount={errorCount} onDiscard={discard} onReview={() => setReviewing(true)} onSave={() => setReviewing(true)} />
+        <PendingChangesBar
+          count={dirty.length}
+          cameraCount={change.pendingCount}
+          errorCount={errorCount}
+          onDiscard={discard}
+          onReview={() => (dirty.length > 0 ? setReviewing(true) : change.openReview())}
+          onSave={() => (dirty.length > 0 ? setReviewing(true) : change.openReview())}
+          onReviewCamera={change.openReview}
+        />
       )}
 
       {zoneEditor && (

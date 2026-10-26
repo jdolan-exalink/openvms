@@ -712,5 +712,17 @@ describe("FrigateCameraConfig", () => {
       await screen.findByRole("tab", { name: "General" });
       expect(screen.queryByRole("button", { name: "Abrir interfaz web" })).not.toBeInTheDocument();
     });
+
+    it("shows the sync badge and the drift panel once the normalized config loads", async () => {
+      mountFull({}, { "/api/v1/cameras/c1/normalized-config": () => json({ state: { desired_revision: 1, applied_revision: 1, sync_state: "drift", last_error: "", drift: [{ path: "detection.enabled", desired: true, effective: false }] } }) });
+      expect((await screen.findAllByTestId("sync-badge"))[0]).toHaveTextContent("Diferencia detectada");
+      expect(screen.getByText("La cámara fue modificada externamente.")).toBeInTheDocument();
+    });
+
+    it("hides the sync badge when the normalized config is unavailable", async () => {
+      mountFull();
+      await screen.findByRole("tab", { name: "General" });
+      expect(screen.queryByTestId("sync-badge")).not.toBeInTheDocument();
+    });
   });
 });
