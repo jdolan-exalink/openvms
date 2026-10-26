@@ -34,6 +34,7 @@ The version of OpenVMS lives in `VERSION` and the version of the edge agent in
 
 ### Changed
 
+- Agent 0.4.5: schema-only change: sqlc models gain camera_config_state (no behaviour change in the agent)
 - Agent 0.4.4: Rebuilt with the server delete purge queries; no change in agent behavior.
 - Agent 0.4.3: Revoking or re-creating the openvms token keeps /etc/openvms/openvms.apikey in step: revoke removes it, create saves the new key.
 - Agent 0.4.2: The installer keeps the OpenVMS key in /etc/openvms/openvms.apikey and ends with the host addresses and the steps to connect it in OpenVMS
