@@ -1,27 +1,26 @@
 import {
   Activity,
   ArrowLeft,
-  Camera,
-  Car,
   CircleCheck,
   Clock,
   Compass,
   Eye,
-  Globe,
-  HardDrive,
-  History,
-  Layers,
   Radio,
   RefreshCw,
-  Settings,
   ShieldCheck,
   SlidersHorizontal,
   Sparkles,
   TriangleAlert,
-  Video,
 } from "lucide-react";
 import { CameraEnabledSwitch, CameraTypeSelect } from "@/components/camera/CameraTopControls";
+import { CameraHeader } from "@/components/camera/CameraHeader";
+import { CameraPreview } from "@/components/camera/CameraPreview";
+import { CameraSummaryCards } from "@/components/camera/CameraSummaryCards";
+import { CameraTabs } from "@/components/camera/CameraTabs";
 import { CameraWebView } from "@/components/camera/CameraWebView";
+import { MoreActions } from "@/components/camera/MoreActions";
+import { PendingChangesBar } from "@/components/camera/PendingChangesBar";
+import { capabilityList, deviceRows, NONE, statusChips, videoRows } from "@/components/camera/summary";
 import { LprTestCard } from "@/components/provision/LprTestCard";
 import { FrigateGeneralFields, GENERAL_SECTIONS, knowsSection, sectionEnabled, type GeneralFrigate } from "@/components/camera/FrigateGeneralFields";
 import { FisheyeSection } from "@/components/fisheye/FisheyeSection";
@@ -33,7 +32,7 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useParams } from "@tanstack/react-router";
 import { type FormEvent, useMemo, useState } from "react";
 import { api, type Schemas, unwrap } from "@/api/client";
-import { cameraFrigateDocQuery, cameraQuery, cameraZonesQuery, camerasQuery, classifyPolicyQuery, frigateSchemaQuery, meQuery } from "@/api/queries";
+import { cameraFrigateDocQuery, cameraQuery, cameraZonesQuery, camerasQuery, classifyPolicyQuery, frigateSchemaQuery, meQuery, serversQuery } from "@/api/queries";
 import { BodyClassifySwitch } from "@/components/BodyClassifySwitch";
 import { ConfirmDialog } from "@/components/ConfirmDialog";
 import { FrigateHistory } from "@/components/frigate/FrigateHistory";
@@ -52,45 +51,29 @@ import {
 import { pickerLabels } from "@/lib/labelEmoji";
 import { loadRestart, saveRestart } from "@/lib/frigateRestart";
 import { can } from "@/lib/perm";
+import {
+  buildCameraTabs, CAMERA_WEB, type CameraTabId, FISHEYE, GENERAL, HISTORY, isFisheyeTagged, ONVIF_INFO, PROVISION, PTZ_CONTROL, tabOfSection,
+} from "@/lib/cameraTabs";
 import { persistedToEditorValue, planManagedZoneChanges, splitFrigateZones, zoneSyncStates, type ZoneChangePlan } from "@/lib/cameraZones";
 
 type SectionResult = Schemas["FrigateSectionResult"];
-const HISTORY = "__history";
-const GENERAL = "__general";
-const FISHEYE = "__fisheye";
-const PROVISION = "__provision";
-const CAMERA_WEB = "__camera_web";
-
-function getSectionIcon(section: string) {
-  switch (section) {
-    case GENERAL:
-      return SlidersHorizontal;
-    case PROVISION:
-      return Car;
-    case CAMERA_WEB:
-      return Globe;
-    case "detect":
-    case "ffmpeg":
-      return Video;
-    case "live":
-      return Eye;
-    case "objects":
-    case "motion":
-      return Activity;
-    case "zones":
-      return Layers;
-    case "record":
-      return HardDrive;
-    case "snapshots":
-      return Camera;
-    case "onvif":
-      return Radio;
-    case HISTORY:
-      return History;
-    default:
-      return Settings;
-  }
-}
+const SECTION_TITLES: Record<string, string> = {
+  detect: "Detección",
+  objects: "Objetos",
+  motion: "Movimiento",
+  record: "Grabación",
+  snapshots: "Capturas",
+  zones: "Zonas",
+  review: "Revisión y Alertas",
+  [GENERAL]: "General",
+  [PROVISION]: "Provision LPR",
+  [CAMERA_WEB]: "Web de la cámara",
+  [ONVIF_INFO]: "Capacidades ONVIF",
+  [PTZ_CONTROL]: "Control PTZ",
+  [FISHEYE]: "Fisheye / 360°",
+  [HISTORY]: "Historial",
+};
+const sectionTitle = (s: string) => SECTION_TITLES[s] ?? sectionLabel(s);
 
 const isRec = (v: unknown): v is Record<string, unknown> => typeof v === "object" && v !== null && !Array.isArray(v);
 const isEmptyMask = (v: unknown) => v == null || v === "" || (Array.isArray(v) && v.length === 0) || (isRec(v) && Object.keys(v).length === 0);
@@ -118,6 +101,7 @@ export function FrigateCameraConfig() {
   const schema = useQuery(frigateSchemaQuery(serverId));
   const serverCameras = useQuery({ ...camerasQuery({ server_id: serverId }), enabled: !!serverId && !!doc.data?.editable });
   const [active, setActive] = useState<string>();
+  const servers = useQuery(serversQuery);
   const [edits, setEdits] = useState<Record<string, unknown>>({});
   const [reviewing, setReviewing] = useState(false);
   const [bulkReviewing, setBulkReviewing] = useState(false);
@@ -328,9 +312,34 @@ export function FrigateCameraConfig() {
     return <div className="mx-auto flex max-w-6xl flex-col gap-4">{header}<ErrorNote error={doc.error ?? schema.error ?? new Error("Configuración de Frigate no disponible.")} /></div>;
   }
 
-  // Filter sections that are handled in our unified sections:
-  const unifiedHandled = new Set(["detect", "objects", "motion", "record", "snapshots", "zones", "review", "birdseye", ...GENERAL_SECTIONS]);
-  const otherSections = sections.filter((s) => !unifiedHandled.has(s));
+  const cam = camera.data;
+  const canManageCamera = can(me.data, "cameras.manage");
+  const provision = !!cam && (isProvisionCamera(cam) || !!cam.tags?.includes("provision"));
+  const general: GeneralFrigate = { root, camProps, config, doc: doc.data, ctx, valueOf, setSection };
+  const knowsLpr = knowsSection(general, "lpr");
+  const cameraType = cam ? cameraTypeOf(cam.tags, { frigateLpr: knowsLpr ? sectionEnabled(general, "lpr") : undefined, looksProvision: isProvisionCamera(cam) }) : "generic";
+  const tabs = buildCameraTabs({
+    sections,
+    generalSections: GENERAL_SECTIONS,
+    ptz: !!cam?.onvif_capabilities?.has_ptz || !!cam?.tags?.includes("ptz"),
+    fisheye: isFisheyeTagged(cam?.tags),
+    analytics: knowsLpr || knowsSection(general, "face_recognition") || provision || !!cam?.lpr || !!cam?.onvif_capabilities?.has_analytics,
+    provision,
+    cameraWeb: canOpenCameraWeb,
+  });
+  const owner = tabOfSection(tabs, activeSection);
+  const tab = owner ?? tabs[0]!;
+  const section = owner ? activeSection : (tab.sections[0] ?? GENERAL);
+  const dirtyTabs = new Set<CameraTabId>(dirty.flatMap((s) => [...tabs.filter((t) => t.sections.includes(s)).map((t) => t.id), ...(GENERAL_SECTIONS.includes(s) ? (["general"] as const) : [])]));
+  const isPseudo = section.startsWith("__");
+  const server = servers.data?.find((s) => s.id === serverId);
+  const onApplyToFrigate = (patch: Record<string, unknown>) => {
+    setEdits((e) => ({ ...e, onvif: patch }));
+    setActive("onvif");
+  };
+  const openBulk = () => { setBulkTargets([cameraId]); setBulkResults([]); bulkApply.reset(); setBulkReviewing(true); };
+  const discard = () => { setEdits({}); apply.reset(); };
+  const canSave = !readOnly && dirty.length > 0 && errorCount === 0;
 
   return (
     <div className="mx-auto flex max-w-7xl flex-col gap-5">
@@ -350,419 +359,128 @@ export function FrigateCameraConfig() {
         error={apply.error ? new Error(`${apply.error.message} Las secciones anteriores pudieron aplicarse: revisa el historial o recarga para ver el estado actual.`) : null}
       />
 
-      {/* Avigilon HUD Viewfinder & Specs Header */}
-      <CameraIdentity name={doc.data.camera_name} version={version} config={config} camera={camera.data} cameraId={cameraId} />
-
-      {/* Nx Witness / Avigilon Control Room Layout: Left Sidebar + Main Settings */}
-      <div className="grid grid-cols-1 md:grid-cols-[260px_1fr] lg:grid-cols-[280px_1fr] gap-6 items-start">
-        {/* Left Sidebar Navigation */}
-        <aside className="flex flex-col gap-3 rounded-m3-2xl border border-outline-variant/60 bg-surface-1 p-3 shadow-sm md:sticky md:top-4">
-          <div className="px-3 py-2 flex items-center justify-between border-b border-outline-variant/40">
-            <span className="font-mono text-xs font-bold text-muted uppercase tracking-wider">Opciones de Cámara</span>
-            {dirty.length > 0 && (
-              <span className="rounded-m3-xs bg-primary/20 px-2 py-0.5 text-[10px] font-bold text-primary animate-pulse">
-                {dirty.length} {dirty.length === 1 ? "cambio" : "cambios"}
-              </span>
-            )}
-          </div>
-
-          <nav aria-label="Secciones de configuración" className="flex flex-col gap-1.5">
-            {/* 1. General */}
-            <div className="flex flex-col gap-1 rounded-m3-xl border border-outline-variant/40 bg-surface-2 p-1.5">
-              <div className="flex items-center gap-1">
-                <button
-                  type="button"
-                  aria-current={activeSection === GENERAL ? "page" : undefined}
-                  onClick={() => setActive(GENERAL)}
-                  className={cn(
-                    "flex min-h-10 flex-1 items-center gap-2 rounded-m3-lg px-3 text-xs font-bold transition-colors text-left",
-                    activeSection === GENERAL
-                      ? "bg-primary text-on-primary shadow-sm"
-                      : "text-on-surface hover:bg-surface-3"
-                  )}
-                >
-                  <Icon icon={SlidersHorizontal} size="xs" />
-                  <span>General</span>
-                  {GENERAL_SECTIONS.some((g) => dirty.includes(g)) && <span aria-label="con cambios" className="ml-auto text-primary">●</span>}
-                </button>
-              </div>
-            </div>
-
-            {/* 2. Detección y Analítica */}
-            <div className="flex flex-col gap-1 rounded-m3-xl border border-outline-variant/40 bg-surface-2 p-1.5">
-              <button
-                type="button"
-                aria-current={activeSection === "detect" ? "page" : undefined}
-                onClick={() => setActive("detect")}
-                className={cn(
-                  "flex min-h-10 w-full items-center justify-between rounded-m3-lg px-3 text-xs font-bold transition-colors text-left",
-                  activeSection === "detect"
-                    ? "bg-primary text-on-primary shadow-sm"
-                    : "text-on-surface hover:bg-surface-3"
-                )}
-              >
-                <span className="flex items-center gap-2">
-                  <Icon icon={Activity} size="xs" />
-                  <span>Detección</span>
-                </span>
-                <span className="flex items-center gap-1.5">
-                  {dirty.includes("detect") && <span aria-label="con cambios" className="text-primary animate-pulse">●</span>}
-                  <LiveBadge live={isLiveSection("detect")} />
-                </span>
-              </button>
-              <div className="grid grid-cols-2 gap-1 pt-0.5">
-                <button
-                  type="button"
-                  aria-current={activeSection === "objects" ? "page" : undefined}
-                  onClick={() => setActive("objects")}
-                  className={cn(
-                    "flex items-center justify-between rounded-m3-md px-2.5 py-1.5 text-xs font-bold transition-colors",
-                    activeSection === "objects"
-                      ? "bg-primary text-on-primary"
-                      : "text-on-surface-variant hover:bg-surface-3"
-                  )}
-                >
-                  <span className="flex items-center gap-1.5">
-                    <Icon icon={Sparkles} size="xs" />
-                    <span>Objetos</span>
-                  </span>
-                  {dirty.includes("objects") && <span className="text-primary">●</span>}
-                </button>
-                <button
-                  type="button"
-                  aria-current={activeSection === "motion" ? "page" : undefined}
-                  onClick={() => setActive("motion")}
-                  className={cn(
-                    "flex items-center justify-between rounded-m3-md px-2.5 py-1.5 text-xs font-bold transition-colors",
-                    activeSection === "motion"
-                      ? "bg-primary text-on-primary"
-                      : "text-on-surface-variant hover:bg-surface-3"
-                  )}
-                >
-                  <span className="flex items-center gap-1.5">
-                    <Icon icon={Video} size="xs" />
-                    <span>Movimiento</span>
-                  </span>
-                  {dirty.includes("motion") && <span className="text-primary">●</span>}
-                </button>
-              </div>
-            </div>
-
-            {/* 3. Grabación y Capturas */}
-            <div className="flex flex-col gap-1 rounded-m3-xl border border-outline-variant/40 bg-surface-2 p-1.5">
-              <button
-                type="button"
-                aria-current={activeSection === "record" ? "page" : undefined}
-                onClick={() => setActive("record")}
-                className={cn(
-                  "flex min-h-10 w-full items-center justify-between rounded-m3-lg px-3 text-xs font-bold transition-colors text-left",
-                  activeSection === "record"
-                    ? "bg-primary text-on-primary shadow-sm"
-                    : "text-on-surface hover:bg-surface-3"
-                )}
-              >
-                <span className="flex items-center gap-2">
-                  <Icon icon={HardDrive} size="xs" />
-                  <span>Grabación</span>
-                </span>
-                <span className="flex items-center gap-1.5">
-                  {dirty.includes("record") && <span aria-label="con cambios" className="text-primary animate-pulse">●</span>}
-                  <LiveBadge live={isLiveSection("record")} />
-                </span>
-              </button>
-              <div className="pt-0.5">
-                <button
-                  type="button"
-                  aria-current={activeSection === "snapshots" ? "page" : undefined}
-                  onClick={() => setActive("snapshots")}
-                  className={cn(
-                    "flex w-full items-center justify-between rounded-m3-md px-2.5 py-1.5 text-xs font-bold transition-colors",
-                    activeSection === "snapshots"
-                      ? "bg-primary text-on-primary"
-                      : "text-on-surface-variant hover:bg-surface-3"
-                  )}
-                >
-                  <span className="flex items-center gap-1.5">
-                    <Icon icon={Camera} size="xs" />
-                    <span>Capturas</span>
-                  </span>
-                  {dirty.includes("snapshots") && <span className="text-primary">●</span>}
-                </button>
-              </div>
-            </div>
-
-            {/* 4. Zonas y Revisión */}
-            <div className="flex flex-col gap-1 rounded-m3-xl border border-outline-variant/40 bg-surface-2 p-1.5">
-              <button
-                type="button"
-                aria-current={activeSection === "zones" ? "page" : undefined}
-                onClick={() => setActive("zones")}
-                className={cn(
-                  "flex min-h-10 w-full items-center justify-between rounded-m3-lg px-3 text-xs font-bold transition-colors text-left",
-                  activeSection === "zones"
-                    ? "bg-primary text-on-primary shadow-sm"
-                    : "text-on-surface hover:bg-surface-3"
-                )}
-              >
-                <span className="flex items-center gap-2">
-                  <Icon icon={Layers} size="xs" />
-                  <span>Zonas</span>
-                </span>
-                <span className="flex items-center gap-1.5">
-                  {dirty.includes("zones") && <span aria-label="con cambios" className="text-primary animate-pulse">●</span>}
-                  <LiveBadge live={isLiveSection("zones")} />
-                </span>
-              </button>
-              <div className="pt-0.5">
-                <button
-                  type="button"
-                  aria-current={activeSection === "review" ? "page" : undefined}
-                  onClick={() => setActive("review")}
-                  className={cn(
-                    "flex w-full items-center justify-between rounded-m3-md px-2.5 py-1.5 text-xs font-bold transition-colors",
-                    activeSection === "review"
-                      ? "bg-primary text-on-primary"
-                      : "text-on-surface-variant hover:bg-surface-3"
-                  )}
-                >
-                  <span className="flex items-center gap-1.5">
-                    <Icon icon={Eye} size="xs" />
-                    <span>Revisión y Alertas</span>
-                  </span>
-                  {dirty.includes("review") && <span className="text-primary">●</span>}
-                </button>
-              </div>
-            </div>
-
-            {/* 5. Modo Fisheye / 360° */}
-            <div className="flex flex-col gap-1 rounded-m3-xl border border-outline-variant/40 bg-surface-2 p-1.5">
-              <button
-                type="button"
-                aria-current={activeSection === FISHEYE ? "page" : undefined}
-                onClick={() => setActive(FISHEYE)}
-                className={cn(
-                  "flex min-h-10 w-full items-center justify-between rounded-m3-lg px-3 text-xs font-bold transition-colors text-left",
-                  activeSection === FISHEYE
-                    ? "bg-primary text-on-primary shadow-sm"
-                    : "text-on-surface hover:bg-surface-3"
-                )}
-              >
-                <span className="flex items-center gap-2">
-                  <Icon icon={Compass} size="xs" />
-                  <span>Fisheye / 360°</span>
-                </span>
-                {(camera.data?.tags?.includes("fisheye") || camera.data?.tags?.includes("ojo_de_pez")) && (
-                  <span className="rounded-m3-xs bg-cyan-400/20 text-cyan-300 px-1 py-0.5 text-[9px] font-mono">
-                    Activo
-                  </span>
-                )}
-              </button>
-            </div>
-
-            {/* 6. Modo Provision LPR */}
-            {(isProvisionCamera(camera.data) || camera.data?.tags?.includes("provision") || activeSection === PROVISION) && (
-              <div className="flex flex-col gap-1 rounded-m3-xl border border-outline-variant/40 bg-surface-2 p-1.5">
-                <button
-                  type="button"
-                  aria-current={activeSection === PROVISION ? "page" : undefined}
-                  onClick={() => setActive(PROVISION)}
-                  className={cn(
-                    "flex min-h-10 w-full items-center justify-between rounded-m3-lg px-3 text-xs font-bold transition-colors text-left",
-                    activeSection === PROVISION
-                      ? "bg-primary text-on-primary shadow-sm"
-                      : "text-on-surface hover:bg-surface-3"
-                  )}
-                >
-                  <span className="flex items-center gap-2">
-                    <Icon icon={Car} size="xs" />
-                    <span>Provision LPR</span>
-                  </span>
-                  <span className="flex items-center gap-1">
-                    {camera.data?.tags?.includes("provision") &&
-                      !camera.data?.onvif_capabilities?.manufacturer?.toLowerCase().includes("provision") && (
-                        <span className="rounded-m3-xs bg-primary/20 text-primary px-1.5 py-0.5 text-[9px] font-mono font-bold">
-                          Forzada
-                        </span>
-                      )}
-                    {camera.data?.onvif_capabilities?.manufacturer?.toLowerCase().includes("provision") && (
-                      <span className="rounded-m3-xs bg-ok/20 text-ok px-1.5 py-0.5 text-[9px] font-mono font-bold">
-                        ONVIF
-                      </span>
-                    )}
-                  </span>
-                </button>
-              </div>
-            )}
-
-            {/* Web propia de la cámara, a través del agente */}
-            {canOpenCameraWeb && (
-              <div className="flex flex-col gap-1 rounded-m3-xl border border-outline-variant/40 bg-surface-2 p-1.5">
-                <button
-                  type="button"
-                  aria-current={activeSection === CAMERA_WEB ? "page" : undefined}
-                  onClick={() => setActive(CAMERA_WEB)}
-                  className={cn(
-                    "flex min-h-10 w-full items-center justify-between rounded-m3-lg px-3 text-xs font-bold transition-colors text-left",
-                    activeSection === CAMERA_WEB
-                      ? "bg-primary text-on-primary shadow-sm"
-                      : "text-on-surface hover:bg-surface-3"
-                  )}
-                >
-                  <span className="flex items-center gap-2">
-                    <Icon icon={Globe} size="xs" />
-                    <span>Web de la cámara</span>
-                  </span>
-                </button>
-              </div>
-            )}
-
-            {/* 6. Secciones adicionales avanzadas */}
-            {otherSections.map((s) => {
-              const live = isLiveSection(s);
-              const SIcon = getSectionIcon(s);
-              return (
-                <button
-                  key={s}
-                  type="button"
-                  aria-current={activeSection === s ? "page" : undefined}
-                  onClick={() => setActive(s)}
-                  className={cn(
-                    "flex min-h-10 w-full items-center justify-between rounded-m3-lg px-3 text-xs font-bold transition-colors text-left",
-                    activeSection === s
-                      ? "bg-primary text-on-primary shadow-sm"
-                      : "text-on-surface hover:bg-surface-2"
-                  )}
-                >
-                  <span className="flex items-center gap-2">
-                    <Icon icon={SIcon} size="xs" />
-                    <span>{sectionLabel(s)}</span>
-                  </span>
-                  <span className="flex items-center gap-1.5">
-                    {dirty.includes(s) && <span aria-label="con cambios" className="text-primary">●</span>}
-                    <LiveBadge live={live} />
-                  </span>
-                </button>
-              );
-            })}
-
-            {/* 7. Historial */}
-            <button
-              type="button"
-              aria-current={activeSection === HISTORY ? "page" : undefined}
-              onClick={() => setActive(HISTORY)}
-              className={cn(
-                "flex min-h-10 w-full items-center gap-2 rounded-m3-lg px-3 text-xs font-bold transition-colors text-left mt-2 border-t border-outline-variant/40 pt-3",
-                activeSection === HISTORY
-                  ? "bg-primary text-on-primary shadow-sm"
-                  : "text-on-surface hover:bg-surface-2"
-              )}
-            >
-              <Icon icon={History} size="xs" />
-              <span>Historial</span>
-            </button>
-          </nav>
-        </aside>
-
-        {/* Right Main Content Section */}
-        <section
-          aria-label={
-            activeSection === HISTORY
-              ? "Historial"
-              : activeSection === GENERAL
-              ? t("common.general")
-              : activeSection === FISHEYE
-              ? "Fisheye"
-              : activeSection === PROVISION
-              ? "Provision LPR"
-              : activeSection === CAMERA_WEB
-              ? "Acceso web a la cámara"
-              : sectionLabel(activeSection ?? "")
-          }
-          className="flex min-w-0 flex-1 flex-col gap-5 rounded-m3-2xl bg-surface-1 p-5 border border-outline-variant/60 shadow-sm"
-        >
-          {activeSection === GENERAL ? (
-            <CameraGeneral
-              cameraId={cameraId}
-              canManage={can(me.data, "cameras.manage")}
-              frigate={{ root, camProps, config, doc: doc.data, ctx, valueOf, setSection }}
-              onApplyToFrigate={(patch) => {
-                setEdits((e) => ({ ...e, onvif: patch }));
-                setActive("onvif");
-              }}
+      <CameraHeader
+        name={doc.data.camera_name}
+        serverName={server?.name}
+        chips={statusChips(cam, config)}
+        actions={
+          <>
+            <Button variant="primary" disabled={!canSave} onClick={() => setReviewing(true)}>Guardar</Button>
+            <Button variant="text" disabled={!dirty.length} onClick={discard}>Descartar cambios</Button>
+            {canOpenCameraWeb && <Button variant="tonal" onClick={() => setActive(CAMERA_WEB)}>Abrir interfaz web</Button>}
+            <MoreActions
+              actions={[
+                { id: "bulk", label: "Aplicar a varias cámaras", disabled: readOnly || !dirty.length || errorCount > 0 || !serverId, onSelect: openBulk },
+                { id: "onvif", label: "Capacidades ONVIF", onSelect: () => setActive(ONVIF_INFO) },
+                { id: "history", label: "Historial de cambios", onSelect: () => setActive(HISTORY) },
+              ]}
             />
-          ) : activeSection === FISHEYE ? (
-            <FisheyeSection
-              cameraId={cameraId}
-              cameraName={doc.data.camera_name}
-              snapshotUrl={`/media/v1/cameras/${cameraId}/snapshot.jpg`}
-              canManage={!readOnly}
-            />
-          ) : activeSection === PROVISION ? (
-            camera.data && (
-              <ProvisionLprSection
-                camera={camera.data}
-                onCameraUpdate={() => {
-                  void qc.invalidateQueries({ queryKey: ["cameras", cameraId] });
-                  void qc.invalidateQueries({ queryKey: ["cameras"] });
-                }}
-              />
-            )
-          ) : activeSection === CAMERA_WEB ? (
-            <CameraWebView cameraId={cameraId} />
-          ) : activeSection === HISTORY ? (
-            <FrigateHistory
-              serverId={doc.data.server_id}
-              cameraId={cameraId}
-              secretsVisible={secretsVisible}
-              canRollback={!readOnly && secretsVisible}
-              onRestored={() => setNeedsRestart(true)}
-            />
-          ) : (
-            activeSection && (
-              <SectionPanel
-                section={activeSection}
-                schema={camProps[activeSection]}
-                value={valueOf(activeSection)}
-                onChange={(v) => setEdits((e) => ({ ...e, [activeSection]: v }))}
-                ctx={ctx}
-                camera={doc.data}
-                config={config}
-                onEditZones={() => setZoneEditor(true)}
-              />
-            )
-          )}
+          </>
+        }
+      />
 
-          {activeSection !== HISTORY &&
-            activeSection !== GENERAL &&
-            activeSection !== FISHEYE &&
-            activeSection !== PROVISION &&
-            activeSection !== CAMERA_WEB &&
-            Object.entries(errors).filter(([p]) => p.split(".")[0] === activeSection).length > 0 && (
-              <p role="alert" className="text-xs text-bad">
-                Hay valores no válidos en esta sección.
-              </p>
-            )}
-        </section>
+      <div className="flex flex-col gap-3 lg:flex-row lg:items-stretch">
+        <CameraPreview cameraId={cameraId} name={doc.data.camera_name} serverId={serverId} initialQuality={cam?.default_live_quality} />
+        <CameraSummaryCards
+          origin={[
+            { label: "Servidor", value: server?.name || NONE },
+            { label: "Motor", value: version ? `Frigate ${version}` : "Frigate" },
+            { label: "Cámara", value: cam?.remote_name || NONE },
+          ]}
+          video={videoRows(cam, config)}
+          device={deviceRows(cam, config)}
+          capabilities={capabilityList(cam, config)}
+        />
       </div>
 
-      {!readOnly && (
-        <div className="sticky bottom-0 z-10 flex flex-wrap items-center justify-between gap-2 rounded-m3-xl bg-surface-3 px-5 py-3 shadow-md">
-          <span role="status" className="text-sm text-muted">
-            {dirty.length ? `${dirty.length} ${dirty.length === 1 ? "sección modificada" : "secciones modificadas"}` : "Sin cambios pendientes"}
-            {errorCount > 0 && <span className="text-bad"> · {errorCount} {errorCount === 1 ? "error" : "errores"}</span>}
-          </span>
-          <div className="flex gap-2">
-            <Button variant="text" disabled={!dirty.length} onClick={() => { setEdits({}); apply.reset(); }}>Descartar</Button>
-            <Button
-              variant="secondary"
-              disabled={!dirty.length || errorCount > 0 || !serverId}
-              onClick={() => { setBulkTargets([cameraId]); setBulkResults([]); bulkApply.reset(); setBulkReviewing(true); }}
+      <CameraTabs
+        tabs={tabs}
+        active={tab.id}
+        dirtyTabs={dirtyTabs}
+        onSelect={(t) => setActive(t.sections[0] ?? GENERAL)}
+      />
+
+      {tab.sections.length > 1 && (
+        <nav aria-label={`Subsecciones de ${tab.label}`} className="flex flex-wrap gap-2">
+          {tab.sections.map((s) => (
+            <button
+              key={s}
+              type="button"
+              aria-current={section === s ? "page" : undefined}
+              onClick={() => setActive(s)}
+              className={cn(
+                "inline-flex min-h-9 items-center gap-2 rounded-m3-lg px-3 text-xs font-bold transition-colors",
+                section === s ? "bg-primary text-on-primary" : "bg-surface-2 text-on-surface hover:bg-surface-3"
+              )}
             >
-              Aplicar a varias cámaras
-            </Button>
-            <Button variant="primary" disabled={!dirty.length || errorCount > 0} onClick={() => setReviewing(true)}>Revisar cambios</Button>
-          </div>
-        </div>
+              {sectionTitle(s)}
+              {dirty.includes(s) && <span aria-label="con cambios">●</span>}
+              {!s.startsWith("__") && <LiveBadge live={isLiveSection(s)} />}
+            </button>
+          ))}
+        </nav>
+      )}
+
+      <section
+        aria-label={section === CAMERA_WEB ? "Acceso web a la cámara" : sectionTitle(section)}
+        className="flex min-w-0 flex-1 flex-col gap-5 rounded-m3-2xl bg-surface-1 p-5 border border-outline-variant/60 shadow-sm"
+      >
+        {tab.id === "analytics" && cameraType === "lpr_frigate" && section !== PROVISION && <LprTestCard cameraId={cameraId} engine="frigate" />}
+        {tab.sections.length === 0 ? (
+          <p className="text-sm text-muted">Esta versión de Frigate no expone ajustes en esta pestaña.</p>
+        ) : section === GENERAL ? (
+          <CameraGeneral cameraId={cameraId} canManage={canManageCamera} frigate={general} onApplyToFrigate={onApplyToFrigate} />
+        ) : section === FISHEYE ? (
+          <FisheyeSection
+            cameraId={cameraId}
+            cameraName={doc.data.camera_name}
+            snapshotUrl={`/media/v1/cameras/${cameraId}/snapshot.jpg`}
+            canManage={!readOnly}
+          />
+        ) : section === PROVISION ? (
+          cam && (
+            <ProvisionLprSection
+              camera={cam}
+              onCameraUpdate={() => {
+                void qc.invalidateQueries({ queryKey: ["cameras", cameraId] });
+                void qc.invalidateQueries({ queryKey: ["cameras"] });
+              }}
+            />
+          )
+        ) : section === CAMERA_WEB ? (
+          <CameraWebView cameraId={cameraId} />
+        ) : section === ONVIF_INFO || section === PTZ_CONTROL ? (
+          <CameraOnvifPanel cameraId={cameraId} camera={cam} canManage={canManageCamera} onApplyToFrigate={onApplyToFrigate} />
+        ) : section === HISTORY ? (
+          <FrigateHistory
+            serverId={doc.data.server_id}
+            cameraId={cameraId}
+            secretsVisible={secretsVisible}
+            canRollback={!readOnly && secretsVisible}
+            onRestored={() => setNeedsRestart(true)}
+          />
+        ) : (
+          <SectionPanel
+            section={section}
+            schema={camProps[section]}
+            value={valueOf(section)}
+            onChange={(v) => setEdits((e) => ({ ...e, [section]: v }))}
+            ctx={ctx}
+            camera={doc.data}
+            config={config}
+            onEditZones={() => setZoneEditor(true)}
+          />
+        )}
+
+        {!isPseudo && Object.keys(errors).some((p) => p.split(".")[0] === section) && (
+          <p role="alert" className="text-xs text-bad">
+            Hay valores no válidos en esta sección.
+          </p>
+        )}
+      </section>
+
+      {!readOnly && (
+        <PendingChangesBar count={dirty.length} errorCount={errorCount} onDiscard={discard} onReview={() => setReviewing(true)} onSave={() => setReviewing(true)} />
       )}
 
       {zoneEditor && (
@@ -846,125 +564,11 @@ export function FrigateCameraConfig() {
 
 function displayEndpointHost(endpoint: string): string {
   try {
-    const parsed = new URL(endpoint);
-    return parsed.hostname;
+    return new URL(endpoint).hostname;
   } catch {
     return endpoint;
   }
 }
-
-function CameraIdentity({
-  name,
-  version,
-  config,
-  camera,
-  cameraId,
-}: {
-  name: string;
-  version: string;
-  config: Record<string, unknown>;
-  camera?: Schemas["Camera"];
-  cameraId?: string;
-}) {
-  const [imgError, setImgError] = useState(false);
-  const detect = isRec(config.detect) ? config.detect : undefined;
-  const width = typeof detect?.width === "number" ? detect.width : undefined;
-  const height = typeof detect?.height === "number" ? detect.height : undefined;
-  const fps = typeof detect?.fps === "number" ? detect.fps : undefined;
-  const onvifCaps = camera?.onvif_capabilities;
-  const isOnline = camera?.enabled && camera.status === "online";
-  const snapshotUrl = cameraId ? `/media/v1/cameras/${cameraId}/snapshot.jpg?h=360` : undefined;
-
-  return (
-    <div className="flex flex-col gap-4 rounded-m3-2xl border border-outline-variant/60 bg-gradient-to-b from-surface-1 to-surface-dim p-4 sm:p-5 shadow-sm">
-      <div className="flex flex-col gap-5 lg:flex-row lg:items-stretch lg:gap-6">
-        {/* Avigilon Live Snapshot Viewfinder */}
-        {snapshotUrl && (
-          <div className="relative aspect-video w-full shrink-0 overflow-hidden rounded-m3-xl border border-outline-variant/80 bg-black/80 sm:w-80 lg:w-96 shadow-inner">
-            {!imgError ? (
-              <img
-                src={snapshotUrl}
-                alt={`Vista previa de ${name}`}
-                className="size-full object-cover"
-                onError={() => setImgError(true)}
-              />
-            ) : (
-              <div className="flex size-full flex-col items-center justify-center gap-2 text-muted">
-                <Icon icon={Video} size="md" className="opacity-40" />
-                <span className="font-mono text-xs">Sin vista previa</span>
-              </div>
-            )}
-            {/* Avigilon HUD Overlays */}
-            <div className="pointer-events-none absolute inset-0 flex flex-col justify-between p-2.5 bg-gradient-to-t from-black/70 via-transparent to-black/60">
-              <div className="flex items-center justify-between gap-2">
-                <span className="flex items-center gap-1.5 rounded-m3-xs bg-black/60 px-2 py-0.5 font-mono text-[10px] font-bold tracking-wider text-white backdrop-blur-md">
-                  <span className={cn("size-2 rounded-full", isOnline ? "bg-ok animate-pulse" : "bg-muted")} />
-                  {isOnline ? "EN VIVO" : camera?.enabled ? "ONLINE" : "OFFLINE"}
-                </span>
-                <span className="rounded-m3-xs bg-black/60 px-1.5 py-0.5 font-mono text-[10px] text-white/90 backdrop-blur-md">
-                  {width && height ? `${width}×${height}` : "1080p"}
-                </span>
-              </div>
-              <div className="flex items-center justify-between gap-2 text-[10px] font-mono text-white/90">
-                <span className="rounded-m3-xs bg-black/60 px-1.5 py-0.5 backdrop-blur-md">
-                  {fps ? `${fps} FPS` : (camera?.fps ? `${camera.fps.toFixed(1)} FPS` : "Detección activa")}
-                </span>
-                <span className="rounded-m3-xs bg-black/60 px-1.5 py-0.5 backdrop-blur-md">
-                  {camera?.default_live_quality === "main" ? "STREAM MAIN" : "STREAM SUB"}
-                </span>
-              </div>
-            </div>
-          </div>
-        )}
-
-        {/* Avigilon Device Telemetry Header */}
-        <div className="flex min-w-0 flex-1 flex-col justify-between gap-3">
-          <div className="flex flex-col gap-2">
-            <div className="flex flex-wrap items-start justify-between gap-3">
-              <div className="flex flex-col gap-1">
-                <div className="flex flex-wrap items-center gap-2">
-                  <h1 className="text-[22px] font-bold tracking-tight text-ink sm:text-2xl">{name}</h1>
-                  {camera?.lpr && (
-                    <span className="rounded-m3-sm bg-secondary-container px-2 py-0.5 font-mono text-xs font-bold text-on-secondary-container">
-                      LPR
-                    </span>
-                  )}
-                </div>
-                <p className="font-mono text-xs text-muted">
-                  {camera?.remote_name ? `ID / Origen Frigate: ${camera.remote_name}` : `Cámara: ${name}`}
-                  {version && ` · Frigate ${version}`}
-                  {(onvifCaps?.manufacturer || onvifCaps?.model) && ` · ${[onvifCaps.manufacturer, onvifCaps.model].filter(Boolean).join(" ")}`}
-                </p>
-              </div>
-              <LinkButton to="/cameras" variant="tonal" className="self-start text-xs">
-                <Icon icon={ArrowLeft} size="xs" /> Volver a cámaras
-              </LinkButton>
-            </div>
-          </div>
-
-          {/* Telemetry grid (ONVIF facts live in the "Capacidades ONVIF" popup of General) */}
-          <dl className="grid grid-cols-2 gap-2 text-xs">
-            <div className="flex flex-col gap-0.5 rounded-m3-lg border border-outline-variant/40 bg-surface-2 p-3">
-              <dt className="text-muted font-medium">Versión</dt>
-              <dd className="font-mono text-ink font-semibold">{version || "—"}</dd>
-              <span className="truncate text-[10px] text-muted">Frigate NVR</span>
-            </div>
-
-            <div className="flex flex-col gap-0.5 rounded-m3-lg border border-outline-variant/40 bg-surface-2 p-3">
-              <dt className="text-muted font-medium">Resolución</dt>
-              <dd className="font-mono text-ink font-semibold">{width && height ? `${width}×${height}` : "—"}</dd>
-              <span className="font-mono text-[10px] text-muted">
-                {fps ? `${fps} fps` : (camera?.fps ? `${camera.fps.toFixed(1)} fps` : "1080p standard")}
-              </span>
-            </div>
-          </dl>
-        </div>
-      </div>
-    </div>
-  );
-}
-
-
 
 // --- Unified General & Capabilities Panel ------------------------------------------------------
 
