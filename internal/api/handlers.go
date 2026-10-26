@@ -67,6 +67,9 @@ type Handlers struct {
 	RealtimeTracker RealtimeConnTracker
 	GRPCTracker     GRPCConnTracker
 	SessionsTracker SessionConnTracker
+
+	// lprTest replaces the LPR link test's lookups in tests; nil uses the services above.
+	lprTest lprTestSource
 }
 
 var _ gen.StrictServerInterface = (*Handlers)(nil)

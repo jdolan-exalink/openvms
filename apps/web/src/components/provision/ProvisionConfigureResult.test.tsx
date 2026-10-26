@@ -13,6 +13,14 @@ describe("ProvisionConfigureResult", () => {
     expect(screen.queryByText(/ya reporta/)).not.toBeInTheDocument();
   });
 
+  it("labels the manual steps as instructions and keeps the warning colour for registration problems only", () => {
+    const { container, rerender } = render(<ProvisionConfigureResult result={waiting} />);
+    expect(screen.getByText("Instrucciones manuales")).toBeInTheDocument();
+    expect(container.firstElementChild?.className).not.toContain("text-warn");
+    rerender(<ProvisionConfigureResult result={{ ...waiting, registered: false, registration_error: "agent_unreachable" }} />);
+    expect(container.firstElementChild?.className).toContain("text-warn");
+  });
+
   it("shows success, without the manual warning, once the camera reports in", () => {
     render(<ProvisionConfigureResult result={{ ...waiting, success: true, verified: true, method: "verified", message: "La cámara ya reporta a este agente: la integración está verificada." }} />);
     expect(screen.getByText(/integración está verificada/)).toBeInTheDocument();

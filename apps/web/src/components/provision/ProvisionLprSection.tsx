@@ -19,6 +19,7 @@ import {
 import { api, requestJson, type Schemas, unwrap } from "@/api/client";
 import { Icon } from "@/components/Icon";
 import { type ConfigureResult, ProvisionConfigureResult } from "@/components/provision/ProvisionConfigureResult";
+import { LprTestCard } from "@/components/provision/LprTestCard";
 import { ProvisionIngestionCard } from "@/components/provision/ProvisionIngestionCard";
 import { ProvisionRegistryCard } from "@/components/provision/ProvisionRegistryCard";
 import { Button, ErrorNote, TextInput } from "@/components/ui";
@@ -109,7 +110,7 @@ export function ProvisionLprSection({ camera, onCameraUpdate }: ProvisionLprSect
   const [targetHost, setTargetHost] = useState("");
   const [targetPort, setTargetPort] = useState("7419");
   const [configResult, setConfigResult] = useState<ConfigureResult | null>(null);
-  const [showManualGuide, setShowManualGuide] = useState(false);
+  const [showManualGuide, setShowManualGuide] = useState(true);
 
   const isForced = camera.tags?.includes("provision") ?? false;
   const onvifMfg = camera.onvif_capabilities?.manufacturer;
@@ -191,9 +192,8 @@ export function ProvisionLprSection({ camera, onCameraUpdate }: ProvisionLprSect
     },
     onSuccess: (data) => {
       setConfigResult(data);
-      if (!data.success) {
-        setShowManualGuide(true);
-      }
+      // The configurator only returns the values to enter by hand, so they are always shown.
+      setShowManualGuide(true);
       void statusQuery.refetch();
     },
   });
@@ -439,6 +439,7 @@ export function ProvisionLprSection({ camera, onCameraUpdate }: ProvisionLprSect
             </div>
           </div>
 
+          {showManualGuide && (
           <div className="flex flex-col gap-2">
             <span className="text-[11px] font-bold text-muted uppercase">Parámetros a ingresar en la cámara:</span>
             <div className="flex flex-col gap-1.5">
@@ -467,8 +468,11 @@ export function ProvisionLprSection({ camera, onCameraUpdate }: ProvisionLprSect
               ))}
             </div>
           </div>
+          )}
         </div>
       </div>
+
+      <LprTestCard cameraId={camera.id} engine="provision" />
 
       <ProvisionRegistryCard serverId={camera.server_id} />
       <ProvisionIngestionCard serverId={camera.server_id} />

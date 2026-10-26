@@ -115,23 +115,9 @@ func (h *Handlers) GetCameraProvisionLPRStatusHandler(w http.ResponseWriter, r *
 	_ = json.NewEncoder(w).Encode(res)
 }
 
-// findProvisionCameraStatus finds a camera's entry in the agent's status: by the ID it is registered
-// under, by the address it connects from, or by the names older setups used. An empty address or name
-// never matches an entry that has the same field empty.
+// findProvisionCameraStatus finds a camera's entry in the agent's status; see provision.FindLPRCameraStatus.
 func findProvisionCameraStatus(status map[string]any, camID uuid.UUID, cameraIP, remoteName, displayName string) map[string]any {
-	list, _ := status["cameras"].([]any)
-	for _, item := range list {
-		c, ok := item.(map[string]any)
-		if !ok {
-			continue
-		}
-		cIP, _ := c["camera_ip"].(string)
-		cID, _ := c["camera_id"].(string)
-		if (cameraIP != "" && cIP == cameraIP) || (cID != "" && (cID == remoteName || cID == displayName || cID == camID.String())) {
-			return c
-		}
-	}
-	return nil
+	return provision.FindLPRCameraStatus(status, camID, cameraIP, remoteName, displayName)
 }
 
 // registrationResult says whether the camera was registered on the agent and, if not, why.
