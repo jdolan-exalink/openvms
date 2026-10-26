@@ -128,7 +128,7 @@ func (s *Service) CreateCameraPTZTour(ctx context.Context, actor authz.Actor, ca
 		if err := checker.Require(authz.CamerasManage, cameraResource(cam)); err != nil {
 			return err
 		}
-		row, err := q.CreateCameraPTZTour(ctx, db.CreateCameraPTZTourParams{TenantID: cam.TenantID, CameraID: cam.ID, Name: in.Name, Steps: mustJSON(in.Steps), RepeatCount: int32(in.RepeatCount)})
+		row, err := q.CreateCameraPTZTour(ctx, db.CreateCameraPTZTourParams{TenantID: cam.TenantID, CameraID: cam.ID, Name: in.Name, Steps: mustJSON(in.Steps), RepeatCount: repeatInt32(in.RepeatCount)})
 		if err != nil {
 			return store.Classify(err)
 		}
@@ -153,7 +153,7 @@ func (s *Service) UpdateCameraPTZTour(ctx context.Context, actor authz.Actor, ca
 		if err := checker.Require(authz.CamerasManage, cameraResource(cam)); err != nil {
 			return err
 		}
-		row, err := q.UpdateCameraPTZTour(ctx, db.UpdateCameraPTZTourParams{TenantID: cam.TenantID, CameraID: cam.ID, ID: tourID, Name: in.Name, Steps: mustJSON(in.Steps), RepeatCount: int32(in.RepeatCount)})
+		row, err := q.UpdateCameraPTZTour(ctx, db.UpdateCameraPTZTourParams{TenantID: cam.TenantID, CameraID: cam.ID, ID: tourID, Name: in.Name, Steps: mustJSON(in.Steps), RepeatCount: repeatInt32(in.RepeatCount)})
 		if err != nil {
 			return notFoundOr(store.Classify(err))
 		}
@@ -182,4 +182,9 @@ func (s *Service) DeleteCameraPTZTour(ctx context.Context, actor authz.Actor, ca
 		}
 		return nil
 	})
+}
+
+// repeatInt32 narrows a repeat count already bounded to 0..maxPTZTourRepeat by normalizePTZTour.
+func repeatInt32(n int) int32 {
+	return int32(min(max(n, 0), maxPTZTourRepeat)) //nolint:gosec // clamped to a small range on the line above
 }
