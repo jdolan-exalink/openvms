@@ -163,13 +163,24 @@ func (h *Handlers) UninstallServerAgentOverSSH(ctx context.Context, r gen.Uninst
 	if r.Body.SshPort < 1 || r.Body.SshPort > 65535 {
 		return nil, &provision.ValidationError{Msg: "ssh_port must be between 1 and 65535"}
 	}
-	job, err := h.Provision.StartServerAgentUninstall(ctx, a, r.ServerId, provision.AgentUninstallStartRequest{
-		SSHPort: uint16(r.Body.SshPort), Password: *r.Body.SshPassword,
-	})
+	job, err := h.Provision.StartServerAgentUninstall(ctx, a, r.ServerId, agentUninstallStartRequest(r.Body))
 	if err != nil {
 		return nil, err
 	}
 	return gen.UninstallServerAgentOverSSH202JSONResponse(serverAgentInstallJob(job)), nil
+}
+
+// agentUninstallStartRequest maps the body; an omitted config_action means keep and an omitted
+// discard_backup means false. An unknown config_action is rejected later by the provision service.
+func agentUninstallStartRequest(body *gen.ServerAgentUninstallRequest) provision.AgentUninstallStartRequest {
+	out := provision.AgentUninstallStartRequest{SSHPort: uint16(body.SshPort), Password: *body.SshPassword, ConfigAction: provision.ConfigActionKeep}
+	if body.ConfigAction != nil {
+		out.ConfigAction = string(*body.ConfigAction)
+	}
+	if body.DiscardBackup != nil {
+		out.DiscardBackup = *body.DiscardBackup
+	}
+	return out
 }
 
 func (h *Handlers) GetServerAgentUninstallJob(ctx context.Context, r gen.GetServerAgentUninstallJobRequestObject) (gen.GetServerAgentUninstallJobResponseObject, error) {
