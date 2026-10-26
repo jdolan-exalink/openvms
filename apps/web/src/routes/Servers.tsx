@@ -1785,7 +1785,6 @@ export function LanNetworkMeters({
   const lanIface = lanInterfaces.find((i) => i.role === "monitoring" || (i.is_default && i !== cctvIface))
     ?? lanInterfaces.find((i) => i !== cctvIface)
     ?? (lanInterfaces.length === 1 && cctvIface == null ? lanInterfaces[0] : undefined);
-  const extraInterfaces = lanInterfaces.filter((i) => i !== cctvIface && i !== lanIface);
 
   return (
     <div className="flex flex-col gap-2 w-full" role="region" aria-label={t("servers.agentNetworkLive")}>
@@ -1821,17 +1820,6 @@ export function LanNetworkMeters({
           </div>
         )}
       </div>
-      {extraInterfaces.length > 0 && (
-        <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 w-full">
-          {extraInterfaces.map((iface) => (
-            <LanInterfaceCard
-              key={iface.name}
-              iface={iface}
-              samples={getNetworkHistory(`${serverId}:${iface.name}`)}
-            />
-          ))}
-        </div>
-      )}
     </div>
   );
 }
