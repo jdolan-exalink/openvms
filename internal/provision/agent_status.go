@@ -153,6 +153,8 @@ func (s *Service) UpdateAgent(ctx context.Context, actor authz.Actor, serverID u
 	for {
 		last, err = s.AgentStatus(ctx, actor, serverID)
 		if err == nil && last.Installed && last.Version == agent.Version && last.Error == "" {
+			// An agent deployed before backups existed gets its copy once it runs this version.
+			s.ensureBackupInBackground(ctx, actor, serverID, "update")
 			return last, nil
 		}
 		if time.Now().After(deadline) {

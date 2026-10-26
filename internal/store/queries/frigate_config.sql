@@ -14,3 +14,11 @@ LIMIT @max_rows;
 
 -- name: GetFrigateConfigRevision :one
 SELECT * FROM frigate_config_revisions WHERE id = @id AND server_id = @server_id;
+
+-- name: GetEarliestFrigateConfigBefore :one
+-- The config.yml as it was before OpenVMS first changed it: the before_yaml of the oldest revision
+-- of the server (any kind) that recorded one.
+SELECT before_yaml FROM frigate_config_revisions
+WHERE server_id = @server_id AND before_yaml <> ''
+ORDER BY created_at ASC, id ASC
+LIMIT 1;
