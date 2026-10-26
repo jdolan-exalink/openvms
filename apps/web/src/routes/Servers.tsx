@@ -94,6 +94,7 @@ export function Servers() {
           open={!!configuringFrigate}
           onClose={() => setConfiguringFrigate(null)}
           canRestart={can(me.data, "servers.restart")}
+          canEdit={can(me.data, "servers.manage")}
         />
       )}
       <ErrorNote error={servers.error} />
@@ -2073,6 +2074,7 @@ function EditServerModal({
           open={frigateEditorOpen}
           onClose={() => setFrigateEditorOpen(false)}
           canRestart={can(me, "servers.restart")}
+          canEdit={can(me, "servers.manage")}
         />
       )}
     </Modal>

@@ -431,4 +431,80 @@ describe("ServerFrigateConfigModal", () => {
       screen.getByText(/Cálculo dinámico y protección de almacenamiento desactivados/i)
     ).toBeInTheDocument();
   });
+
+  describe("global configuration groups", () => {
+    const catalog = {
+      engine: "frigate",
+      categories: [
+        {
+          id: "vehicle",
+          label: "Vehículos",
+          objects: [
+            { id: "vehicle.car", label: "Auto", requires_model: false, supported: true },
+            { id: "vehicle.pickup", label: "Camioneta", requires_model: true, supported: false },
+            { id: "vehicle.bus", label: "Colectivo", requires_model: false, supported: null },
+          ],
+        },
+      ],
+    };
+    const open = (canEdit = true) => {
+      const yaml = `${sampleYaml}ffmpeg:\n  hwaccel_args: preset-vaapi\nmodel:\n  path: /models/custom.tflite\n  width: 320\ngo2rtc:\n  streams: {}\ncameras:\n  patio: {}\n`;
+      const { calls } = setupConfigModal(async (req) => {
+        const url = new URL(req.url);
+        if (url.pathname.includes("/frigate-config/raw") && req.method === "GET") return json({ yaml, version: "0.14.1" });
+        if (url.pathname.endsWith("/object-catalog")) return json(catalog);
+        return undefined as unknown as Response;
+      });
+      renderPage(() => <ServerFrigateConfigModal server={mockServer} open={true} onClose={vi.fn()} canRestart={true} canEdit={canEdit} />);
+      return calls;
+    };
+
+    it("shows the wide catalog with the model support flags", async () => {
+      open();
+      await screen.findByText(/Configuración de Servidor Frigate/i);
+      fireEvent.click(screen.getByRole("button", { name: /Objetos disponibles/i }));
+      const group = await screen.findByRole("group", { name: "Catálogo Vehículos" });
+      expect(group).toHaveTextContent("Auto Soportado");
+      expect(group).toHaveTextContent("Camioneta No soportado por el modelo");
+      expect(group).toHaveTextContent("Colectivo Sin verificar");
+      expect(screen.getByText(/cada cámara elige solo la selección simplificada/i)).toBeInTheDocument();
+    });
+
+    it("shows the model section and the label support counts", async () => {
+      open();
+      await screen.findByText(/Configuración de Servidor Frigate/i);
+      fireEvent.click(screen.getByRole("button", { name: "Modelo" }));
+      expect(await screen.findByText("/models/custom.tflite", { selector: "dd" })).toBeInTheDocument();
+      expect(await screen.findByText(/1 soportadas · 1 no soportadas · 1 sin verificar/)).toBeInTheDocument();
+    });
+
+    it("keeps unclaimed sections reachable under Otros parámetros", async () => {
+      open();
+      await screen.findByText(/Configuración de Servidor Frigate/i);
+      fireEvent.click(screen.getByRole("button", { name: /Otros parámetros/i }));
+      expect(await screen.findByRole("region", { name: "go2rtc" })).toHaveTextContent("streams: {}");
+      expect(screen.getByRole("region", { name: "cameras" })).toBeInTheDocument();
+    });
+
+    it("lists the inherited defaults and edits acceleration through the same save flow", async () => {
+      const calls = open();
+      await screen.findByText(/Configuración de Servidor Frigate/i);
+      fireEvent.click(screen.getByRole("button", { name: /Defaults de cámaras/i }));
+      expect(await screen.findByRole("region", { name: /Grabación \(record\)/ })).toHaveTextContent("days: 7");
+      fireEvent.click(screen.getByRole("button", { name: "Aceleración" }));
+      fireEvent.change(await screen.findByRole("combobox"), { target: { value: "preset-nvidia" } });
+      fireEvent.click(screen.getByRole("button", { name: /Editor YAML/i }));
+      expect(await screen.findByRole("region", { name: /Vista previa de cambios/i })).toHaveTextContent("+ hwaccel_args: preset-nvidia");
+      fireEvent.click(screen.getByRole("button", { name: /Guardar cambios/i }));
+      await waitFor(() => expect(calls.some((c) => c.method === "PUT" && new URL(c.url).pathname.endsWith("/frigate-config/raw"))).toBe(true));
+    });
+
+    it("is read-only without permission", async () => {
+      open(false);
+      await screen.findByText(/Configuración de Servidor Frigate/i);
+      fireEvent.click(screen.getByRole("button", { name: "Aceleración" }));
+      expect(await screen.findByRole("combobox")).toBeDisabled();
+      expect(screen.getByRole("button", { name: /Guardar cambios/i })).toBeDisabled();
+    });
+  });
 });
