@@ -1,6 +1,7 @@
 import { useQuery } from "@tanstack/react-query";
 import type { ReactNode } from "react";
 import { objectCatalogQuery } from "@/api/queries";
+import { EditYamlLink } from "@/components/camera/advanced/YamlEntry";
 import { useCameraChange } from "@/components/camera/CameraChangeProvider";
 import { ProvenanceBadge } from "@/components/camera/profile/ProvenanceBadge";
 import { Switch } from "@/components/ui";
@@ -68,7 +69,10 @@ export function DetectionTab({ serverId, readOnly, settings, onMotion, onObjects
 
       <details className="rounded-m3-lg bg-surface-1">
         <summary className="min-h-11 cursor-pointer px-3 py-2.5 text-xs font-bold">Avanzado de detección (Frigate)</summary>
-        <div className="flex flex-col gap-4 border-t border-outline-variant p-3">{legacy}</div>
+        <div className="flex flex-col gap-4 border-t border-outline-variant p-3">
+          <EditYamlLink section="detect" label="Editar YAML de detección" />
+          {legacy}
+        </div>
       </details>
     </div>
   );

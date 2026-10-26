@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { ANALYTICS_MODULES, analyticsTabVisible, buildCameraTabs, CAMERA_WEB, FISHEYE, GENERAL, HISTORY, INTEGRATIONS_STATUS, isFisheyeTagged, ONVIF_INFO, PROVISION, PTZ_CONTROL, tabOfSection } from "./cameraTabs";
+import { ADVANCED_PANELS, ANALYTICS_MODULES, analyticsTabVisible, buildCameraTabs, CAMERA_WEB, FISHEYE, GENERAL, HISTORY, INTEGRATIONS_STATUS, isFisheyeTagged, ONVIF_INFO, PROVISION, PTZ_CONTROL, tabOfSection } from "./cameraTabs";
 
 const base = { sections: [], ptz: false, fisheye: false, analytics: false, provision: false, cameraWeb: false };
 const ids = (input: Partial<Parameters<typeof buildCameraTabs>[0]>) => buildCameraTabs({ ...base, ...input }).map((t) => t.id);
@@ -46,12 +46,12 @@ describe("buildCameraTabs", () => {
 
   it("sends every remaining section, Fisheye for non-fisheye cameras and the history to Avanzado", () => {
     const tabs = buildCameraTabs({ ...base, sections: ["detect", "onvif", "genai", "audio", "birdseye_x"], generalSections: ["audio"] });
-    expect(tabs.find((t) => t.id === "advanced")!.sections).toEqual(["onvif", "genai", "birdseye_x", FISHEYE, HISTORY]);
+    expect(tabs.find((t) => t.id === "advanced")!.sections).toEqual([ADVANCED_PANELS, "onvif", "genai", "birdseye_x", FISHEYE, HISTORY]);
   });
 
   it("moves Fisheye out of Avanzado when the camera is fisheye", () => {
     const tabs = buildCameraTabs({ ...base, fisheye: true });
-    expect(tabs.find((t) => t.id === "advanced")!.sections).toEqual([HISTORY]);
+    expect(tabs.find((t) => t.id === "advanced")!.sections).toEqual([ADVANCED_PANELS, HISTORY]);
     expect(tabs.find((t) => t.id === "fisheye")!.sections).toEqual([FISHEYE]);
   });
 
