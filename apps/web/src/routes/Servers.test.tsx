@@ -755,6 +755,26 @@ describe("Servers", () => {
         expect(await tone()).toBe("ok");
       });
 
+      it("judges an agent by its version when it exposes no binary identity (plain HTTP listener)", async () => {
+        setup(undefined, undefined, grants, undefined, { installed: true, version: "0.4.4", binary_status: "current", binary_outdated: false, binary_upgrade_available: false, binary_available: { sha256: sha("a"), architecture: "amd64", version: "0.4.4" } });
+        renderPage(Servers);
+        expect(await tone()).toBe("ok");
+        expect(screen.queryByText(/No se pudo verificar el estado del agente/i)).not.toBeInTheDocument();
+      });
+
+      it("offers the update to an agent without identity that is older than the bundled one", async () => {
+        setup(undefined, undefined, grants, undefined, { installed: true, version: "0.4.3", binary_status: "update_available", binary_outdated: true, binary_upgrade_available: true, binary_available: { sha256: sha("a"), architecture: "amd64", version: "0.4.4" } });
+        renderPage(Servers);
+        expect(await screen.findByRole("button", { name: /Actualizar agente/i })).toBeInTheDocument();
+        expect(screen.queryByText(/No se pudo verificar el estado del agente/i)).not.toBeInTheDocument();
+      });
+
+      it("does not trust a current label without identity when the version is older than the bundled one", async () => {
+        setup(undefined, undefined, grants, undefined, { installed: true, version: "0.4.3", binary_status: "current", binary_outdated: false, binary_upgrade_available: false, binary_available: { sha256: sha("a"), architecture: "amd64", version: "0.4.4" } });
+        renderPage(Servers);
+        expect((await screen.findAllByText(/No se pudo verificar el estado del agente/i)).length).toBeGreaterThan(0);
+      });
+
       it("is yellow only when an update is available", async () => {
         setup(undefined, undefined, grants, undefined, { installed: true, version: "0.1.0", binary_status: "update_available", binary_outdated: true, binary_upgrade_available: true, binary_observed: { sha256: sha("1"), architecture: "amd64", version: "0.1.0" }, binary_available: { sha256: sha("2"), architecture: "amd64", version: "0.1.1" } });
         renderPage(Servers);

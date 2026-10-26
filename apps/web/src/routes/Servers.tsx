@@ -1,6 +1,6 @@
 import { useT } from "@/i18n";
 import { agentInstallFailureText, agentUninstallFailureText, safeAgentVersion } from "@/lib/agentJobs/failureText";
-import { isNewerAgentVersion } from "@/lib/agentVersion";
+import { isAtLeastAgentVersion, isNewerAgentVersion } from "@/lib/agentVersion";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Activity, AlertTriangle, ArrowDown, ArrowUp, Camera, Check, Copy, Pencil, Plus, RefreshCw, RotateCcw, Terminal, Trash2 } from "lucide-react";
 import { Link, useSearch } from "@tanstack/react-router";
@@ -1893,6 +1893,17 @@ function problemText(problem: Schemas["ServerProblem"], t: ReturnType<typeof use
 }
 
 function isAgentBinaryCurrent(agent: Schemas["ServerAgent"]) {
+  return hasCurrentDigest(agent) || isCurrentByVersion(agent);
+}
+
+// An agent reached over the plain HTTP listener exposes no binary identity (no /v1/health), so the
+// version it reports decides instead, never the bare status label.
+function isCurrentByVersion(agent: Schemas["ServerAgent"]) {
+  return agent.installed && agent.binary_status === "current" && agent.binary_outdated === false &&
+    !agent.binary_observed?.sha256 && isAtLeastAgentVersion(agent.version, agent.binary_available?.version);
+}
+
+function hasCurrentDigest(agent: Schemas["ServerAgent"]) {
   const observed = agent.binary_observed?.sha256;
   const available = agent.binary_available?.sha256;
   const observedArchitecture = agent.binary_observed?.architecture;
