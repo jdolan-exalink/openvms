@@ -1,5 +1,5 @@
 import { Camera, Maximize2, Minimize2, Pause, Play, Video, Volume2, VolumeX } from "lucide-react";
-import { useState } from "react";
+import { useState, type ReactNode } from "react";
 import { Icon } from "@/components/Icon";
 import { MsePlayer } from "@/components/MsePlayer";
 import { cn } from "@/lib/cn";
@@ -10,7 +10,7 @@ type Quality = "sub" | "main";
  * Permanent preview of the editor: a snapshot until the user plays it, then the same live player
  * Live view uses. It is not a Live view tile: no grid, no layout, only the basic controls.
  */
-export function CameraPreview({ cameraId, name, serverId, initialQuality = "sub" }: { cameraId: string; name: string; serverId?: string; initialQuality?: Quality }) {
+export function CameraPreview({ cameraId, name, serverId, initialQuality = "sub", overlay }: { cameraId: string; name: string; serverId?: string; initialQuality?: Quality; overlay?: ReactNode }) {
   const [playing, setPlaying] = useState(false);
   const [muted, setMuted] = useState(true);
   const [maximized, setMaximized] = useState(false);
@@ -35,6 +35,7 @@ export function CameraPreview({ cameraId, name, serverId, initialQuality = "sub"
         <span className="absolute left-2 top-2 rounded-m3-xs bg-black/60 px-1.5 py-0.5 font-mono text-[10px] font-bold text-white">
           {playing ? "EN VIVO" : "IMAGEN"} · {quality === "main" ? "MAIN" : "SUB"}
         </span>
+        {overlay && <div className="absolute right-2 top-2">{overlay}</div>}
         <div role="toolbar" aria-label="Controles de la vista previa" className="absolute inset-x-2 bottom-2 flex items-center justify-between gap-2">
           <div className="flex gap-1.5">
             <button type="button" className={btn} aria-label={playing ? "Pausar" : "Reproducir"} onClick={() => setPlaying((p) => !p)}>
