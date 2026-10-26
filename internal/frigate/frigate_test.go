@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"net/http/httptest"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -323,5 +324,65 @@ func TestReviewByID(t *testing.T) {
 	}
 	if _, err := a.Review(ctx, "missing"); !errors.Is(err, ErrNotFound) {
 		t.Errorf("missing review: want ErrNotFound, got %v", err)
+	}
+}
+
+func labelsAdapter(t *testing.T, srv *frigatemock.Server) *v017 {
+	t.Helper()
+	srv.Version, srv.User, srv.Password, srv.RequireAuth = "0.17.2", "vms", "pw", true
+	srv.StartedAt = time.Now()
+	ts := httptest.NewServer(srv.Handler())
+	t.Cleanup(ts.Close)
+	a, err := Connect(context.Background(), ConnInfo{BaseURL: ts.URL, Username: "vms", Password: "pw"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	return a.(*v017)
+}
+
+func TestModelLabelsDefaultIsCOCO(t *testing.T) {
+	cams, _ := frigatemock.ParseCameras("a")
+	labels, err := labelsAdapter(t, &frigatemock.Server{Cameras: cams, Store: frigatemock.NewStore(1)}).ModelLabels(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(labels) != 80 {
+		t.Fatalf("COCO has 80 labels, got %d", len(labels))
+	}
+	for _, want := range []string{"person", "car", "motorcycle", "bus", "truck", "bicycle", "dog", "backpack"} {
+		if !slices.Contains(labels, want) {
+			t.Errorf("missing %q", want)
+		}
+	}
+	if slices.Contains(labels, "???") || slices.Contains(labels, "license_plate") {
+		t.Error("placeholders and non-COCO labels must not appear")
+	}
+}
+
+func TestModelLabelsAppliesInlineLabelmap(t *testing.T) {
+	cams, _ := frigatemock.ParseCameras("a")
+	srv := &frigatemock.Server{Cameras: cams, Store: frigatemock.NewStore(1),
+		ModelLabelmap: map[string]string{"0": "persona", "91": "package"}}
+	labels, err := labelsAdapter(t, srv).ModelLabels(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if slices.Contains(labels, "person") || !slices.Contains(labels, "persona") || !slices.Contains(labels, "package") {
+		t.Errorf("overrides not applied: %v", labels)
+	}
+}
+
+func TestModelLabelsCustomFileAndUnreachableAreUnknown(t *testing.T) {
+	cams, _ := frigatemock.ParseCameras("a")
+	srv := &frigatemock.Server{Cameras: cams, Store: frigatemock.NewStore(1), ModelLabelmapPath: "/config/labels.txt"}
+	a := labelsAdapter(t, srv)
+	if _, err := a.ModelLabels(context.Background()); !errors.Is(err, ErrLabelsUnknown) {
+		t.Fatalf("custom labelmap file: want ErrLabelsUnknown, got %v", err)
+	}
+	srv2 := &frigatemock.Server{Cameras: cams, Store: frigatemock.NewStore(1)}
+	b := labelsAdapter(t, srv2)
+	srv2.Offline.Store(true)
+	if _, err := b.ModelLabels(context.Background()); err == nil {
+		t.Fatal("unreachable frigate must return an error")
 	}
 }

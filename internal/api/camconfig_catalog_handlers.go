@@ -30,8 +30,12 @@ func (h *Handlers) GetObjectCatalog(ctx context.Context, r gen.GetObjectCatalogR
 		engine = string(*r.Params.Engine)
 	}
 	var available []string
-	if r.Params.ServerId != nil && h.catalogLabels != nil {
-		if available, err = h.catalogLabels.ServerModelLabels(ctx, a, *r.Params.ServerId); err != nil {
+	labels := h.catalogLabels
+	if labels == nil && h.Inv != nil {
+		labels = h.Inv
+	}
+	if r.Params.ServerId != nil && labels != nil {
+		if available, err = labels.ServerModelLabels(ctx, a, *r.Params.ServerId); err != nil {
 			return nil, err
 		}
 	}
