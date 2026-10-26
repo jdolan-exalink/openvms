@@ -92,6 +92,7 @@ export default {
   agentHttpsRedirectAction: "Open OpenVMS over HTTPS",
   agentHttpsRedirectChecking: "Checking the configured HTTPS port…",
   agentHttpsRedirectFailed: "Could not read the configured HTTPS port. No credentials were sent.",
+  actionsTitle: "Server actions",
   agentInstallPermissionRequired: "This server requires both servers.manage and servers.config.secrets permissions.",
   agentInstallSubmitting: "Submitting…",
   agentInstallSubmit: "Install agent",
