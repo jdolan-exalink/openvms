@@ -41,7 +41,7 @@ Route: inline unless a task has parallel units. Status: all pending.
 - U2 (S1, S23, S18) Universal read model: Go package `internal/camconfig` (normalized `Camera`, capabilities, streams) + Frigate read adapter + `GET /api/v1/cameras/{id}/config`; web reads only this model. Risk: item 3 (new public API).
 - U3 (S15, S19) Write path: desired/effective state, change review with impact, apply, audit; Frigate write adapter wrapping today's section patch. Risk: items 1 and 2 (migration, audit contract).
 - U4 (S7) Video + ONVIF parameters: supported values per device, stream restart notice, Audio section.
-- U5 (S9) Detection: object catalog, categories, mapping Frigate, keep original object. Phase A: catalog package `internal/camconfig/catalog` + docs/object-catalog.md (COMMIT_A). Phase B (API + UI) pending.
+- U5 (S9) Detection: object catalog, categories, mapping Frigate, keep original object. Phase A: catalog package `internal/camconfig/catalog` + docs/object-catalog.md (6c5be61). Phase B (API + UI) pending.
 - U6 (S10) Analytics modules: LPR (Frigate and Provision sources), facial detection vs recognition, color.
 - U7 (S12) PTZ and Fisheye sections.
 - U8 (S10, S12) Provision ISR adapter onto the same model.
