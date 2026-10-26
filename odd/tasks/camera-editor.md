@@ -18,14 +18,14 @@ Facts found by the explorer (L2) that shape the work:
 
 Assumptions (not asked by the user; confirm or drop):
 - A1. The top "camera enabled" switch writes both OpenVMS `cameras.enabled` and Frigate `enabled`, so disabling a camera also stops Frigate from processing it.
-- A2. "Camera type" generic | LPR is a real choice in General that turns the Frigate `lpr` section on and tags the camera; no new database column.
-- A3. The Provision LPR "test" observes: it registers the camera, waits for a keepalive from its IP and reports pass/fail with last seen and counters; it cannot push configuration into the camera.
+- A2. "Camera type" is a real choice in General with three values, stored as tags (no new database column): `generic`, `lpr_frigate` (Frigate's own LPR engine reads the plates: Cementerio) and `lpr_provision` (the camera's integrated Provision analytics send the plates to our agent: Escuela and Ingreso Sur). Changing it only touches the tags and, for `lpr_frigate`, the camera's Frigate `lpr.enabled`.
+- A3. The LPR "test" observes: it registers the camera, waits for a keepalive from its IP and reports pass/fail with last seen and counters; it cannot push configuration into the camera.
 
 ## Tasks
 - [ ] C1 (S1) Open the camera editor on General.
 - [ ] C2 (S3) Move the ONVIF informational data into an "Capacidades ONVIF" popup opened from a button in General.
 - [ ] C3 (S4, A1, A2) General gets the enabled switch on top, input streams, audio, LPR, face recognition, timestamp, audio transcription (only with audio on), best image time and camera type.
-- [ ] C4 (S5, A3) Provision LPR camera: check the REST link camera -> agent, make the analytics and a real "Probar conexión" work, and run it on the real camera.
+- [ ] C4 (S5, A3) LPR cameras: check the REST link camera -> agent for Provision cameras, add a real "Probar conexión" and working analytics; for Frigate-engine cameras check that Frigate LPR is on and plates arrive. Real cameras: Escuela and Ingreso Sur (Provision), Cementerio (Frigate engine); the real run needs the user (no remote access from the build host).
 - [ ] C5 (S9) Camera web view inside the editor (spike first). Moved here from servers-screen-rework T9.
 
 ## Log
@@ -37,3 +37,4 @@ GENERAL: tenemos toda la configuracion de la camara como cuadros, streams, brita
 agregamos Streams de entrada a genereal, switch de camara habilitada arriba de todo, audio, LPR, RECONOCIMIENTO FACIAL, marca de tiempo, transcripcion de audio si esta activo el audio, Tiempo de mejor imagen
 y tipo de camara, genrica o LPR tambien quiero que trabajemoms en la camara Helv01 que es Provision LPR para mejorar y chequear la conexion REST de la camara a nuestro agente al igual que las analiticas y el test quiero que funcione"
 L2 (2026-10-26, explorer map): see "Facts found by the explorer" above; code references are in the editor file and the Provision files named there.
+L3 (2026-10-26, user, verbatim: "Escuela, es la que ya está marcada como LPR y es una camara que tiene la analitica integrada de LPR provision y Ingreso-SUR tambien la Cementerio es una camara con analiticas i6 que frigate usa para leer patentes con su motor interno asi que con estas 3 podemos probar todo hace todo vos y modofica lo necesario"): the test cameras are Escuela and Ingreso Sur (Provision integrated LPR, REST to our agent) and Cementerio (I6 analytics, plates read by Frigate's own engine). The user authorizes making the changes needed; push, PR, merge and deploy still need their own go-ahead.
