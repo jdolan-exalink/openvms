@@ -37,7 +37,7 @@ Assumptions (to confirm):
 ## Tasks
 Route: inline unless a task has parallel units. Status: all pending.
 
-- U1 (S2, S3, S5, S21) Shell: header with state chips, persistent preview with controls, summary cards, dynamic tabs, "N cambios sin guardar" bar, responsive. Content of each tab comes from today's editor; no model change. Risk: none.
+- [x] U1 (S2, S3, S5, S21) done 517a0f1, bc69fcb. Shell: header with state chips, persistent preview with controls, summary cards, dynamic tabs, "N cambios sin guardar" bar, responsive. Content of each tab comes from today's editor; no model change. Risk: none.
 - U2 (S1, S23, S18) Universal read model: Go package `internal/camconfig` (normalized `Camera`, capabilities, streams) + Frigate read adapter + `GET /api/v1/cameras/{id}/config`; web reads only this model. Risk: item 3 (new public API).
 - U3 (S15, S19) Write path: desired/effective state, change review with impact, apply, audit; Frigate write adapter wrapping today's section patch. Risk: items 1 and 2 (migration, audit contract).
 - U4 (S7) Video + ONVIF parameters: supported values per device, stream restart notice, Audio section.
@@ -53,3 +53,4 @@ Route: inline unless a task has parallel units. Status: all pending.
 ## Log
 - L1 (2026-10-26) User: "vamos a trabajar en la UI de configuracion de camara para que sea mas facil la integracioon de las distintas tecnologias soportadas ahora y hacia el futuro, te paso un PRD para que armemos un plan de trabajo" — followed by the PRD "Configuración Universal de Cámaras en OpenVMS" (52 sections). The Specs above quote it; the full text is in the conversation.
 - L2 Findings: today's editor `apps/web/src/routes/FrigateCameraConfig.tsx` is driven by the Frigate JSON schema (`frigateSchemaQuery`, `cameraFrigateDocQuery`, sections ordered from the schema); zones are already OpenVMS-owned (`cameraZonesQuery`); camera groups and bulk edit exist; the Frigate adapter exposes `Capabilities`/`GetCameraConfig` in `internal/frigate`; ONVIF capabilities live in `cameras.onvif_capabilities`.
+- L3 U1 done inline. FrigateCameraConfig.tsx is now header (chips, actions) + persistent preview + summary cards + top tabs + pending-changes bar; the left sidebar is gone. Tab/section mapping lives in `lib/cameraTabs.ts` (unit tested); chips and cards only read the camera row, Frigate config and onvif_capabilities and show a dash otherwise. Existing tests adapted only for navigation (tabs instead of sidebar buttons, "N cambio sin guardar" bar, bulk apply under Más acciones). Deferred: Reiniciar cámara action (S3), preview stream selector is a Sub/Main toggle only, the summary cards use no new API (Origen server name comes from the servers list), Video/PTZ tabs still show Frigate sections until U4/U7.
