@@ -42,6 +42,9 @@ type Camera struct {
 	Fisheye      Fisheye       `json:"fisheye"`
 	Integrations []Integration `json:"integrations"`
 	Overrides    Overrides     `json:"overrides"`
+	// State compares the desired configuration kept by OpenVMS with this (effective) read. The
+	// adapters leave it zero; the service fills it in.
+	State State `json:"state"`
 	// Sources tells where each part of the model came from and whether it could be read.
 	Sources  []Source `json:"sources"`
 	Warnings []string `json:"warnings"`
@@ -176,6 +179,12 @@ type Inventory struct {
 //
 // Read never fails because the engine is down: it returns what inventory knows and marks the
 // engine source unavailable. The error is reserved for unusable input.
+//
+// Plan is pure: it compares a patch with the current model and describes what would change and
+// what it would affect, without touching the engine. Apply writes the patch to the engine;
+// callers verify the result by reading again.
 type Adapter interface {
 	Read(ctx context.Context, in Inventory) (Camera, error)
+	Plan(ctx context.Context, current Camera, patch Patch) (Review, error)
+	Apply(ctx context.Context, patch Patch) error
 }
