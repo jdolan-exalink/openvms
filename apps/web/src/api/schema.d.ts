@@ -1063,6 +1063,34 @@ export interface paths {
         patch: operations["patchCameraFrigateConfig"];
         trace?: never;
     };
+    "/api/v1/cameras/{cameraId}/normalized-config": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                cameraId: string;
+            };
+            cookie?: never;
+        };
+        /**
+         * Get the engine-agnostic configuration model of a camera
+         * @description Requires cameras.view on the camera. Returns the normalized model (identity, device,
+         *     capabilities, streams by role, recording, detection, analytics, zones, PTZ, fisheye,
+         *     integrations, overrides) that adapters build from the camera's engine, so clients never
+         *     depend on engine structures. Stream URLs are reduced to scheme, host and path: credentials
+         *     and query strings are never returned. When the engine cannot be reached the response still
+         *     carries what OpenVMS knows and `sources` marks the engine as unavailable (HTTP 200).
+         *     Fields the engine did not report are omitted, never guessed.
+         */
+        get: operations["getCameraConfig"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/cameras/{cameraId}/onvif/check": {
         parameters: {
             query?: never;
@@ -4717,6 +4745,89 @@ export interface components {
         };
         CameraZoneList: {
             zones: components["schemas"]["CameraZone"][];
+        };
+        /** @description Engine-agnostic configuration model of one camera. */
+        CameraConfig: {
+            identity: {
+                camera_id: string;
+                name: string;
+                remote_name: string;
+                description?: string;
+                location?: string;
+                tags: string[];
+                enabled: boolean;
+            };
+            origin: {
+                /** @description Engine kind */
+                engine: string;
+                engine_version?: string;
+                server_id: string;
+                server_name?: string;
+            };
+            device: {
+                manufacturer?: string;
+                model?: string;
+                firmware?: string;
+                serial_number?: string;
+                address?: string;
+                onvif_version?: string;
+                onvif_profile?: string;
+            };
+            /** @description Only capabilities with positive evidence. */
+            capabilities: ("onvif" | "audio" | "ptz" | "lpr" | "fisheye" | "object_detection" | "recording" | "analytics" | "events")[];
+            /** @description Streams by role; recording is present only when it differs from primary. */
+            streams: {
+                primary?: components["schemas"]["CameraConfigStream"];
+                detection?: components["schemas"]["CameraConfigStream"];
+                recording?: components["schemas"]["CameraConfigStream"];
+            };
+            recording: {
+                enabled?: boolean;
+            };
+            detection: {
+                enabled?: boolean;
+                objects: string[];
+            };
+            analytics: {
+                lpr?: boolean;
+                audio?: boolean;
+            };
+            zones: {
+                name: string;
+                objects: string[];
+            }[];
+            ptz: {
+                supported: boolean;
+                autotracking?: boolean;
+            };
+            fisheye: {
+                supported: boolean;
+            };
+            integrations: {
+                name: string;
+                enabled: boolean;
+            }[];
+            overrides: {
+                default_live_quality?: string;
+            };
+            /** @description Where each part of the model came from and whether it could be read. */
+            sources: {
+                name: string;
+                /** @enum {string} */
+                status: "ok" | "unavailable";
+                detail?: string;
+            }[];
+            warnings: string[];
+        };
+        CameraConfigStream: {
+            name?: string;
+            /** @description Scheme */
+            url?: string;
+            codec?: string;
+            width?: number;
+            height?: number;
+            fps?: number;
+            roles: string[];
         };
         CameraFrigateConfig: {
             /** Format: uuid */
@@ -8555,6 +8666,31 @@ export interface operations {
             403: components["responses"]["Forbidden"];
             404: components["responses"]["NotFound"];
             502: components["responses"]["FrigateUnreachable"];
+        };
+    };
+    getCameraConfig: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                cameraId: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Normalized camera configuration */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["CameraConfig"];
+                };
+            };
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
         };
     };
     checkCameraOnvif: {

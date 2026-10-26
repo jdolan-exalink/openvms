@@ -70,6 +70,9 @@ type Handlers struct {
 	GRPCTracker     GRPCConnTracker
 	SessionsTracker SessionConnTracker
 
+	// camConfig replaces the camera config model's lookups in tests; nil uses Inv.
+	camConfig camConfigSource
+
 	// lprTest replaces the LPR link test's lookups in tests; nil uses the services above.
 	lprTest lprTestSource
 }
