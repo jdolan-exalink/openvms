@@ -4,6 +4,7 @@ package events_test
 
 import (
 	"context"
+	"strings"
 	"testing"
 	"time"
 
@@ -113,7 +114,8 @@ func TestServerEventAlarmModeMigrationAndDefaults(t *testing.T) {
 		Name:          "frigate-new-default",
 		ImportCameras: false,
 		Conn: inventory.ConnInput{
-			BaseURL:  f.env.Mocks["frigate-h01"].URL,
+			// Same mock as the demo server frigate-h01, spelled with a different host so the address is not a duplicate.
+			BaseURL:  strings.Replace(f.env.Mocks["frigate-h01"].URL, "127.0.0.1", "localhost", 1),
 			Username: "admin",
 			Password: "h-pass",
 		},

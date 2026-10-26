@@ -3,6 +3,7 @@ package inventory
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"net/url"
 	"strings"
@@ -266,6 +267,9 @@ func (s *Service) CreateServer(ctx context.Context, actor authz.Actor, in Create
 		if _, err := requireSite(ctx, q, c, authz.ServersManage, in.SiteID); err != nil {
 			return err
 		}
+		if err := requireFreeAddress(ctx, q, site.TenantID, id, info.BaseURL); err != nil {
+			return err
+		}
 		err := q.CreateServer(ctx, db.CreateServerParams{
 			ID: id, TenantID: site.TenantID, SiteID: site.ID, Name: in.Name,
 			BaseUrl: strings.TrimRight(info.BaseURL, "/"), AuthMode: string(info.AuthMode), Username: info.Username,
@@ -360,6 +364,10 @@ func (s *Service) UpdateServer(ctx context.Context, actor authz.Actor, id uuid.U
 				return invalid("a server cannot move to another tenant")
 			}
 		}
+		// Refuse a taken address before contacting Frigate with the new connection.
+		if in.BaseURL != nil && !strings.EqualFold(strings.TrimRight(strings.TrimSpace(*in.BaseURL), "/"), current.BaseUrl) {
+			return requireFreeAddress(ctx, q, current.TenantID, id, strings.TrimSpace(*in.BaseURL))
+		}
 		return nil
 	})
 	if err != nil {
@@ -413,6 +421,12 @@ func (s *Service) UpdateServer(ctx context.Context, actor authz.Actor, id uuid.U
 		if err := c.Require(authz.ServersManage, access.Server(current.TenantID, current.SiteID, current.ID)); err != nil {
 			return err
 		}
+		// Only a changed address can collide; renaming a server must keep working whatever the data.
+		if !strings.EqualFold(strings.TrimRight(info.BaseURL, "/"), current.BaseUrl) {
+			if err := requireFreeAddress(ctx, q, current.TenantID, id, info.BaseURL); err != nil {
+				return err
+			}
+		}
 		err := q.UpdateServer(ctx, db.UpdateServerParams{
 			ID: id, Name: name, SiteID: siteID, BaseUrl: strings.TrimRight(info.BaseURL, "/"), AuthMode: string(info.AuthMode),
 			Username: info.Username, PasswordSealed: sealed, TlsSkipVerify: conn.TLSSkipVerify,
@@ -439,6 +453,21 @@ func (s *Service) UpdateServer(ctx context.Context, actor authz.Actor, id uuid.U
 	return s.GetServer(ctx, actor, id)
 }
 
+// ErrDuplicateServer is returned when another server of the tenant already uses the address.
+var ErrDuplicateServer = errors.New("ya hay un servidor registrado con esa dirección")
+
+// requireFreeAddress refuses an address that another active server of the tenant already uses.
+func requireFreeAddress(ctx context.Context, q *db.Queries, tenantID, exceptID uuid.UUID, baseURL string) error {
+	taken, err := q.ServerAddressTaken(ctx, db.ServerAddressTakenParams{TenantID: tenantID, ExceptID: exceptID, BaseUrl: baseURL})
+	if err != nil {
+		return err
+	}
+	if taken {
+		return ErrDuplicateServer
+	}
+	return nil
+}
+
 // DeleteServer permanently removes the server and every record that belongs to it or to its
 // cameras (events, plate reads, alarms, exports, clip jobs, sync state, grants, ...) in one
 // transaction. The audit log is append-only and is kept, including the SERVER_REMOVED entry
@@ -446,7 +475,19 @@ func (s *Service) UpdateServer(ctx context.Context, actor authz.Actor, id uuid.U
 // (thumbnails, previews, watermarked clips) are removed best-effort after the commit.
 func (s *Service) DeleteServer(ctx context.Context, actor authz.Actor, id uuid.UUID) error {
 	var blobKeys []string
-	err := s.tx(ctx, actor, func(q *db.Queries, c *access.Checker) error {
+	err := retryOnDeadlock(ctx, func() error {
+		blobKeys = nil
+		return s.deleteServerTx(ctx, actor, id, &blobKeys)
+	})
+	if err != nil {
+		return err
+	}
+	s.deleteBlobs(ctx, id, blobKeys)
+	return nil
+}
+
+func (s *Service) deleteServerTx(ctx context.Context, actor authz.Actor, id uuid.UUID, keys *[]string) error {
+	return s.tx(ctx, actor, func(q *db.Queries, c *access.Checker) error {
 		srv, err := q.GetServer(ctx, id)
 		if err != nil {
 			return notFoundOr(err)
@@ -454,7 +495,7 @@ func (s *Service) DeleteServer(ctx context.Context, actor authz.Actor, id uuid.U
 		if err := c.Require(authz.ServersManage, access.Server(srv.TenantID, srv.SiteID, srv.ID)); err != nil {
 			return err
 		}
-		if blobKeys, err = q.ListServerBlobKeys(ctx, id); err != nil {
+		if *keys, err = q.ListServerBlobKeys(ctx, id); err != nil {
 			return err
 		}
 		// Rules referencing the server or its cameras lose those ids. This reads the cameras, so
@@ -478,6 +519,9 @@ func (s *Service) DeleteServer(ctx context.Context, actor authz.Actor, id uuid.U
 			{"events", func() (int64, error) { return q.PurgeServerEvents(ctx, id) }},
 			{"object_snapshots", func() (int64, error) { return q.PurgeServerObjectSnapshots(ctx, id) }},
 			{"sync_state", func() (int64, error) { return q.PurgeServerSyncState(ctx, id) }},
+			{"object_tracks", func() (int64, error) { return q.PurgeServerObjectTracks(ctx, id) }},
+			{"face_sightings", func() (int64, error) { return q.PurgeServerFaceSightings(ctx, id) }},
+			{"export_job_items", func() (int64, error) { return q.PurgeServerExportJobItems(ctx, id) }},
 			{"rule_firings", func() (int64, error) { return q.PurgeServerRuleFirings(ctx, id) }},
 			{"notifications", func() (int64, error) { return q.PurgeServerNotifications(ctx, &id) }},
 			{"grants", func() (int64, error) { return q.PurgeServerGrants(ctx, id) }},
@@ -501,11 +545,6 @@ func (s *Service) DeleteServer(ctx context.Context, actor authz.Actor, id uuid.U
 		}
 		return audit(ctx, q, actor, &srv.TenantID, ActionServerRemoved, "server", id, details)
 	})
-	if err != nil {
-		return err
-	}
-	s.deleteBlobs(ctx, id, blobKeys)
-	return nil
 }
 
 type ruleRefResult struct {

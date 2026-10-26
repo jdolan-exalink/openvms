@@ -38,7 +38,7 @@ func (b *recordingBlobs) Delete(_ context.Context, key string) error {
 func seedServerData(t *testing.T, env *demofix.Env, cam db.GetCameraRow, tag string) {
 	t.Helper()
 	ctx := context.Background()
-	evID, readID, groupID, viewID, ruleID := uuid.New(), uuid.New(), uuid.New(), uuid.New(), uuid.New()
+	evID, readID, groupID, viewID, ruleID, jobID := uuid.New(), uuid.New(), uuid.New(), uuid.New(), uuid.New(), uuid.New()
 	layout := `{"columns": 2, "cells": [{"camera_id": "` + cam.ID.String() + `", "quality": "sub"}, null]}`
 	err := env.Store.TxRaw(ctx, store.AllTenants, func(tx pgx.Tx) error {
 		stmts := []struct {
@@ -62,6 +62,14 @@ func seedServerData(t *testing.T, env *demofix.Env, cam db.GetCameraRow, tag str
 			{`INSERT INTO object_snapshots (server_id, tenant_id, remote_object_id) VALUES ($1, $2, 'obj-' || $3)`,
 				[]any{cam.ServerID, cam.TenantID, tag}},
 			{`INSERT INTO event_sync_state (server_id, tenant_id) VALUES ($1, $2)`, []any{cam.ServerID, cam.TenantID}},
+			{`INSERT INTO object_tracks (server_id, tenant_id, camera_id, remote_object_id, start_time) VALUES ($1, $2, $3, 'trk-' || $4, now())`,
+				[]any{cam.ServerID, cam.TenantID, cam.ID, tag}},
+			{`INSERT INTO face_sightings (tenant_id, server_id, source_file) VALUES ($1, $2, 'face-' || $3)`,
+				[]any{cam.TenantID, cam.ServerID, tag}},
+			{`INSERT INTO export_jobs (id, tenant_id, requested_by, name, start_time, end_time) VALUES ($1, $2, $3, 'job-' || $4, now(), now())`,
+				[]any{jobID, cam.TenantID, env.Admin.UserID, tag}},
+			{`INSERT INTO export_job_items (job_id, tenant_id, camera_id, server_id) VALUES ($1, $2, $3, $4)`,
+				[]any{jobID, cam.TenantID, cam.ID, cam.ServerID}},
 			{`INSERT INTO camera_outages (camera_id, tenant_id) VALUES ($1, $2)`, []any{cam.ID, cam.TenantID}},
 			{`INSERT INTO camera_groups (id, tenant_id, name) VALUES ($1, $2, 'g-' || $3)`, []any{groupID, cam.TenantID, tag}},
 			{`INSERT INTO camera_group_members (group_id, camera_id, tenant_id) VALUES ($1, $2, $3)`, []any{groupID, cam.ID, cam.TenantID}},
@@ -116,6 +124,9 @@ func TestDeleteServerHardDeletesEverything(t *testing.T) {
 		"clip_watermark_jobs":  `SELECT count(*) FROM clip_watermark_jobs WHERE server_id = $1`,
 		"object_snapshots":     `SELECT count(*) FROM object_snapshots WHERE server_id = $1`,
 		"event_sync_state":     `SELECT count(*) FROM event_sync_state WHERE server_id = $1`,
+		"object_tracks":        `SELECT count(*) FROM object_tracks WHERE server_id = $1`,
+		"face_sightings":       `SELECT count(*) FROM face_sightings WHERE server_id = $1`,
+		"export_job_items":     `SELECT count(*) FROM export_job_items WHERE server_id = $1`,
 		"camera_outages":       `SELECT count(*) FROM camera_outages o JOIN cameras c ON c.id = o.camera_id WHERE c.server_id = $1`,
 		"camera_group_members": `SELECT count(*) FROM camera_group_members m JOIN cameras c ON c.id = m.camera_id WHERE c.server_id = $1`,
 		"rule_firings":         `SELECT count(*) FROM rule_firings f JOIN cameras c ON c.id = f.resource_id WHERE c.server_id = $1`,

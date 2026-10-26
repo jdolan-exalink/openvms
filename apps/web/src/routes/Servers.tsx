@@ -2077,7 +2077,7 @@ function DeleteServerDialog({ server, onDone }: { server: Schemas["Server"]; onD
   return (
     <ConfirmDialog
       title="Eliminar servidor"
-      message={`¿Está seguro de eliminar el servidor «${server.name}»? Se eliminarán de forma permanente todas sus cámaras, eventos, lecturas, alarmas y exportaciones. Esta acción no se puede deshacer.`}
+      message={`¿Está seguro de eliminar el servidor «${server.name}»? Se eliminarán de forma permanente todas sus cámaras, eventos, lecturas, alarmas y exportaciones. Esta acción no se puede deshacer. El agente instalado en el host no se desinstala: si querés quitarlo, desinstalalo antes.`}
       confirmLabel="Eliminar"
       pending={remove.isPending}
       error={remove.error}

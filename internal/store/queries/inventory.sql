@@ -289,6 +289,14 @@ SELECT k::text FROM (
     UNION ALL SELECT j.output_key FROM clip_watermark_jobs j WHERE j.server_id = @server_id
 ) keys WHERE k <> '';
 
+-- A server address is registered once per tenant, compared ignoring case and trailing slashes.
+-- name: ServerAddressTaken :one
+SELECT EXISTS (
+    SELECT 1 FROM frigate_servers
+    WHERE tenant_id = @tenant_id AND deleted_at IS NULL AND id <> @except_id
+      AND lower(regexp_replace(base_url, '/+$', '')) = lower(regexp_replace(@base_url::text, '/+$', ''))
+)::boolean AS taken;
+
 -- name: PurgeServerClipJobs :execrows
 DELETE FROM clip_watermark_jobs WHERE server_id = @server_id;
 
@@ -309,6 +317,15 @@ DELETE FROM object_snapshots WHERE server_id = @server_id;
 
 -- name: PurgeServerSyncState :execrows
 DELETE FROM event_sync_state WHERE server_id = @server_id;
+
+-- name: PurgeServerObjectTracks :execrows
+DELETE FROM object_tracks WHERE server_id = @server_id;
+
+-- name: PurgeServerFaceSightings :execrows
+DELETE FROM face_sightings WHERE server_id = @server_id;
+
+-- name: PurgeServerExportJobItems :execrows
+DELETE FROM export_job_items WHERE server_id = @server_id;
 
 -- name: PurgeServerRuleFirings :execrows
 DELETE FROM rule_firings
