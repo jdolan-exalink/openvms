@@ -1296,6 +1296,28 @@ paths:
         "403": { $ref: "#/components/responses/Forbidden" }
         "404": { $ref: "#/components/responses/NotFound" }
         "502": { $ref: "#/components/responses/FrigateUnreachable" }
+  /api/v1/camera-config/object-catalog:
+    get:
+      tags: [cameras]
+      operationId: getObjectCatalog
+      summary: Get the normalized object catalog
+      description: |
+        Any authenticated actor may read it. Returns the ordered OpenVMS categories and objects
+        (Spanish labels) instead of an engine's raw label list. `supported` is true or false when
+        the model labels of `server_id` are readable and null (unknown) otherwise; an object the
+        engine has no label for is always false. Raw labels the catalog does not know are never
+        listed here: they stay visible as `detection.raw` of the camera model.
+      parameters:
+        - { name: engine, in: query, required: false, schema: { type: string, enum: [frigate], default: frigate } }
+        - { name: server_id, in: query, required: false, schema: { type: string, format: uuid } }
+      responses:
+        "200":
+          description: The catalog
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ObjectCatalog" }
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
   /api/v1/cameras/{cameraId}/normalized-config:
     parameters:
       - { name: cameraId, in: path, required: true, schema: { type: string, format: uuid } }
@@ -6161,7 +6183,11 @@ components:
           required: [objects]
           properties:
             enabled: { type: boolean }
-            objects: { type: array, items: { type: string } }
+            objects: { type: array, items: { type: string }, description: Raw engine labels being tracked }
+            selection: { type: array, items: { type: string }, description: Catalog object ids collapsed from the tracked labels }
+            categories: { type: array, items: { type: string }, description: Catalog categories whose every engine-supported object is selected }
+            raw: { type: array, items: { type: string }, description: Tracked labels the catalog does not know }
+            available_labels: { type: array, items: { type: string }, description: Labels the engine model supports; omitted when unknown }
         analytics:
           type: object
           properties:
@@ -6218,7 +6244,10 @@ components:
       description: |
         Sparse change to the normalized model; omitted fields stay as they are. The fields that can
         be changed today are `detection.enabled` (boolean), `detection.objects` (raw engine object
-        labels until the object catalog lands), `recording.enabled` (boolean) and `analytics.lpr`
+        labels), `detection.selection` (catalog object or category ids from
+        `/api/v1/camera-config/object-catalog`, expanded to the engine labels its model supports;
+        sending it together with `detection.objects` is a 400, and ids the model cannot honor are
+        listed in the review `unsupported` and rejected on apply), `recording.enabled` (boolean) and `analytics.lpr`
         (boolean). The schema is deliberately open so the server can reject every other field,
         nested ones included, with 400 instead of dropping it silently.
       additionalProperties: true
@@ -6226,6 +6255,29 @@ components:
         detection: { enabled: true, objects: [person, car] }
         recording: { enabled: true }
         analytics: { lpr: false }
+    ObjectCatalog:
+      type: object
+      required: [engine, categories]
+      properties:
+        engine: { type: string }
+        categories:
+          type: array
+          items:
+            type: object
+            required: [id, label, objects]
+            properties:
+              id: { type: string, example: vehicle }
+              label: { type: string, example: Vehículos }
+              objects:
+                type: array
+                items:
+                  type: object
+                  required: [id, label, requires_model, supported]
+                  properties:
+                    id: { type: string, example: vehicle.truck }
+                    label: { type: string, example: Camión }
+                    requires_model: { type: boolean }
+                    supported: { type: boolean, nullable: true, description: null means unknown }
     CameraConfigReview:
       type: object
       required: [changes, impact, unsupported]

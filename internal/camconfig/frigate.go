@@ -62,6 +62,10 @@ func (a FrigateAdapter) Read(ctx context.Context, in Inventory) (Camera, error) 
 	} else {
 		applyFrigateDoc(&cam, in, doc, codecs)
 	}
+	if doc != nil {
+		cam.Detection.AvailableLabels = ModelLabels(ctx, a.Engine)
+	}
+	detectionView(&cam.Detection)
 	finish(&cam, in, doc)
 	return cam, nil
 }

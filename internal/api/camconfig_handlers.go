@@ -143,6 +143,9 @@ func (h *Handlers) ApplyCameraConfig(ctx context.Context, r gen.ApplyCameraConfi
 	if err != nil {
 		return nil, err
 	}
+	if patch, err = h.resolveCatalogSelection(ctx, a, r.CameraId, patch); err != nil {
+		return nil, err
+	}
 	in := inventory.ConfigApplyInput{Patch: patch, ExpectedRevision: r.Body.ExpectedRevision}
 	if r.Body.Origin != nil {
 		in.Origin = string(*r.Body.Origin)

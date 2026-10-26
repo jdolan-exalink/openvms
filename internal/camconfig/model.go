@@ -108,6 +108,13 @@ type Recording struct {
 type Detection struct {
 	Enabled *bool    `json:"enabled,omitempty"`
 	Objects []string `json:"objects"`
+	// Selection and Categories are the catalog view of Objects: object ids and the ids of
+	// categories fully selected. Raw are tracked labels the catalog does not know.
+	Selection  []string `json:"selection"`
+	Categories []string `json:"categories"`
+	Raw        []string `json:"raw"`
+	// AvailableLabels are the labels the engine's model supports; empty means unknown.
+	AvailableLabels []string `json:"available_labels,omitempty"`
 }
 
 // Analytics are the optional analytics running on the camera; nil means unknown.
