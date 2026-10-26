@@ -2,7 +2,7 @@ import { useT } from "@/i18n";
 import { agentInstallFailureText, safeAgentVersion } from "@/lib/agentJobs/failureText";
 import { isNewerAgentVersion } from "@/lib/agentVersion";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { Activity, AlertTriangle, ArrowDown, ArrowUp, Camera, Check, Copy, Pencil, Plus, RefreshCw, RotateCcw, Settings, Terminal, Trash2 } from "lucide-react";
+import { Activity, AlertTriangle, ArrowDown, ArrowUp, Camera, Check, Copy, Pencil, Plus, RefreshCw, RotateCcw, Terminal, Trash2 } from "lucide-react";
 import { Link, useSearch } from "@tanstack/react-router";
 import { type FormEvent, type ReactNode, useCallback, useEffect, useRef, useState } from "react";
 import { ApiError, api, type Schemas, unwrap } from "@/api/client";
@@ -12,7 +12,7 @@ import { ConfirmDialog } from "@/components/ConfirmDialog";
 import { Icon } from "@/components/Icon";
 import { Modal } from "@/components/Modal";
 import { AgentUpdateButton } from "@/components/servers/AgentUpdateButton";
-import { ConnectAgentControls } from "@/components/servers/ConnectAgentControls";
+import { ServerActionsPanel } from "@/components/servers/ServerActionsPanel";
 import { ServerFrigateConfigModal } from "@/components/servers/ServerFrigateConfigModal";
 import { calculateAttainableDays, calculateUsableStorage, formatBytes } from "@/components/servers/storageRetention";
 import { Button, Empty, ErrorNote, Field, PageHeader, Pill, Select, StatusBadge, Summary, Switch, TextInput } from "@/components/ui";
@@ -68,7 +68,22 @@ export function Servers() {
           ) : null
         }
       />
-      {editing && <EditServerModal server={editing} sites={sites.data ?? []} onDone={() => setEditing(null)} />}
+      {editing && (
+        <EditServerModal
+          server={editing}
+          sites={sites.data ?? []}
+          me={me.data}
+          onDone={() => setEditing(null)}
+          onConfigureFrigate={(target) => {
+            setEditing(null);
+            setConfiguringFrigate(target);
+          }}
+          onDelete={(target) => {
+            setEditing(null);
+            setDeleting(target);
+          }}
+        />
+      )}
       {deleting && <DeleteServerDialog server={deleting} onDone={() => setDeleting(null)} />}
       {registering && <RegisterServer sites={sites.data ?? []} onDone={() => setRegistering(false)} />}
       {configuringFrigate && (
@@ -157,35 +172,15 @@ export function Servers() {
                 </Fact>
               </dl>
               <div className="flex flex-wrap items-start justify-end gap-2">
-                {canInstallAgent(me.data, s) && <AgentSSHControls key={s.id} server={s} />}
-                {canInstallAgent(me.data, s) && <ConnectAgentControls key={`connect-${s.id}`} server={s} />}
-                {hasServerInstallPermission(me.data, "servers.manage", s) && !hasServerInstallPermission(me.data, "servers.config.secrets", s) && (
-                  <span role="note" className="text-xs text-muted">{t("servers.agentInstallPermissionRequired")}</span>
-                )}
-                {can(me.data, "servers.restart") && <RestartButton server={s} />}
-                {can(me.data, "servers.manage") && <SyncButton server={s} />}
-                {can(me.data, "servers.manage") && (
-                  <Button
-                    size="sm"
-                    variant="tonal"
-                    onClick={() => setConfiguringFrigate(s)}
-                    title="Configuración global de Frigate y parámetros del sistema"
-                  >
-                    <Icon icon={Settings} size="xs" />
-                    Configurar Frigate
+                {canInstallAgent(me.data, s) && <AgentSSHControls key={s.id} server={s} mode="row" />}
+                {can(me.data, "servers.manage") ? (
+                  <Button size="sm" onClick={() => setEditing(s)} title="Editar servidor">
+                    <Icon icon={Pencil} size="xs" />
+                    Editar
                   </Button>
-                )}
-                {can(me.data, "servers.manage") && (
-                  <>
-                    <Button size="sm" onClick={() => setEditing(s)} title="Editar servidor">
-                      <Icon icon={Pencil} size="xs" />
-                      Editar
-                    </Button>
-                    <Button size="sm" variant="outlined" className="text-bad" onClick={() => setDeleting(s)} title="Eliminar servidor">
-                      <Icon icon={Trash2} size="xs" />
-                      Eliminar
-                    </Button>
-                  </>
+                ) : (
+                  // Restart lives in the edit panel, which needs servers.manage; keep it reachable for restart-only users.
+                  can(me.data, "servers.restart") && <RestartButton server={s} />
                 )}
               </div>
             </li>
@@ -213,7 +208,12 @@ function hasServerInstallPermission(me: Schemas["Me"] | undefined, permission: s
   return matching.some((grant) => grant.effect === "allow") && !matching.some((grant) => grant.effect === "deny");
 }
 
-function AgentSSHControls({ server }: { server: Schemas["Server"] }) {
+/**
+ * AgentSSHControls renders the agent lifecycle in two places. "row" is the server row: update and
+ * uninstall for an installed agent, nothing for a server without one. "panel" is the edit modal: only
+ * the SSH install, offered while no agent is installed.
+ */
+function AgentSSHControls({ server, mode }: { server: Schemas["Server"]; mode: "row" | "panel" }) {
   const t = useT();
   const { jobs } = useAgentJobs();
   const me = useQuery(meQuery);
@@ -261,6 +261,12 @@ function AgentSSHControls({ server }: { server: Schemas["Server"] }) {
   const active = !!visibleDeployment?.job && (visibleDeployment.job.status === "queued" || visibleDeployment.job.status === "running");
 
   if (!status.isPending && !status.data?.installed && status.data?.binary_status === "not_installed" && visibleDeployment?.kind !== "uninstall") {
+    if (mode === "row") {
+      // An install started from the edit modal keeps reporting here after the modal is closed.
+      return active && visibleDeployment?.kind === "install" ? (
+        <span role="status" className="text-xs text-muted">{t("servers.agentInstallContinues")}</span>
+      ) : null;
+    }
     return (
       <div className="flex flex-wrap items-center gap-2">
         <AgentInstallControl
@@ -280,6 +286,24 @@ function AgentSSHControls({ server }: { server: Schemas["Server"] }) {
     );
   }
   const agent = status.data;
+  if (mode === "panel") {
+    // The install dialog stays mounted after the agent shows up so its result is not cut off.
+    return installOpen ? (
+      <AgentInstallDialog
+        server={server}
+        open={installOpen}
+        onClose={() => {
+          setInstallOpen(false);
+          setDeployment(null);
+        }}
+        job={visibleDeployment?.kind === "install" ? (visibleDeployment.job ?? null) : null}
+        onJob={onInstallJob}
+        otherOperationActive={false}
+        onStart={onInstallStart}
+        onFailure={onInstallFailure}
+      />
+    ) : null;
+  }
   if (status.isPending && !visibleDeployment) return <Button size="sm" variant="outlined" disabled>{t("servers.agentLifecycleChecking")}</Button>;
   if ((status.isError || !agent) && !visibleDeployment) return <div className="flex flex-wrap items-center gap-2"><span role="status" className="text-xs text-muted">{t("servers.agentLifecycleUnknown")}</span><Button size="sm" variant="outlined" disabled={status.isFetching} onClick={() => void status.refetch()}>{t("servers.agentLifecycleRefresh")}</Button></div>;
 
@@ -1864,7 +1888,21 @@ function DeleteServerDialog({ server, onDone }: { server: Schemas["Server"]; onD
 
 // EditServerModal patches only what changed: a rename must not re-test the Frigate
 // connection, and a blank password keeps the stored one.
-function EditServerModal({ server, sites, onDone }: { server: Schemas["Server"]; sites: Schemas["Site"][]; onDone: () => void }) {
+function EditServerModal({
+  server,
+  sites,
+  me,
+  onDone,
+  onConfigureFrigate,
+  onDelete,
+}: {
+  server: Schemas["Server"];
+  sites: Schemas["Site"][];
+  me: Schemas["Me"] | undefined;
+  onDone: () => void;
+  onConfigureFrigate: (server: Schemas["Server"]) => void;
+  onDelete: (server: Schemas["Server"]) => void;
+}) {
   const qc = useQueryClient();
   const initialAlarmMode: Schemas["EventAlarmMode"] = server.event_alarm_mode ?? "rules_only";
   const [form, setForm] = useState({
@@ -1959,6 +1997,18 @@ function EditServerModal({ server, sites, onDone }: { server: Schemas["Server"];
           </Button>
         </div>
       </form>
+      <ServerActionsPanel
+        server={server}
+        canInstall={canInstallAgent(me, server)}
+        installPermissionMissing={hasServerInstallPermission(me, "servers.manage", server) && !hasServerInstallPermission(me, "servers.config.secrets", server)}
+        canManage={can(me, "servers.manage")}
+        canRestart={can(me, "servers.restart")}
+        installControls={<AgentSSHControls server={server} mode="panel" />}
+        restartControl={<RestartButton server={server} />}
+        syncControl={<SyncButton server={server} />}
+        onConfigureFrigate={onConfigureFrigate}
+        onDelete={onDelete}
+      />
     </Modal>
   );
 }
