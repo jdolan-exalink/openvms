@@ -6,10 +6,14 @@ import { useEffect, useRef, useState } from "react";
 import { type CameraFilter, camerasQuery, classifyPolicyQuery, meQuery, serverAgentQuery, serversQuery, sitesQuery } from "@/api/queries";
 import { api, unwrap, ApiError } from "@/api/client";
 import { BodyClassifySwitch } from "@/components/BodyClassifySwitch";
-import { can } from "@/lib/perm";
+import { BulkConfigureDialog } from "@/components/camera/bulk/BulkConfigureDialog";
+import { can, canCamera } from "@/lib/perm";
 import { Icon } from "@/components/Icon";
-import { Empty, ErrorNote, LinkButton, PageHeader, Select, StatusBadge, Summary, Table, TextInput, Th } from "@/components/ui";
+import { Button, Empty, ErrorNote, LinkButton, PageHeader, Select, StatusBadge, Summary, Table, TextInput, Th } from "@/components/ui";
 import { IaViewModal } from "@/components/IaViewModal";
+/** Most cameras one bulk configuration may target from the list selection. */
+const BULK_CAMERA_CAP = 200;
+
 function summarize(cameras: { enabled: boolean; status: string; onvif_profile?: string | null }[]) {
   const online = cameras.filter((c) => c.enabled && c.status === "online").length;
   const onvifLinked = cameras.filter((c) => Boolean(c.onvif_profile)).length;
@@ -122,6 +126,10 @@ export function Cameras() {
   const qc = useQueryClient();
   const navigate = useNavigate();
   const [checkResult, setCheckResult] = useState<string | null>(null);
+  const [picked, setPicked] = useState<string[]>([]);
+  const [bulkOpen, setBulkOpen] = useState(false);
+  const canBulk = canCamera(me.data, "cameras.config.edit");
+  const togglePicked = (id: string) => setPicked((cur) => (cur.includes(id) ? cur.filter((x) => x !== id) : cur.length >= BULK_CAMERA_CAP ? cur : [...cur, id]));
 
   const [addingDevice, setAddingDevice] = useState<{
     xaddr: string;
@@ -652,10 +660,19 @@ export function Cameras() {
       <ErrorNote error={cameras.error} />
       {cameras.data && <Summary>{summarize(cameras.data)}</Summary>}
       {cameras.data?.length === 0 && <Empty>No hay cámaras que coincidan.</Empty>}
+      {canBulk && picked.length > 0 && (
+        <div role="region" aria-label="Selección de cámaras" className="flex flex-wrap items-center gap-3 rounded-m3-lg bg-surface-2 px-4 py-2 text-sm">
+          <Button variant="filled" onClick={() => setBulkOpen(true)}>Configurar cámaras ({picked.length})</Button>
+          <Button variant="text" onClick={() => setPicked([])}>Limpiar selección</Button>
+          {picked.length >= BULK_CAMERA_CAP && <span role="status" className="text-xs text-warn">Máximo {BULK_CAMERA_CAP} cámaras por cambio masivo.</span>}
+        </div>
+      )}
+      {bulkOpen && <BulkConfigureDialog target={{ cameraIds: picked }} targetLabel={`${picked.length} cámaras`} onClose={() => setBulkOpen(false)} onDone={() => setPicked([])} />}
       {!!cameras.data?.length && (
         <Table label="Cámaras">
           <thead>
             <tr>
+              {canBulk && <Th><span className="sr-only">Seleccionar</span></Th>}
               <Th>Cámara</Th>
               <Th>Sitio</Th>
               <Th>Servidor</Th>
@@ -669,6 +686,11 @@ export function Cameras() {
           <tbody>
             {cameras.data.map((c) => (
               <tr key={c.id} className="border-t border-outline-variant align-top">
+                {canBulk && (
+                  <td>
+                    <input type="checkbox" aria-label={`Seleccionar ${c.display_name}`} checked={picked.includes(c.id)} onChange={() => togglePicked(c.id)} />
+                  </td>
+                )}
                 <td>
                   <div className="flex items-center gap-2 font-medium">
                     {c.display_name}

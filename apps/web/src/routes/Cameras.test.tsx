@@ -822,6 +822,40 @@ describe("Cameras", () => {
 
     expect(await screen.findByText(/Cámara en inventario: Camara Sodecar 549/i)).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Vincular ONVIF" })).toBeInTheDocument();
+});
+
+
+describe("bulk selection", () => {
+  const withPerm = (cameras: object[], grants: object[]) => ({ ...inventory(cameras), "/api/v1/me": () => json({ id: "u", tenant_id: "t", grants }) });
+  const editGrant = { permission: "cameras.config.edit", effect: "allow", scope_type: "platform" };
+
+  it("opens the bulk dialog with the selected camera ids", async () => {
+    const seen: unknown[] = [];
+    vi.stubGlobal("fetch", vi.fn(stubApi({
+      ...withPerm([camera("c1", "acceso"), camera("c2", "muelle")], [editGrant]),
+      "POST /api/v1/cameras/config/bulk": (init) => { seen.push(JSON.parse(String(init?.body ?? "{}"))); return json({ rows: [], summary: {} }); },
+    })));
+    renderPage(Cameras);
+    fireEvent.click(await screen.findByLabelText("Seleccionar acceso"));
+    fireEvent.click(screen.getByLabelText("Seleccionar muelle"));
+    fireEvent.click(screen.getByRole("button", { name: "Configurar cámaras (2)" }));
+    expect(await screen.findByRole("dialog")).toBeInTheDocument();
   });
 
+  it("hides the selection without the camera config permission", async () => {
+    vi.stubGlobal("fetch", vi.fn(stubApi(withPerm([camera("c1", "acceso")], []))));
+    renderPage(Cameras);
+    await screen.findByRole("link", { name: "Configuración de acceso" });
+    expect(screen.queryByLabelText("Seleccionar acceso")).toBeNull();
+  });
 
+  it("caps the selection at 200 cameras with a message", async () => {
+    const many = Array.from({ length: 201 }, (_, i) => camera(`c${i}`, `cam${i}`));
+    vi.stubGlobal("fetch", vi.fn(stubApi(withPerm(many, [editGrant]))));
+    renderPage(Cameras);
+    await screen.findByLabelText("Seleccionar cam0");
+    for (let i = 0; i < 201; i++) fireEvent.click(screen.getByLabelText(`Seleccionar cam${i}`));
+    expect(screen.getByRole("button", { name: "Configurar cámaras (200)" })).toBeInTheDocument();
+    expect(screen.getByText(/Máximo 200 cámaras/)).toBeInTheDocument();
+  }, 60_000);
+});
