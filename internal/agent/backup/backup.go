@@ -105,6 +105,7 @@ func (s *Store) Save(config, frigateVersion, registeredBy string) (Meta, error) 
 	if err := os.MkdirAll(s.dir, 0o700); err != nil {
 		return Meta{}, fmt.Errorf("create the backup directory: %w", err)
 	}
+	// #nosec G302 -- 0700 is the strictest mode a directory can have and still be entered by its owner.
 	if err := os.Chmod(s.dir, 0o700); err != nil {
 		return Meta{}, fmt.Errorf("protect the backup directory: %w", err)
 	}
