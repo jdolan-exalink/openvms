@@ -129,6 +129,9 @@ type Outcome struct {
 	// Applied is true when the engine confirmed the change, so applied_revision may advance.
 	Applied bool
 	Result  string // "ok" or "error" or "unverified", for the audit trail
+	// Plain is LastError in words for the person, with the sanitized technical text apart
+	// (errors_plain.go). Zero when there is no error. LastError stays as it was.
+	Plain PlainError
 }
 
 // Result values recorded in the audit trail.
@@ -142,13 +145,14 @@ const (
 // apply is never synced, and only a verified change advances the applied revision.
 func DecideOutcome(applyErr error, verified Camera, patch, desired Patch) Outcome {
 	if applyErr != nil {
-		return Outcome{SyncState: SyncError, LastError: SanitizeError(applyErr), Result: ResultError}
+		return Outcome{SyncState: SyncError, LastError: SanitizeError(applyErr), Result: ResultError, Plain: PlainFromError(applyErr)}
 	}
 	if !EngineReadable(verified) {
 		return Outcome{SyncState: SyncUnverifiable, Result: ResultUnverified}
 	}
 	if len(Diff(patch, verified)) > 0 {
-		return Outcome{SyncState: SyncError, LastError: "el motor no refleja el cambio aplicado", Result: ResultError}
+		msg := "el motor no refleja el cambio aplicado"
+		return Outcome{SyncState: SyncError, LastError: msg, Result: ResultError, Plain: PlainFromText(msg)}
 	}
 	if len(Diff(desired, verified)) > 0 {
 		return Outcome{SyncState: SyncDrift, Applied: true, Result: ResultOK}
