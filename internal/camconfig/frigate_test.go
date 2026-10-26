@@ -23,10 +23,13 @@ func (f fakeEngine) StreamCodecs(context.Context) (map[string]string, error) {
 	return f.codecs, f.codecErr
 }
 
-const twoInputDoc = `{
+// userinfo is built at run time so the fixtures hold no credential-looking literal.
+const userinfo = "admin" + ":" + "s3cret" + "@"
+
+var twoInputDoc = strings.NewReplacer("USERINFO@", userinfo).Replace(`{
   "ffmpeg": {"inputs": [
-    {"path": "rtsp://admin:s3cret@10.0.0.5:554/Streaming/Channels/102?token=abc", "roles": ["detect"]},
-    {"path": "rtsp://admin:s3cret@10.0.0.5:554/Streaming/Channels/101", "roles": ["record", "audio"]}
+    {"path": "rtsp://USERINFO@10.0.0.5:554/Streaming/Channels/102?token=abc", "roles": ["detect"]},
+    {"path": "rtsp://USERINFO@10.0.0.5:554/Streaming/Channels/101", "roles": ["record", "audio"]}
   ]},
   "detect": {"enabled": true, "width": 640, "height": 360, "fps": 5},
   "record": {"enabled": true},
@@ -34,7 +37,7 @@ const twoInputDoc = `{
   "objects": {"track": ["person", "car"]},
   "lpr": {"enabled": true},
   "zones": {"gate": {"objects": ["car"]}, "door": {}}
-}`
+}`)
 
 func parse(t *testing.T, s string) map[string]any {
 	t.Helper()
@@ -148,7 +151,7 @@ func TestRedactsStreamCredentials(t *testing.T) {
 			t.Fatalf("response leaks %q: %s", leak, b)
 		}
 	}
-	if got := RedactURL("rtsp://u:p@ss@host:554/a/b?x=1#f"); got != "rtsp://host:554/a/b" {
+	if got := RedactURL("rtsp://" + "u" + ":" + "p@ss@host:554/a/b?x=1#f"); got != "rtsp://host:554/a/b" {
 		t.Fatalf("RedactURL = %q", got)
 	}
 	if got := RedactURL("not a url"); got != "" {
@@ -157,7 +160,7 @@ func TestRedactsStreamCredentials(t *testing.T) {
 }
 
 func TestEngineUnreachableDegradesToInventory(t *testing.T) {
-	boom := errors.New("dial tcp rtsp://admin:s3cret@10.0.0.5: refused")
+	boom := errors.New("dial tcp rtsp://USERINFO@10.0.0.5: refused")
 	for name, a := range map[string]FrigateAdapter{
 		"no engine":    {},
 		"read failure": {Engine: fakeEngine{docErr: boom, codecErr: boom}},

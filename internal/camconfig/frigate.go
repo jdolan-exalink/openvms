@@ -37,10 +37,9 @@ func (a FrigateAdapter) Read(ctx context.Context, in Inventory) (Camera, error) 
 
 	var doc map[string]any
 	var codecs map[string]string
-	switch {
-	case a.Engine == nil:
+	if a.Engine == nil {
 		cam.Sources = append(cam.Sources, unavailable("frigate"))
-	default:
+	} else {
 		cam.Origin.EngineVersion = a.Engine.Version()
 		var err error
 		if doc, err = a.Engine.CameraConfig(ctx, in.RemoteName, false); err != nil {
