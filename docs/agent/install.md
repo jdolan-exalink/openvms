@@ -19,7 +19,7 @@ curl -fsSL <release>/install-agent.sh | sudo bash -s -- --port 7419
 |---|---|
 | `--version X.Y.Z` | install that release instead of the one the script came from |
 | `--port N` | port for the first install (default 7419); an existing `agent.env` is never rewritten |
-| `--uninstall` | remove the program and the service, keep `/etc/openvms` and `/var/lib/openvms-agent` |
+| `--uninstall` | remove the program and the service, keep `/etc/openvms` and `/var/lib/openvms-agent`; if a saved original Frigate configuration exists it says where it is and how to restore it (`docs/agent/backup.md`) |
 | `--uninstall --purge` | also remove the configuration and the tokens |
 
 ## What it does

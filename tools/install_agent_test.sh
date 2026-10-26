@@ -91,7 +91,16 @@ if run "$tmp/p6" --version "not a version" >/dev/null 2>&1; then fail "a bad ver
 if run "$tmp/p6" --bogus >/dev/null 2>&1; then fail "an unknown option accepted"; fi
 
 # 8. Uninstall removes the program and the unit, and keeps the configuration unless --purge.
-run "$p1" --uninstall >/dev/null 2>&1 || fail "uninstall failed"
+# A saved original Frigate configuration is announced, with how to restore it.
+mkdir -p "$p1/var/lib/openvms-agent/backup"
+echo "cameras: {}" >"$p1/var/lib/openvms-agent/backup/frigate-config.original.yml"
+out8=$(run "$p1" --uninstall 2>&1) || fail "uninstall failed"
+grep -q 'frigate-config.original.yml' <<<"$out8" || fail "uninstall did not mention the saved original configuration: $out8"
+grep -qi 'restart Frigate' <<<"$out8" || fail "uninstall did not say how to restore it: $out8"
+grep -q -- '--purge' <<<"$out8" || fail "uninstall did not say --purge removes it: $out8"
+[[ -f "$p1/var/lib/openvms-agent/backup/frigate-config.original.yml" ]] || fail "uninstall removed the saved original configuration"
+out8b=$(run "$tmp/p-nobackup" --uninstall 2>&1) || fail "uninstall without a backup failed"
+if grep -q 'frigate-config.original.yml' <<<"$out8b"; then fail "uninstall mentioned a backup that does not exist: $out8b"; fi
 [[ ! -e "$bin" && ! -e "$p1/etc/systemd/system/openvms-agent.service" ]] || fail "uninstall left the program behind"
 [[ -e "$p1/etc/openvms/agent.token" ]] || fail "uninstall without --purge removed the configuration"
 run "$p1" --uninstall --purge >/dev/null 2>&1 || fail "purge failed"

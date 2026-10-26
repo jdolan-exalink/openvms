@@ -188,3 +188,36 @@ export function formatBytes(bytes: number): string {
   }
   return `${gb.toFixed(2)} GB`;
 }
+
+/**
+ * Reads one scalar from Frigate YAML by key path (two-space indentation, as Frigate writes it).
+ * Line based like the other helpers in this file; it is not a YAML parser.
+ */
+export function extractYamlValue(yaml: string, path: string[]): string | undefined {
+  let depth = 0;
+  for (const line of yaml.split("\n")) {
+    const match = line.match(/^(\s*)([a-zA-Z0-9_-]+):\s*(.*)$/);
+    if (!match) continue;
+    const indent = (match[1] ?? "").length;
+    if (indent === depth * 2 && match[2] === path[depth]) {
+      if (depth === path.length - 1) return (match[3] ?? "").trim().replace(/^["']|["']$/g, "");
+      depth++;
+    }
+  }
+  return undefined;
+}
+
+export interface RecordingSummary {
+  retainDays?: string;
+  retainMode?: string;
+  snapshotsRetainDays?: string;
+}
+
+/** Recording settings shown in the server detail panel; undefined fields are not set in the config. */
+export function summarizeRecording(yaml: string): RecordingSummary {
+  return {
+    retainDays: extractYamlValue(yaml, ["record", "retain", "days"]),
+    retainMode: extractYamlValue(yaml, ["record", "retain", "mode"]),
+    snapshotsRetainDays: extractYamlValue(yaml, ["snapshots", "retain", "default"]),
+  };
+}

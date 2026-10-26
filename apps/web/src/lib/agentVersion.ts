@@ -14,3 +14,11 @@ export function isNewerAgentVersion(version: string | undefined, other: string |
   if (a[1] !== b[1]) return a[1] > b[1];
   return a[2] > b[2];
 }
+
+// isAtLeastAgentVersion is true when both are MAJOR.MINOR.PATCH and version is not older than other.
+export function isAtLeastAgentVersion(version: string | undefined, other: string | undefined): boolean {
+  const a = parts(version);
+  const b = parts(other);
+  if (!a || !b) return false;
+  return !isNewerAgentVersion(other, version);
+}

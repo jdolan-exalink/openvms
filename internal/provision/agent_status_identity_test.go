@@ -231,3 +231,62 @@ func TestClassifyAgentBinaryStatusNeverCallsANewerHostOutdated(t *testing.T) {
 		})
 	}
 }
+
+// An agent reached over the plain HTTP listener answers metrics (with its version) but has no
+// /v1/health, so its binary identity is unknown. The version then decides, like in the UI.
+func TestClassifyAgentByVersionUsesTheReportedVersionWhenThereIsNoIdentity(t *testing.T) {
+	digest := sha256.Sum256([]byte("bundled"))
+	bundled := func(version string) *agent.BinaryIdentity {
+		return &agent.BinaryIdentity{SHA256: hex.EncodeToString(digest[:]), Architecture: "amd64", Version: version}
+	}
+	tests := []struct {
+		name             string
+		installed        string
+		available        *agent.BinaryIdentity
+		wantOK           bool
+		wantState        AgentBinaryStatus
+		wantOutdated     bool
+		wantUpgradeOffer bool
+	}{
+		{name: "older agent has an update", installed: "0.4.3", available: bundled("0.4.4"), wantOK: true, wantState: AgentBinaryUpdateAvailable, wantOutdated: true, wantUpgradeOffer: true},
+		{name: "same version is current", installed: "0.4.4", available: bundled("0.4.4"), wantOK: true, wantState: AgentBinaryCurrent},
+		{name: "newer agent is current and is never offered a downgrade", installed: "0.5.0", available: bundled("0.4.4"), wantOK: true, wantState: AgentBinaryCurrent},
+		{name: "the v prefix is ignored", installed: "v0.4.3", available: bundled("0.4.4"), wantOK: true, wantState: AgentBinaryUpdateAvailable, wantOutdated: true, wantUpgradeOffer: true},
+		{name: "an unparsable agent version stays unknown", installed: "dev", available: bundled("0.4.4")},
+		{name: "an empty agent version stays unknown", installed: "", available: bundled("0.4.4")},
+		{name: "an unparsable bundled version stays unknown", installed: "0.4.3", available: bundled("dev")},
+		{name: "no bundled artifact stays unknown", installed: "0.4.3", available: nil},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got, ok := classifyAgentByVersion(tt.installed, tt.available)
+			if ok != tt.wantOK {
+				t.Fatalf("ok = %v, want %v (result %#v)", ok, tt.wantOK, got)
+			}
+			if !ok {
+				return
+			}
+			if got.Status != tt.wantState || got.Outdated == nil || *got.Outdated != tt.wantOutdated || got.UpgradeAvailable != tt.wantUpgradeOffer {
+				t.Fatalf("status = %#v, want state=%q outdated=%v upgrade=%v", got, tt.wantState, tt.wantOutdated, tt.wantUpgradeOffer)
+			}
+		})
+	}
+}
+
+func TestClassifyWithoutIdentityKeepsUnreachableAgentsUnreachable(t *testing.T) {
+	digest := sha256.Sum256([]byte("bundled"))
+	available := &agent.BinaryIdentity{SHA256: hex.EncodeToString(digest[:]), Architecture: "amd64", Version: "0.4.4"}
+
+	unreachable := classifyWithoutIdentity(available, "0.4.3", errors.Join(errAgentHealthUnreachable, errors.New("dial")))
+	if unreachable.Status != AgentBinaryUnreachable || unreachable.Outdated != nil {
+		t.Fatalf("an agent whose health could not be reached must stay unreachable, got %#v", unreachable)
+	}
+	answered := classifyWithoutIdentity(available, "0.4.3", errors.New("agent health response was not successful"))
+	if answered.Status != AgentBinaryUpdateAvailable || !answered.UpgradeAvailable {
+		t.Fatalf("an agent that answers without identity is judged by version, got %#v", answered)
+	}
+	noVersion := classifyWithoutIdentity(available, "", errors.New("agent health response was not successful"))
+	if noVersion.Status != AgentBinaryUnknown || !noVersion.UpgradeAvailable {
+		t.Fatalf("without a version it stays unknown with the upgrade path, got %#v", noVersion)
+	}
+}

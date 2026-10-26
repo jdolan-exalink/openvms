@@ -75,6 +75,37 @@ func agentVersionIsNewer(version, other string) bool {
 
 func boolPointer(value bool) *bool { return &value }
 
+// classifyAgentByVersion judges an agent by the version it reports when its binary identity is
+// unavailable (the plain HTTP listener has no /v1/health). An agent at or above the bundled
+// version is current and is never offered the bundled binary, which would be a downgrade.
+func classifyAgentByVersion(installedVersion string, available *agent.BinaryIdentity) (agentBinaryStatusResult, bool) {
+	if available == nil || !validAgentBinaryIdentity(*available) {
+		return agentBinaryStatusResult{}, false
+	}
+	if _, ok := parseAgentSemver(installedVersion); !ok {
+		return agentBinaryStatusResult{}, false
+	}
+	if _, ok := parseAgentSemver(available.Version); !ok {
+		return agentBinaryStatusResult{}, false
+	}
+	if agentVersionIsNewer(available.Version, installedVersion) {
+		return agentBinaryStatusResult{Status: AgentBinaryUpdateAvailable, Outdated: boolPointer(true), UpgradeAvailable: true}, true
+	}
+	return agentBinaryStatusResult{Status: AgentBinaryCurrent, Outdated: boolPointer(false)}, true
+}
+
+// classifyWithoutIdentity is the status when the agent answered its metrics but its binary
+// identity could not be read: unreachable stays unreachable, an agent that answered is judged by
+// version when possible, and otherwise it stays unknown.
+func classifyWithoutIdentity(available *agent.BinaryIdentity, installedVersion string, healthErr error) agentBinaryStatusResult {
+	if !errors.Is(healthErr, errAgentHealthUnreachable) {
+		if result, ok := classifyAgentByVersion(installedVersion, available); ok {
+			return result
+		}
+	}
+	return classifyAgentBinaryStatus(true, available, nil, errors.Is(healthErr, errAgentHealthUnreachable))
+}
+
 func validAgentBinaryIdentity(identity agent.BinaryIdentity) bool {
 	if len(identity.SHA256) != sha256.Size*2 || (identity.Architecture != "amd64" && identity.Architecture != "arm64") || len(identity.Version) > 256 || len(identity.Commit) > 256 {
 		return false
