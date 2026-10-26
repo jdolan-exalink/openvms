@@ -1,0 +1,56 @@
+# Universal camera configuration
+Objective: replace the Frigate-shaped camera editor with a capability-driven, backend-independent screen (PRD "Configuración Universal de Cámaras en OpenVMS").
+Branch: one `feat/ucc-*` branch per task from `main`. Delivery: one PR per task. Runner: `go test ./internal/<pkg>/...`, `pnpm --dir apps/web test -- --run <path>`.
+
+## Specs
+Quoted from the PRD; section numbers are the PRD's.
+
+- S1 (§1) "OpenVMS configura la cámara. Los adaptadores traducen la intención del usuario al dispositivo y/o motor correspondiente."
+- S2 (§2) Five principles: "Simple de entrada", "Complejidad progresiva", "Basada en capacidades", "Independiente del backend", "Escape avanzado".
+- S3 (§4-§7) Header with name, "Servidor: Cayastá · Motor: Frigate", quick states "● En línea · ● Grabando · ● Detección activa · ● LPR activo · ONVIF"; permanent preview (play, mute, snapshot, maximize, stream indicator, stream selector); cards Origen / Video (Principal + Detección, Grabación only if different) / Dispositivo / Capacidades; actions Guardar, Descartar cambios, Reiniciar cámara, Abrir interfaz web, Más acciones.
+- S4 (§8) Device web UI: "Abrir dentro de OpenVMS", also "Abrir en nueva pestaña"; agent proxy that is not open, respects permissions and audits access; if the maker blocks embedding, offer new tab automatically. (Delivered by camera-editor C5.)
+- S5 (§9, §24) Navigation "General | Video | Grabación | Detección | Analíticas | Zonas | Integraciones | Avanzado"; tabs are dynamic (PTZ only with PTZ, Fisheye only with fisheye, Analíticas hidden when none).
+- S6 (§10) General: identity, state, association (server, engine, origin, driver), network (passwords never in plain text), applied profile with change / unlink / overrides.
+- S7 (§11-§12) Video speaks in streams (principal, detección, grabación), parameters only when ONVIF/API can change them and only values the device really supports; changes that restart a stream, Frigate or the device are announced before saving; Audio section only when the camera has audio.
+- S8 (§13) Recording abstracted: mode (continua, por eventos, eventos + buffer, deshabilitada), retention, quality, storage summary.
+- S9 (§14-§16, §36) Normalized object catalog (Personas, Vehículos with "Activar todos los vehículos", Animales, Paquetes y objetos, Seguridad / EPP); OpenVMS object → engine objects mapping; the original detected object is kept for search and audit; global catalog vs simplified per-camera selection; engine-specific parameters only in advanced mode.
+- S10 (§17-§19, §37) Analytics as modules (LPR, facial detection vs recognition, vehicle classification and color, clothing color, similar search); detail only when the module is on; LPR source abstracted (OpenVMS, Frigate, Provision ISR, native); "Si Provision solamente devuelve `vehicle` sin subtipo, OpenVMS registra la capacidad real sin inventar precisión."
+- S11 (§20) Visual zone editor on the preview; zones belong to OpenVMS and are translated to the engine; zone links objects, analytics, alarms.
+- S12 (§21-§22) PTZ (move, zoom, focus, speed, presets, tours, home, limits; ONVIF first, then maker API, then specific adapter); Fisheye (mount, orientation, dewarping, 360, 2×180, 3×120, virtual PTZ; keep the original stream, dewarp in view).
+- S13 (§23, §33) Integrations tab is status and association; Advanced is separated by backend (Frigate YAML of the camera, validate, diff; ONVIF profiles/URI/capabilities; Provision parameters).
+- S14 (§25-§28) Inheritance in three levels (engine/server defaults → OpenVMS profile → per-camera override that stores only differences; UI labels each value heredado / definido por perfil / modificado localmente); profile apply shows "Se modificarán 12 parámetros."; groups are central but permissions stay explicit; bulk apply of one section without overwriting the rest, showing affected, incompatible, skipped cameras and restarts.
+- S15 (§29-§32) Desired vs effective state (Sincronizado, Cambios pendientes, Diferencia detectada, Error, No verificable; "La cámara fue modificada externamente." → "Usar configuración de OpenVMS" / "Importar configuración actual" / "Ver diferencias"); pending changes bar "3 cambios sin guardar" with Descartar / Revisar cambios / Guardar; review with Cambios and Impacto before "Aplicar cambios"; rollback "Restaurar configuración anterior".
+- S16 (§34) Contextual YAML ("Avanzado → Editar YAML de detección"): validate syntax and schema, show diff, warn about UI-managed parameters, never overwrite advanced edits silently.
+- S17 (§35) Global Frigate configuration stays separate: "Configuración → Servidores → Frigate → Configuración".
+- S18 (§38-§39) ONVIF is a foundation layer (capabilities, profiles, streams, encoder, PTZ, events, audio, device info); discovery is out of scope but must not be blocked.
+- S19 (§40-§41) Permissions: view, modify, video, recording, analytics, PTZ, camera web, advanced, edit YAML, restart device; audit with user, camera, time, old/new values, origin (UI, perfil, grupo, API, sincronización, YAML, dispositivo externo) and result.
+- S20 (§42) "No se pudo iniciar el stream de grabación." with "Ver información técnica" instead of raw `ffmpeg exited with code 1`.
+- S21 (§43) Works at 1360×768, 1920×1080, 2560×1440 and basic operations on mobile/tablet.
+- S22 (§48) Acceptance: an installer configures a common camera without knowing Frigate; no irrelevant options; PTZ/Fisheye/LPR only when they apply; principal and detection streams shown; impact before applying; advanced access; inherited values identifiable; same experience across backends.
+- S23 (§49) "La implementación no debe acoplar componentes UI directamente a estructuras de Frigate." Normalized model: Camera → Identity, Device, Capabilities, Streams (Primary, Detection, Recording), Recording, Detection, Analytics, Zones, PTZ, Fisheye, Integrations, Overrides.
+
+Assumptions (to confirm):
+- A1 The current schema-driven editor is not thrown away: it becomes the "Avanzado → Frigate" content until each section has a universal replacement (no capability is lost between PRs).
+- A2 The desired state and profiles need new tables (migrations); each lands with its task.
+- A3 The existing camera-editor work (General tab, ONVIF popup, LPR test, camera web view) is reused, not redone.
+
+## Tasks
+Route: inline unless a task has parallel units. Status: all pending.
+
+- [x] U1 (S2, S3, S5, S21) done 517a0f1, bc69fcb. Shell: header with state chips, persistent preview with controls, summary cards, dynamic tabs, "N cambios sin guardar" bar, responsive. Content of each tab comes from today's editor; no model change. Risk: none.
+- U2 (S1, S23, S18) Universal read model: Go package `internal/camconfig` (normalized `Camera`, capabilities, streams) + Frigate read adapter + `GET /api/v1/cameras/{id}/config`; web reads only this model. Risk: item 3 (new public API).
+- U3 (S15, S19) Write path: desired/effective state, change review with impact, apply, audit; Frigate write adapter wrapping today's section patch. Risk: items 1 and 2 (migration, audit contract).
+- U4 (S7) Video + ONVIF parameters: supported values per device, stream restart notice, Audio section.
+- U5 (S9) Detection: object catalog, categories, mapping Frigate, keep original object.
+- U6 (S10) Analytics modules: LPR (Frigate and Provision sources), facial detection vs recognition, color.
+- U7 (S12) PTZ and Fisheye sections.
+- U8 (S10, S12) Provision ISR adapter onto the same model.
+- U9 (S14, S6) Profiles, inheritance labels, overrides, groups, bulk apply. Risk: items 1 and 2.
+- U10 (S16, S13, S20) Advanced: contextual YAML, diff, validation, rollback.
+- U11 (S17) Global Frigate configuration screen (the PRD names it but its phase list omits it).
+- U12 (S19) Granular permissions (new permission names, role migration). Risk: item 2.
+
+## Log
+- L1 (2026-10-26) User: "vamos a trabajar en la UI de configuracion de camara para que sea mas facil la integracioon de las distintas tecnologias soportadas ahora y hacia el futuro, te paso un PRD para que armemos un plan de trabajo" — followed by the PRD "Configuración Universal de Cámaras en OpenVMS" (52 sections). The Specs above quote it; the full text is in the conversation.
+- L2 Findings: today's editor `apps/web/src/routes/FrigateCameraConfig.tsx` is driven by the Frigate JSON schema (`frigateSchemaQuery`, `cameraFrigateDocQuery`, sections ordered from the schema); zones are already OpenVMS-owned (`cameraZonesQuery`); camera groups and bulk edit exist; the Frigate adapter exposes `Capabilities`/`GetCameraConfig` in `internal/frigate`; ONVIF capabilities live in `cameras.onvif_capabilities`.
+- L3 U1 done inline. FrigateCameraConfig.tsx is now header (chips, actions) + persistent preview + summary cards + top tabs + pending-changes bar; the left sidebar is gone. Tab/section mapping lives in `lib/cameraTabs.ts` (unit tested); chips and cards only read the camera row, Frigate config and onvif_capabilities and show a dash otherwise. Existing tests adapted only for navigation (tabs instead of sidebar buttons, "N cambio sin guardar" bar, bulk apply under Más acciones). Deferred: Reiniciar cámara action (S3), preview stream selector is a Sub/Main toggle only, the summary cards use no new API (Origen server name comes from the servers list), Video/PTZ tabs still show Frigate sections until U4/U7.
