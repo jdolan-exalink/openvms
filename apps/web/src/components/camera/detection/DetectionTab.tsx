@@ -2,6 +2,7 @@ import { useQuery } from "@tanstack/react-query";
 import type { ReactNode } from "react";
 import { objectCatalogQuery } from "@/api/queries";
 import { useCameraChange } from "@/components/camera/CameraChangeProvider";
+import { ProvenanceBadge } from "@/components/camera/profile/ProvenanceBadge";
 import { Switch } from "@/components/ui";
 import { DetectionSettings, type DetectionSettingsValue } from "./DetectionSettings";
 import { ObjectCatalogPicker } from "./ObjectCatalogPicker";
@@ -34,11 +35,12 @@ export function DetectionTab({ serverId, readOnly, settings, onMotion, onObjects
     <div className="flex flex-col gap-5">
       <div className="flex flex-col gap-1.5 rounded-m3-lg bg-surface-2 p-3">
         <Switch label="Detección de objetos" checked={enabled === true} disabled={readOnly || enabled === undefined} onChange={(v) => change.setPatch({ detection: { enabled: v } })} />
+        <ProvenanceBadge path="detection.enabled" />
         {enabled === undefined && <p className="text-xs text-muted">El estado de la detección no está disponible.</p>}
       </div>
 
       <section aria-label="Qué detectar" className="flex flex-col gap-2">
-        <h3 className="text-sm font-bold">Qué detectar</h3>
+        <h3 className="flex flex-wrap items-center gap-2 text-sm font-bold">Qué detectar <ProvenanceBadge path="detection.objects" /></h3>
         {catalog.isLoading ? (
           <p className="text-sm text-muted">Cargando catálogo…</p>
         ) : catalog.isError || !catalog.data ? (

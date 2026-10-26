@@ -53,6 +53,7 @@ export function VideoTab({ cameraId, legacy, readOnlyReason }: { cameraId: strin
           key={r.role}
           title={r.title}
           purpose={r.purpose}
+          provenance={["resolution", "fps", "codec", "bitrate_kbps", "gop"].map((f) => `streams.${r.role}.${f}`)}
           summary={streamSummary({ ...r.modelStream, codec: r.current.codec, width: r.current.resolution?.width, height: r.current.resolution?.height, fps: r.current.fps })}
         >
           <fieldset disabled={!!readOnlyReason} className="contents">

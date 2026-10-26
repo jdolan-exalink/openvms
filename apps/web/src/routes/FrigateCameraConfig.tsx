@@ -15,6 +15,7 @@ import {
 import { CameraEnabledSwitch, CameraTypeSelect } from "@/components/camera/CameraTopControls";
 import { DetectionTab } from "@/components/camera/detection/DetectionTab";
 import { CameraChangeProvider, useCameraChange } from "@/components/camera/CameraChangeProvider";
+import { ProfileCard } from "@/components/camera/profile/ProfileCard";
 import { CameraHeader } from "@/components/camera/CameraHeader";
 import { SyncStatusPanel } from "@/components/camera/SyncStatusPanel";
 import { CameraPreview } from "@/components/camera/CameraPreview";
@@ -706,6 +707,8 @@ function CameraGeneral({
         canManage={canManage}
         onStageLpr={stage("lpr") ? (next) => frigate.setSection("lpr", setIn(frigate.valueOf("lpr"), ["enabled"], next)) : undefined}
       />
+
+      <ProfileCard cameraId={cameraId} />
 
       <FrigateGeneralFields f={frigate} />
 
