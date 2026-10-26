@@ -212,3 +212,5 @@ Failure behaviour: resumes after agent restart ____  resends missed events ____ 
 Long Polling Port (documented 8080): reachable yes/no, what the manual says it speaks ____ (do not probe beyond the manual)
 Surprises: ____
 ```
+
+After entering the values in the camera, use the "Probar conexión" card in the camera editor to verify each link; see [connection-test.md](connection-test.md).

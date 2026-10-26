@@ -36,8 +36,11 @@ function registrationLine(r: ConfigureResult): string | null {
  */
 export function ProvisionConfigureResult({ result }: { result: ConfigureResult }) {
   const registration = registrationLine(result);
+  // Manual instructions are how this integration works, not a failure: only a registration problem is a warning.
+  const tone = result.success ? "bg-ok/15 text-ok" : result.registration_error ? "bg-warn/15 text-warn" : "bg-surface-2 text-on-surface";
   return (
-    <div className={cn("flex flex-col gap-1.5 rounded-m3-xl p-3 text-xs", result.success ? "bg-ok/15 text-ok" : "bg-warn/15 text-warn")}>
+    <div className={cn("flex flex-col gap-1.5 rounded-m3-xl p-3 text-xs", tone)}>
+      {!result.success && <span className="text-[11px] font-bold uppercase tracking-wider opacity-80">Instrucciones manuales</span>}
       <div className="flex items-center gap-2 font-bold">
         <Icon icon={result.success ? CheckCircle2 : Info} size="xs" />
         <span>{result.message || (result.success ? "La cámara ya reporta a este agente." : "Falta configurar la cámara.")}</span>
