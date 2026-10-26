@@ -13,6 +13,7 @@ import {
   TriangleAlert,
 } from "lucide-react";
 import { CameraEnabledSwitch, CameraTypeSelect } from "@/components/camera/CameraTopControls";
+import { DetectionTab } from "@/components/camera/detection/DetectionTab";
 import { CameraChangeProvider, useCameraChange } from "@/components/camera/CameraChangeProvider";
 import { CameraHeader } from "@/components/camera/CameraHeader";
 import { SyncStatusPanel } from "@/components/camera/SyncStatusPanel";
@@ -344,6 +345,40 @@ function FrigateCameraConfigScreen({ cameraId }: { cameraId: string }) {
   const dirtyTabs = new Set<CameraTabId>(dirty.flatMap((s) => [...tabs.filter((t) => t.sections.includes(s)).map((t) => t.id), ...(GENERAL_SECTIONS.includes(s) ? (["general"] as const) : [])]));
   const isPseudo = section.startsWith("__");
   const server = servers.data?.find((s) => s.id === serverId);
+  const subNav =
+    tab.sections.length > 1 ? (
+      <nav aria-label={`Subsecciones de ${tab.label}`} className="flex flex-wrap gap-2">
+        {tab.sections.map((s) => (
+          <button
+            key={s}
+            type="button"
+            aria-current={section === s ? "page" : undefined}
+            onClick={() => setActive(s)}
+            className={cn(
+              "inline-flex min-h-9 items-center gap-2 rounded-m3-lg px-3 text-xs font-bold transition-colors",
+              section === s ? "bg-primary text-on-primary" : "bg-surface-2 text-on-surface hover:bg-surface-3"
+            )}
+          >
+            {sectionTitle(s)}
+            {dirty.includes(s) && <span aria-label="con cambios">●</span>}
+            {!s.startsWith("__") && <LiveBadge live={isLiveSection(s)} />}
+          </button>
+        ))}
+      </nav>
+    ) : null;
+  const sectionPanel = (
+    <SectionPanel
+      section={section}
+      schema={camProps[section]}
+      value={valueOf(section)}
+      onChange={(v) => setEdits((e) => ({ ...e, [section]: v }))}
+      ctx={ctx}
+      camera={doc.data}
+      config={config}
+      onEditZones={() => setZoneEditor(true)}
+    />
+  );
+
   const onApplyToFrigate = (patch: Record<string, unknown>) => {
     setEdits((e) => ({ ...e, onvif: patch }));
     setActive("onvif");
@@ -416,26 +451,7 @@ function FrigateCameraConfigScreen({ cameraId }: { cameraId: string }) {
         onSelect={(t) => setActive(t.sections[0] ?? GENERAL)}
       />
 
-      {tab.sections.length > 1 && (
-        <nav aria-label={`Subsecciones de ${tab.label}`} className="flex flex-wrap gap-2">
-          {tab.sections.map((s) => (
-            <button
-              key={s}
-              type="button"
-              aria-current={section === s ? "page" : undefined}
-              onClick={() => setActive(s)}
-              className={cn(
-                "inline-flex min-h-9 items-center gap-2 rounded-m3-lg px-3 text-xs font-bold transition-colors",
-                section === s ? "bg-primary text-on-primary" : "bg-surface-2 text-on-surface hover:bg-surface-3"
-              )}
-            >
-              {sectionTitle(s)}
-              {dirty.includes(s) && <span aria-label="con cambios">●</span>}
-              {!s.startsWith("__") && <LiveBadge live={isLiveSection(s)} />}
-            </button>
-          ))}
-        </nav>
-      )}
+      {tab.id !== "detect" && subNav}
 
       <section
         aria-label={section === CAMERA_WEB ? "Acceso web a la cámara" : sectionTitle(section)}
@@ -444,6 +460,21 @@ function FrigateCameraConfigScreen({ cameraId }: { cameraId: string }) {
         {tab.id === "analytics" && cameraType === "lpr_frigate" && section !== PROVISION && <LprTestCard cameraId={cameraId} engine="frigate" />}
         {tab.sections.length === 0 ? (
           <p className="text-sm text-muted">Esta versión de Frigate no expone ajustes en esta pestaña.</p>
+        ) : tab.id === "detect" ? (
+          <DetectionTab
+            serverId={serverId}
+            readOnly={readOnly}
+            settings={{ motion: valueOf("motion"), objects: objectsDraft, zones: Object.keys(isRec(valueOf("zones")) ? (valueOf("zones") as Record<string, unknown>) : {}) }}
+            onMotion={(v) => setSection("motion", v)}
+            onObjects={(v) => setSection("objects", v)}
+            onOpenZones={() => setZoneEditor(true)}
+            legacy={
+              <>
+                {subNav}
+                {sectionPanel}
+              </>
+            }
+          />
         ) : section === GENERAL ? (
           <CameraGeneral cameraId={cameraId} canManage={canManageCamera} frigate={general} onApplyToFrigate={onApplyToFrigate} />
         ) : section === FISHEYE ? (
@@ -476,16 +507,7 @@ function FrigateCameraConfigScreen({ cameraId }: { cameraId: string }) {
             onRestored={() => setNeedsRestart(true)}
           />
         ) : (
-          <SectionPanel
-            section={section}
-            schema={camProps[section]}
-            value={valueOf(section)}
-            onChange={(v) => setEdits((e) => ({ ...e, [section]: v }))}
-            ctx={ctx}
-            camera={doc.data}
-            config={config}
-            onEditZones={() => setZoneEditor(true)}
-          />
+          sectionPanel
         )}
 
         {!isPseudo && Object.keys(errors).some((p) => p.split(".")[0] === section) && (
