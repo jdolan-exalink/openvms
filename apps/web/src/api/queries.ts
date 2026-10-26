@@ -139,6 +139,14 @@ export const cameraConfigQuery = (cameraId: string) =>
       unwrap(await api.GET("/api/v1/cameras/{cameraId}/normalized-config", { params: { path: { cameraId } } })),
   });
 
+/** Video values the camera itself supports, per stream (needs the ONVIF credential permissions). */
+export const cameraVideoOptionsQuery = (cameraId: string) =>
+  queryOptions({
+    queryKey: ["cameras", cameraId, "video-options"],
+    queryFn: async () =>
+      unwrap(await api.GET("/api/v1/cameras/{cameraId}/video-options", { params: { path: { cameraId } } })),
+  });
+
 /** Full effective Frigate config of a camera (schema-driven editor). */
 export const cameraFrigateDocQuery = (cameraId: string) =>
   queryOptions({

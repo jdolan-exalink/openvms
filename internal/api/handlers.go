@@ -74,6 +74,8 @@ type Handlers struct {
 	camConfig camConfigSource
 	// camConfigWrite replaces the review/apply service in tests; nil uses Inv.
 	camConfigWrite camConfigWriter
+	// camVideo replaces the ONVIF video link lookup in tests; nil uses the camera's credentials.
+	camVideo videoLinkFunc
 
 	// lprTest replaces the LPR link test's lookups in tests; nil uses the services above.
 	lprTest lprTestSource
