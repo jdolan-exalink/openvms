@@ -37,6 +37,9 @@ func (s *Service) OpenCameraEngine(ctx context.Context, actor authz.Actor, camer
 		if err := c.Require(authz.CamerasView, cameraResource(cam)); err != nil {
 			return err
 		}
+		if err := c.RequireCompat(authz.CamerasConfigView, cameraResource(cam)); err != nil {
+			return err
+		}
 		if srv, err = q.GetServer(ctx, cam.ServerID); err != nil {
 			return notFoundOr(err)
 		}

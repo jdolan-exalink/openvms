@@ -381,6 +381,19 @@ func (s *Service) RequireServerManageAndConfigSecrets(ctx context.Context, actor
 	})
 }
 
+// RequireCameraWebAccess requires cameras.web.access on the camera; the legacy pair servers.manage
+// plus servers.config.secrets on its server is accepted as equivalent (authz.CompatFor), unless the
+// actor is explicitly denied the new permission.
+func (s *Service) RequireCameraWebAccess(ctx context.Context, actor authz.Actor, cameraID uuid.UUID) error {
+	return s.tx(ctx, actor, func(q *db.Queries, c *access.Checker) error {
+		cam, err := q.GetCamera(ctx, cameraID)
+		if err != nil {
+			return notFoundOr(err)
+		}
+		return c.RequireCompat(authz.CamerasWebAccess, cameraResource(cam))
+	})
+}
+
 // SaveServerFrigateRaw validates (through Frigate) and writes a full config.yml, storing a
 // revision. Requires servers.config and servers.config.secrets.
 func (s *Service) SaveServerFrigateRaw(ctx context.Context, actor authz.Actor, serverID uuid.UUID, yamlText string, restart bool) (FrigateRawSaveResult, error) {

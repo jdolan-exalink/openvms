@@ -494,8 +494,14 @@ describe("FrigateCameraConfig", () => {
         await waitFor(() => expect(screen.queryByRole("tab", { name: /^Analíticas/ })).not.toBeInTheDocument());
       });
 
+      it("keeps the analytics modules read-only for a granular user without cameras.config.analytics", async () => {
+        mountFull({ config: { lpr: { enabled: false } } }, { "/api/v1/cameras/c1/normalized-config": model(true), "/api/v1/me": () => json({ id: "u", tenant_id: "t", grants: [{ permission: "servers.config", effect: "allow" }, { permission: "cameras.config.edit", effect: "allow" }] }) });
+        await goTo("Analíticas");
+        expect(within(await screen.findByTestId("module-lpr")).getByRole("switch")).toBeDisabled();
+      });
+
       it("shows Analíticas with the module cards when a module is available, and stages the LPR switch", async () => {
-        mountFull({ config: { lpr: { enabled: false } } }, { "/api/v1/cameras/c1/normalized-config": model(true) });
+        mountFull({ config: { lpr: { enabled: false } } }, { "/api/v1/cameras/c1/normalized-config": model(true), "/api/v1/me": () => json({ id: "u", tenant_id: "t", grants: [{ permission: "servers.config", effect: "allow" }] }) });
         await goTo("Analíticas");
         const card = await screen.findByTestId("module-lpr");
         fireEvent.click(within(card).getByRole("switch"));
@@ -755,6 +761,17 @@ describe("FrigateCameraConfig", () => {
       mountFull({}, { "/api/v1/me": () => json({ id: "u", tenant_id: "t", grants: [{ permission: "cameras.manage", effect: "allow" }, { permission: "servers.manage", effect: "allow" }, { permission: "servers.config.secrets", effect: "allow" }] }) });
       fireEvent.click(await screen.findByRole("button", { name: "Abrir interfaz web" }));
       expect(await screen.findByRole("region", { name: "Web de la cámara" })).toBeInTheDocument();
+    });
+
+    it("opens the camera web view with cameras.web.access alone and hides it for servers.config only", async () => {
+      mountFull({}, { "/api/v1/me": () => json({ id: "u", tenant_id: "t", grants: [{ permission: "cameras.web.access", effect: "allow" }] }) });
+      expect(await screen.findByRole("button", { name: "Abrir interfaz web" })).toBeInTheDocument();
+    });
+
+    it("hides Abrir interfaz web for a servers.config holder without web access", async () => {
+      mountFull({}, { "/api/v1/me": () => json({ id: "u", tenant_id: "t", grants: [{ permission: "servers.config", effect: "allow" }, { permission: "cameras.manage", effect: "allow" }] }) });
+      await screen.findByRole("tab", { name: "General" });
+      expect(screen.queryByRole("button", { name: "Abrir interfaz web" })).not.toBeInTheDocument();
     });
 
     it("hides Abrir interfaz web without the permissions", async () => {

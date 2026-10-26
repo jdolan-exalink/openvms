@@ -87,14 +87,42 @@ func (w sectionWriter) PatchSections(ctx context.Context, sections map[string]an
 	return err
 }
 
+// SectionsForbiddenError is a patch that touches sections the actor may not change. It matches
+// access.ErrForbidden; Sections names only the denied sections, never their data.
+type SectionsForbiddenError struct{ Sections []string }
+
+func (e *SectionsForbiddenError) Error() string { return "forbidden" }
+func (e *SectionsForbiddenError) Unwrap() error { return access.ErrForbidden }
+
+// sectionPermission is the permission each patch section needs, on top of servers.config.
+var sectionPermission = map[string]authz.Permission{
+	"detection": authz.CamerasConfigEdit, "recording": authz.CamerasConfigRecording,
+	"analytics": authz.CamerasConfigAnalytics, "video": authz.CamerasConfigVideo,
+}
+
+// requireSections requires the permission of EVERY section the patch touches and reports all
+// the denied ones together.
+func requireSections(c *access.Checker, cam db.GetCameraRow, patch camconfig.Patch) error {
+	var denied []string
+	for _, sec := range patch.Sections() {
+		if !c.CanCompat(sectionPermission[sec], cameraResource(cam)) {
+			denied = append(denied, sec)
+		}
+	}
+	if len(denied) > 0 {
+		return &SectionsForbiddenError{Sections: denied}
+	}
+	return nil
+}
+
 type configTarget struct {
 	cam db.GetCameraRow
 	srv db.GetServerRow
 }
 
 // loadConfigTarget loads the camera and its server and requires the permission the Frigate
-// config PATCH needs (servers.config on the server).
-func (s *Service) loadConfigTarget(ctx context.Context, id uuid.UUID, q *db.Queries, c *access.Checker) (configTarget, error) {
+// config PATCH needs (servers.config on the server) plus one permission per patch section.
+func (s *Service) loadConfigTarget(ctx context.Context, id uuid.UUID, q *db.Queries, c *access.Checker, patch camconfig.Patch) (configTarget, error) {
 	var t configTarget
 	var err error
 	if t.cam, err = q.GetCamera(ctx, id); err != nil {
@@ -103,7 +131,10 @@ func (s *Service) loadConfigTarget(ctx context.Context, id uuid.UUID, q *db.Quer
 	if t.srv, err = q.GetServer(ctx, t.cam.ServerID); err != nil {
 		return t, notFoundOr(err)
 	}
-	return t, c.Require(authz.ServersConfig, access.Server(t.srv.TenantID, t.srv.SiteID, t.srv.ID))
+	if err = c.Require(authz.ServersConfig, access.Server(t.srv.TenantID, t.srv.SiteID, t.srv.ID)); err != nil {
+		return t, err
+	}
+	return t, requireSections(c, t.cam, patch)
 }
 
 // configAdapter builds the Frigate adapter of a camera; an unreachable server yields an
@@ -151,7 +182,7 @@ func (s *Service) ReviewCameraConfigWith(ctx context.Context, actor authz.Actor,
 	var t configTarget
 	err := s.tx(ctx, actor, func(q *db.Queries, c *access.Checker) error {
 		var err error
-		t, err = s.loadConfigTarget(ctx, id, q, c)
+		t, err = s.loadConfigTarget(ctx, id, q, c, patch.Normalized())
 		return err
 	})
 	if err != nil {
@@ -198,7 +229,7 @@ func (s *Service) ApplyCameraConfigWith(ctx context.Context, actor authz.Actor, 
 		var pre configTarget
 		if err := s.tx(ctx, actor, func(q *db.Queries, c *access.Checker) error {
 			var err error
-			pre, err = s.loadConfigTarget(ctx, id, q, c)
+			pre, err = s.loadConfigTarget(ctx, id, q, c, patch)
 			return err
 		}); err != nil {
 			return ConfigApplyResult{}, err
@@ -218,7 +249,7 @@ func (s *Service) ApplyCameraConfigWith(ctx context.Context, actor authz.Actor, 
 	var inherited camconfig.Patch
 	err := s.tx(ctx, actor, func(q *db.Queries, c *access.Checker) error {
 		var err error
-		if t, err = s.loadConfigTarget(ctx, id, q, c); err != nil {
+		if t, err = s.loadConfigTarget(ctx, id, q, c, patch); err != nil {
 			return err
 		}
 		if err = q.EnsureCameraConfigState(ctx, db.EnsureCameraConfigStateParams{CameraID: t.cam.ID, TenantID: t.cam.TenantID}); err != nil {

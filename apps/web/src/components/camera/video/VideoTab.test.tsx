@@ -31,7 +31,7 @@ function Probe() {
 }
 const patchSeen = () => JSON.parse(screen.getByTestId("patch").textContent ?? "null") as unknown;
 
-function mount(opts: { model?: object; options: object | (() => Response); legacy?: boolean }) {
+function mount(opts: { model?: object; options: object | (() => Response); legacy?: boolean; readOnlyReason?: string }) {
   vi.stubGlobal("fetch", stubApi({
     "/api/v1/cameras/c1/normalized-config": () => json(opts.model ?? model()),
     "/api/v1/cameras/c1/video-options": typeof opts.options === "function" ? (opts.options as () => Response) : () => json(opts.options),
@@ -39,7 +39,7 @@ function mount(opts: { model?: object; options: object | (() => Response); legac
   render(
     <QueryClientProvider client={new QueryClient({ defaultOptions: { queries: { retry: false } } })}>
       <CameraChangeProvider cameraId="c1">
-        <VideoTab cameraId="c1" legacy={opts.legacy === false ? undefined : <p>editor ffmpeg heredado</p>} />
+        <VideoTab cameraId="c1" readOnlyReason={opts.readOnlyReason} legacy={opts.legacy === false ? undefined : <p>editor ffmpeg heredado</p>} />
         <Probe />
       </CameraChangeProvider>
     </QueryClientProvider>,
@@ -49,6 +49,19 @@ function mount(opts: { model?: object; options: object | (() => Response); legac
 const available = (streams: object[] = [primaryOptions()]) => ({ camera_id: "c1", available: true, streams });
 
 describe("VideoTab", () => {
+  it("is read-only with the reason when the user lacks cameras.config.video", async () => {
+    mount({ options: available(), readOnlyReason: "Requiere el permiso cameras.config.video." });
+    const card = await screen.findByRole("region", { name: "Stream principal" });
+    expect(await within(card).findByLabelText(/^Códec/)).toBeDisabled();
+    expect(screen.getByRole("note")).toHaveTextContent("cameras.config.video");
+  });
+
+  it("stays editable without a reason", async () => {
+    mount({ options: available() });
+    const card = await screen.findByRole("region", { name: "Stream principal" });
+    expect(await within(card).findByLabelText(/^Códec/)).toBeEnabled();
+  });
+
   it("shows principal and detection cards with their summary line, and no recording card", async () => {
     mount({ options: available() });
     await waitFor(() => expect(screen.getByTestId("summary-Stream principal")).toHaveTextContent("1920×1080 · 15 FPS · H.264"));

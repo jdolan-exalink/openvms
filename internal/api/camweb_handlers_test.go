@@ -45,17 +45,19 @@ func (f *recordingForwarder) Forward(_ context.Context, _ authz.Actor, _ uuid.UU
 	return resp, nil
 }
 
-func cameraWebHandlers(fwd camweb.Forwarder, authorize, ready func(context.Context, authz.Actor, uuid.UUID) error) *Handlers {
+func cameraWebHandlers(fwd camweb.Forwarder, authorize func(context.Context, authz.Actor, camweb.Camera) error, ready func(context.Context, authz.Actor, uuid.UUID) error) *Handlers {
 	return &Handlers{CameraWeb: camweb.NewService(camweb.Config{}, fwd, authorize, ready)}
 }
 
 func okFn(context.Context, authz.Actor, uuid.UUID) error { return nil }
 
+func okCam(context.Context, authz.Actor, camweb.Camera) error { return nil }
+
 func TestCreateCameraWebSessionMapsOutcomes(t *testing.T) {
 	cam := camweb.Camera{ID: uuid.New(), ServerID: uuid.New(), Host: "192.168.1.40"}
 	a := authz.Actor{UserID: uuid.New()}
 	fwd := &recordingForwarder{proxied: true}
-	h := cameraWebHandlers(fwd, okFn, okFn)
+	h := cameraWebHandlers(fwd, okCam, okFn)
 
 	got, err := h.openCameraWeb(context.Background(), a, cam, nil)
 	ok, isOK := got.(gen.CreateCameraWebSession200JSONResponse)
@@ -79,20 +81,20 @@ func TestCreateCameraWebSessionMapsOutcomes(t *testing.T) {
 	if got, _ := h.openCameraWeb(context.Background(), a, noAddr, nil); !is[gen.CreateCameraWebSession404JSONResponse](got) {
 		t.Errorf("loopback camera = %#v, want 404", got)
 	}
-	noAgent := cameraWebHandlers(fwd, okFn, func(context.Context, authz.Actor, uuid.UUID) error { return camweb.ErrNoAgent })
+	noAgent := cameraWebHandlers(fwd, okCam, func(context.Context, authz.Actor, uuid.UUID) error { return camweb.ErrNoAgent })
 	if got, _ := noAgent.openCameraWeb(context.Background(), a, cam, nil); !is[gen.CreateCameraWebSession409JSONResponse](got) {
 		t.Errorf("no agent = %#v, want 409", got)
 	}
-	old := cameraWebHandlers(&recordingForwarder{status: 404}, okFn, okFn) // an agent without the route: 404, no proxy marker
+	old := cameraWebHandlers(&recordingForwarder{status: 404}, okCam, okFn) // an agent without the route: 404, no proxy marker
 	if got, _ := old.openCameraWeb(context.Background(), a, cam, nil); !is[gen.CreateCameraWebSession409JSONResponse](got) {
 		t.Errorf("old agent = %#v, want 409", got)
 	}
-	down := cameraWebHandlers(&recordingForwarder{err: errors.New("dial")}, okFn, okFn)
+	down := cameraWebHandlers(&recordingForwarder{err: errors.New("dial")}, okCam, okFn)
 	if got, _ := down.openCameraWeb(context.Background(), a, cam, nil); !is[gen.CreateCameraWebSession502JSONResponse](got) {
 		t.Errorf("unreachable = %#v, want 502", got)
 	}
 	deny := errors.New("forbidden")
-	denied := cameraWebHandlers(fwd, func(context.Context, authz.Actor, uuid.UUID) error { return deny }, okFn)
+	denied := cameraWebHandlers(fwd, func(context.Context, authz.Actor, camweb.Camera) error { return deny }, okFn)
 	n := len(fwd.targets)
 	if _, err := denied.openCameraWeb(context.Background(), a, cam, nil); !errors.Is(err, deny) {
 		t.Errorf("permission error must pass through to the 403 mapper: %v", err)
@@ -106,7 +108,7 @@ func is[T any](v any) bool { _, ok := v.(T); return ok }
 
 func TestCamproxyRouteNeedsNoCookieButSessionsAreOpaque(t *testing.T) {
 	log := slog.New(slog.NewTextHandler(io.Discard, nil))
-	h := cameraWebHandlers(&recordingForwarder{proxied: true}, okFn, okFn)
+	h := cameraWebHandlers(&recordingForwarder{proxied: true}, okCam, okFn)
 	h.Log = log
 	router, err := NewRouter(h, log, Options{Queries: db.New(nil)}) // Authenticate is active: any use of Queries would panic
 	if err != nil {

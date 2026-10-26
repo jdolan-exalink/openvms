@@ -58,7 +58,7 @@ import {
 } from "@/lib/frigateSchema";
 import { pickerLabels } from "@/lib/labelEmoji";
 import { loadRestart, saveRestart } from "@/lib/frigateRestart";
-import { can } from "@/lib/perm";
+import { can, canCamera } from "@/lib/perm";
 import {
   ANALYTICS_MODULES, analyticsTabVisible, buildCameraTabs, CAMERA_WEB, type CameraTabId, FISHEYE, GENERAL, HISTORY, INTEGRATIONS_STATUS, isFisheyeTagged, ONVIF_INFO, PROVISION, PTZ_CONTROL, tabOfSection,
 } from "@/lib/cameraTabs";
@@ -147,8 +147,8 @@ function FrigateCameraConfigScreen({ cameraId }: { cameraId: string }) {
   );
   const version = doc.data?.frigate_version ?? "";
   const readOnly = !doc.data?.editable;
-  // The camera web view opens a session that needs the same permissions as the ONVIF probe.
-  const canOpenCameraWeb = can(me.data, "servers.manage") && can(me.data, "servers.config.secrets");
+  // The camera web view needs cameras.web.access (the legacy servers.manage + secrets pair counts).
+  const canOpenCameraWeb = canCamera(me.data, "cameras.web.access");
   const canRestart = can(me.data, "servers.restart");
   const secretsVisible = !!doc.data?.secrets_visible;
   const needsRestart = serverId ? (restartPending[serverId] ?? loadRestart(serverId)) : false;
@@ -336,6 +336,8 @@ function FrigateCameraConfigScreen({ cameraId }: { cameraId: string }) {
 
   const cam = camera.data;
   const canManageCamera = can(me.data, "cameras.manage");
+  const canPtz = canCamera(me.data, "cameras.config.ptz");
+  const canEditVideo = canCamera(me.data, "cameras.config.video");
   const provision = !!cam && (isProvisionCamera(cam) || !!cam.tags?.includes("provision"));
   const general: GeneralFrigate = { root, camProps, config, doc: doc.data, ctx, valueOf, setSection };
   const knowsLpr = knowsSection(general, "lpr");
@@ -446,7 +448,7 @@ function FrigateCameraConfigScreen({ cameraId }: { cameraId: string }) {
       )}
 
       <div className="flex flex-col gap-3 lg:flex-row lg:items-stretch">
-        <CameraPreview cameraId={cameraId} name={doc.data.camera_name} serverId={serverId} initialQuality={cam?.default_live_quality} overlay={tab.id === "ptz" && section === PTZ_CONTROL && canManageCamera ? <PtzOverlay cameraId={cameraId} /> : undefined} />
+        <CameraPreview cameraId={cameraId} name={doc.data.camera_name} serverId={serverId} initialQuality={cam?.default_live_quality} overlay={tab.id === "ptz" && section === PTZ_CONTROL && canPtz ? <PtzOverlay cameraId={cameraId} /> : undefined} />
         <CameraSummaryCards
           origin={[
             { label: "Servidor", value: server?.name || NONE },
@@ -476,6 +478,7 @@ function FrigateCameraConfigScreen({ cameraId }: { cameraId: string }) {
         {tab.id === "video" ? (
           <VideoTab
             cameraId={cameraId}
+            readOnlyReason={canEditVideo ? undefined : "Requiere el permiso cameras.config.video."}
             legacy={
               tab.sections.length > 0 &&
               tab.sections.map((s) => (
@@ -500,7 +503,7 @@ function FrigateCameraConfigScreen({ cameraId }: { cameraId: string }) {
         ) : tab.id === "detect" ? (
           <DetectionTab
             serverId={serverId}
-            readOnly={readOnly}
+            readOnly={readOnly || !canCamera(me.data, "cameras.config.edit")}
             settings={{ motion: valueOf("motion"), objects: objectsDraft, zones: Object.keys(isRec(valueOf("zones")) ? (valueOf("zones") as Record<string, unknown>) : {}) }}
             onMotion={(v) => setSection("motion", v)}
             onObjects={(v) => setSection("objects", v)}
@@ -517,7 +520,7 @@ function FrigateCameraConfigScreen({ cameraId }: { cameraId: string }) {
         ) : section === FISHEYE ? (
           <FisheyeTab cameraId={cameraId} cameraName={doc.data.camera_name} canManage={!readOnly} />
         ) : section === ANALYTICS_MODULES ? (
-          <AnalyticsTab cameraId={cameraId} modules={change.config.data?.analytics?.modules} patch={change.patch} setPatch={change.setPatch} readOnly={readOnly} />
+          <AnalyticsTab cameraId={cameraId} modules={change.config.data?.analytics?.modules} patch={change.patch} setPatch={change.setPatch} readOnly={readOnly || !canCamera(me.data, "cameras.config.analytics")} />
         ) : section === PROVISION ? (
           cam && (
             <ProvisionLprSection
@@ -533,7 +536,7 @@ function FrigateCameraConfigScreen({ cameraId }: { cameraId: string }) {
         ) : section === CAMERA_WEB ? (
           <CameraWebView cameraId={cameraId} />
         ) : section === PTZ_CONTROL && tab.id === "ptz" ? (
-          <PtzTab cameraId={cameraId} canManage={canManageCamera} />
+          <PtzTab cameraId={cameraId} canManage={canPtz} />
         ) : section === ONVIF_INFO || section === PTZ_CONTROL ? (
           <CameraOnvifPanel cameraId={cameraId} camera={cam} canManage={canManageCamera} onApplyToFrigate={onApplyToFrigate} />
         ) : section === HISTORY ? (

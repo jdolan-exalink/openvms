@@ -141,18 +141,18 @@ type session struct {
 type Service struct {
 	cfg        Config
 	fwd        Forwarder
-	authorize  func(ctx context.Context, actor authz.Actor, serverID uuid.UUID) error
+	authorize  func(ctx context.Context, actor authz.Actor, cam Camera) error
 	agentReady func(ctx context.Context, actor authz.Actor, serverID uuid.UUID) error
 
 	mu       sync.Mutex
 	sessions map[[32]byte]*session
 }
 
-// NewService builds the service. authorize must enforce servers.manage and config-secret access on
-// the server (it is called when a session opens and again at least every ReauthEvery while it is
+// NewService builds the service. authorize must enforce cameras.web.access on the camera (or the
+// equivalent servers.manage + config-secret pair on its server; it is called when a session opens and again at least every ReauthEvery while it is
 // used); agentReady returns ErrNoAgent when the server has no agent. Expired sessions are removed
 // lazily, so there is no goroutine to stop.
-func NewService(cfg Config, fwd Forwarder, authorize, agentReady func(context.Context, authz.Actor, uuid.UUID) error) *Service {
+func NewService(cfg Config, fwd Forwarder, authorize func(context.Context, authz.Actor, Camera) error, agentReady func(context.Context, authz.Actor, uuid.UUID) error) *Service {
 	cfg.defaults()
 	return &Service{cfg: cfg, fwd: fwd, authorize: authorize, agentReady: agentReady, sessions: map[[32]byte]*session{}}
 }
@@ -168,7 +168,7 @@ func blockedPort(p int) bool { return p == 22 || p == 7419 || p == 7443 }
 
 // Open validates the request, checks the camera answers through the agent and creates a session.
 func (s *Service) Open(ctx context.Context, actor authz.Actor, cam Camera, scheme string, port int) (Opened, error) {
-	if err := s.authorize(ctx, actor, cam.ServerID); err != nil {
+	if err := s.authorize(ctx, actor, cam); err != nil {
 		return Opened{}, err
 	}
 	if (scheme != "http" && scheme != "https") || port < 1 || port > 65535 || blockedPort(port) {

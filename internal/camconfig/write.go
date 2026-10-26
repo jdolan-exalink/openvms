@@ -62,6 +62,25 @@ type Patch struct {
 	Streams *StreamsPatch `json:"streams,omitempty"`
 }
 
+// Sections names the sections a patch touches, in a stable order: detection, recording,
+// analytics and video. Each one is gated by its own permission.
+func (p Patch) Sections() []string {
+	var out []string
+	if p.Detection != nil {
+		out = append(out, "detection")
+	}
+	if p.Recording != nil {
+		out = append(out, "recording")
+	}
+	if p.Analytics != nil {
+		out = append(out, "analytics")
+	}
+	if p.HasVideo() {
+		out = append(out, "video")
+	}
+	return out
+}
+
 // DetectionPatch changes the detection policy.
 type DetectionPatch struct {
 	Enabled *bool     `json:"enabled,omitempty"`

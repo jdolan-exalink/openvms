@@ -10,6 +10,7 @@ import (
 
 	"github.com/google/uuid"
 
+	"github.com/jdolan-exalink/openvms/internal/access"
 	"github.com/jdolan-exalink/openvms/internal/api/gen"
 	"github.com/jdolan-exalink/openvms/internal/authz"
 	"github.com/jdolan-exalink/openvms/internal/camweb"
@@ -25,8 +26,8 @@ import (
 const ActionCameraWebSession = "CAMERA_WEB_SESSION"
 
 // NewCameraWebService wires the camera web view to the inventory permissions and to the agent client
-// of the provisioning service. A session needs servers.manage plus access to configuration secrets on
-// the camera's server, the same pair that protects the ONVIF probe.
+// of the provisioning service. A session needs cameras.web.access on the camera; the legacy pair
+// servers.manage plus configuration secrets on its server stays equivalent.
 func NewCameraWebService(inv *inventory.Service, prov *provision.Service) *camweb.Service {
 	ready := func(ctx context.Context, actor authz.Actor, serverID uuid.UUID) error {
 		switch err := prov.CameraWebAgentReady(ctx, actor, serverID); {
@@ -38,7 +39,9 @@ func NewCameraWebService(inv *inventory.Service, prov *provision.Service) *camwe
 			return camweb.ErrUnreachable
 		}
 	}
-	return camweb.NewService(camweb.Config{}, cameraWebForwarder{prov}, inv.RequireServerManageAndConfigSecrets, ready)
+	return camweb.NewService(camweb.Config{}, cameraWebForwarder{prov}, func(ctx context.Context, actor authz.Actor, cam camweb.Camera) error {
+		return inv.RequireCameraWebAccess(ctx, actor, cam.ID)
+	}, ready)
 }
 
 type cameraWebForwarder struct{ p *provision.Service }
@@ -91,6 +94,9 @@ func (h *Handlers) openCameraWeb(ctx context.Context, a authz.Actor, cam camweb.
 		}
 	}
 	opened, err := h.CameraWeb.Open(ctx, a, cam, scheme, port)
+	if errors.Is(err, access.ErrForbidden) {
+		h.auditCameraWebSession(ctx, a, cam, scheme, port, "denied")
+	}
 	switch {
 	case err == nil:
 	case errors.Is(err, camweb.ErrBadRequest):
@@ -106,16 +112,16 @@ func (h *Handlers) openCameraWeb(ctx context.Context, a authz.Actor, cam camweb.
 	default:
 		return nil, err
 	}
-	h.auditCameraWebSession(ctx, a, cam, scheme, port)
+	h.auditCameraWebSession(ctx, a, cam, scheme, port, "opened")
 	return gen.CreateCameraWebSession200JSONResponse{Url: opened.URL, ExpiresAt: opened.ExpiresAt}, nil
 }
 
-// auditCameraWebSession records who opened which camera and how. Credentials and cookies never pass here.
-func (h *Handlers) auditCameraWebSession(ctx context.Context, a authz.Actor, cam camweb.Camera, scheme string, port int) {
+// auditCameraWebSession records who tried to open which camera, how and with what result (PRD §41). Credentials and cookies never pass here.
+func (h *Handlers) auditCameraWebSession(ctx context.Context, a authz.Actor, cam camweb.Camera, scheme string, port int, result string) {
 	if h.Inv == nil || h.Inv.Store == nil {
 		return
 	}
-	details, err := json.Marshal(map[string]any{"scheme": scheme, "port": port, "server_id": cam.ServerID})
+	details, err := json.Marshal(map[string]any{"scheme": scheme, "port": port, "server_id": cam.ServerID, "result": result, "origin": "ui"})
 	if err != nil {
 		return
 	}

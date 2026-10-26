@@ -70,6 +70,33 @@ func (c *Checker) Can(p authz.Permission, r authz.Resource) bool {
 	return authz.Decide(c.grants, p, r.Covering())
 }
 
+// CanCompat decides a granular camera permission, honoring the legacy permissions that allowed
+// the same action before it existed (see authz.DecideCompat).
+func (c *Checker) CanCompat(p authz.Permission, r authz.Resource) bool {
+	if c.Actor.System {
+		return true
+	}
+	legacy := false
+	if cp, ok := authz.CompatFor(p); ok && len(cp.Legacy) > 0 {
+		legacy = true
+		for _, l := range cp.Legacy {
+			if !authz.Decide(c.grants, l, r.Covering()) {
+				legacy = false
+				break
+			}
+		}
+	}
+	return authz.DecideCompat(c.grants, p, r.Covering(), legacy)
+}
+
+// RequireCompat is Can for granular permissions: a *ForbiddenError unless CanCompat.
+func (c *Checker) RequireCompat(p authz.Permission, r authz.Resource) error {
+	if !c.CanCompat(p, r) {
+		return &ForbiddenError{Permission: p, Resource: r}
+	}
+	return nil
+}
+
 // Require returns a *ForbiddenError (matching ErrForbidden via errors.Is) unless the actor
 // has p on r.
 func (c *Checker) Require(p authz.Permission, r authz.Resource) error {
