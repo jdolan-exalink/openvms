@@ -6,6 +6,7 @@ import { cameraConfigProfileQuery, cameraConfigProfilesQuery, camerasQuery, meQu
 import { Icon } from "@/components/Icon";
 import { Modal } from "@/components/Modal";
 import { ConfirmDialog } from "@/components/ConfirmDialog";
+import { ReapplyOutdated } from "@/components/camera/profile/ReapplyOutdated";
 import { PatchFields } from "@/components/camera/profile/PatchFields";
 import { draftErrors, draftToPatch, leafCount, type PatchDraft, patchToDraft, summarizePatch } from "@/components/camera/profile/patchForm";
 import { Button, Empty, ErrorNote, Field, LinkButton, PageHeader, Pill, Table, TextInput, Textarea, Th } from "@/components/ui";
@@ -62,7 +63,7 @@ export function CameraProfiles() {
       )}
       {editing && <ProfileForm profile={editing === "new" ? undefined : editing} onClose={() => setEditing(null)} />}
       {deleting && <DeleteProfile profile={deleting} onClose={() => setDeleting(null)} />}
-      {following && <FollowersDialog profile={following} onClose={() => setFollowing(null)} />}
+      {following && <FollowersDialog manage={manage} profile={following} onClose={() => setFollowing(null)} />}
     </div>
   );
 }
@@ -129,7 +130,7 @@ function DeleteProfile({ profile, onClose }: { profile: Profile; onClose: () => 
   );
 }
 
-function FollowersDialog({ profile, onClose }: { profile: Profile; onClose: () => void }) {
+function FollowersDialog({ profile, onClose, manage }: { profile: Profile; onClose: () => void; manage?: boolean }) {
   const detail = useQuery(cameraConfigProfileQuery(profile.id));
   const cameras = useQuery(camerasQuery({}));
   const names = new Map(cameras.data?.map((c) => [c.id, c.display_name]));
@@ -141,6 +142,7 @@ function FollowersDialog({ profile, onClose }: { profile: Profile; onClose: () =
         <section aria-label="Cámaras desactualizadas" className="flex flex-col gap-2">
           <h3 className="text-sm font-semibold">Reaplicar a las cámaras desactualizadas</h3>
           <p className="text-xs text-muted">Abrí cada cámara y en «Perfil aplicado» elegí este perfil para revisar y aplicar los cambios.</p>
+          {manage && <ReapplyOutdated profileId={profile.id} cameras={old.map((c) => ({ id: c.camera_id, name: names.get(c.camera_id) ?? c.camera_id }))} />}
           <ul className="flex flex-col gap-1">
             {old.map((c) => (
               <li key={c.camera_id} className="flex items-center justify-between gap-2 text-sm">
