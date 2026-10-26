@@ -63,3 +63,25 @@ Read the original with `GET /v1/backup/original` (a control token from `openvms-
 restore it if the operator wants Frigate back as it was. A plain agent uninstall keeps the backup directory;
 `install-agent.sh --uninstall --purge` removes the whole state directory, backup included. Delete it with
 `DELETE` or by hand when it is no longer wanted.
+
+## Uninstalling from OpenVMS and restoring the original
+
+The uninstall dialog (Servers, **Uninstall agent**) asks what to do with Frigate's configuration when the
+agent holds an original:
+
+- **Keep the current configuration** (default): Frigate is not touched.
+- **Restore the original configuration**: before anything is removed, OpenVMS reads the original from the
+  agent, writes it to Frigate through the usual validated save and restarts Frigate. Cameras OpenVMS added to
+  Frigate may disappear. If the agent has no original, or Frigate rejects the write, the job fails and nothing
+  is uninstalled. If the removal fails after a successful restore, the message says the configuration was
+  already restored.
+- **Keep the backup on the host** (checked by default): leaves `/var/lib/openvms-agent/backup` so another
+  OpenVMS can adopt the server. Unchecking it sends `discard_backup: true` and the uninstall also deletes that
+  directory.
+
+The same choices exist in the API: `POST /api/v1/servers/{serverId}/agent/uninstall` accepts
+`config_action` (`keep` or `restore_original`, default `keep`) and `discard_backup` (default `false`) next to
+`ssh_port` and `ssh_password`; an unknown `config_action` is rejected with `400`.
+
+Running `install-agent.sh --uninstall` by hand keeps the backup and prints where it is and how to restore it
+(copy it over Frigate's `config.yml` and restart Frigate); `--uninstall --purge` removes it.
