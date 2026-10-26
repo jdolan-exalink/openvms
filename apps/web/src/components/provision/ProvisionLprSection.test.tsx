@@ -71,6 +71,30 @@ describe("ProvisionLprSection", () => {
     expect(screen.queryByText(/no aplica estos valores/)).not.toBeInTheDocument();
   });
 
+  it("offers the connection test for the camera", async () => {
+    stubServer(waiting);
+    renderPage(() => <ProvisionLprSection camera={camera} />);
+    expect(await screen.findByRole("button", { name: "Probar conexión" })).toBeInTheDocument();
+  });
+
+  it("presents the manual steps as instructions, not as a failure", async () => {
+    stubServer(waiting);
+    renderPage(() => <ProvisionLprSection camera={camera} />);
+    fireEvent.click(await screen.findByRole("button", { name: "Registrar cámara y preparar configuración" }));
+    expect(await screen.findByText("Instrucciones manuales")).toBeInTheDocument();
+    expect(screen.getByText("Ingresá estos valores en la interfaz web de la cámara.").closest("div[class*='rounded-m3-xl']")?.className).not.toContain("text-warn");
+  });
+
+  it("hides the values when the guide is collapsed and shows them again", async () => {
+    stubServer(waiting);
+    renderPage(() => <ProvisionLprSection camera={camera} />);
+    expect(await screen.findByText("Puerto del Servidor:")).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "Ocultar guía" }));
+    expect(screen.queryByText("Puerto del Servidor:")).not.toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "Ver parámetros" }));
+    expect(screen.getByText("Puerto del Servidor:")).toBeInTheDocument();
+  });
+
   it("shows the registry of the camera's server", async () => {
     stubServer(waiting);
     renderPage(() => <ProvisionLprSection camera={camera} />);

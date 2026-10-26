@@ -17,11 +17,18 @@ const server = (id: string, name: string, site_id: string, extra: object = {}) =
   ...extra,
 });
 
-/** openServerActions opens "Editar servidor", where every action that left the server row now lives. */
-async function openServerActions(name = "frigate-h01") {
+/** openServerDialog opens "Editar servidor" on its default tab (Resumen). */
+async function openServerDialog(name = "frigate-h01") {
   const row = (await screen.findByText(name)).closest("li")!;
   fireEvent.click(await within(row).findByRole("button", { name: "Editar" }));
   return screen.findByRole("dialog", { name: /Editar servidor/ });
+}
+
+/** openServerActions opens "Editar servidor" on its Acciones tab, where every action that left the server row now lives. */
+async function openServerActions(name = "frigate-h01") {
+  const dialog = await openServerDialog(name);
+  fireEvent.click(within(dialog).getByRole("tab", { name: "Acciones" }));
+  return dialog;
 }
 
 function stub() {
@@ -755,6 +762,26 @@ describe("Servers", () => {
         expect(await tone()).toBe("ok");
       });
 
+      it("judges an agent by its version when it exposes no binary identity (plain HTTP listener)", async () => {
+        setup(undefined, undefined, grants, undefined, { installed: true, version: "0.4.4", binary_status: "current", binary_outdated: false, binary_upgrade_available: false, binary_available: { sha256: sha("a"), architecture: "amd64", version: "0.4.4" } });
+        renderPage(Servers);
+        expect(await tone()).toBe("ok");
+        expect(screen.queryByText(/No se pudo verificar el estado del agente/i)).not.toBeInTheDocument();
+      });
+
+      it("offers the update to an agent without identity that is older than the bundled one", async () => {
+        setup(undefined, undefined, grants, undefined, { installed: true, version: "0.4.3", binary_status: "update_available", binary_outdated: true, binary_upgrade_available: true, binary_available: { sha256: sha("a"), architecture: "amd64", version: "0.4.4" } });
+        renderPage(Servers);
+        expect(await screen.findByRole("button", { name: /Actualizar agente/i })).toBeInTheDocument();
+        expect(screen.queryByText(/No se pudo verificar el estado del agente/i)).not.toBeInTheDocument();
+      });
+
+      it("does not trust a current label without identity when the version is older than the bundled one", async () => {
+        setup(undefined, undefined, grants, undefined, { installed: true, version: "0.4.3", binary_status: "current", binary_outdated: false, binary_upgrade_available: false, binary_available: { sha256: sha("a"), architecture: "amd64", version: "0.4.4" } });
+        renderPage(Servers);
+        expect((await screen.findAllByText(/No se pudo verificar el estado del agente/i)).length).toBeGreaterThan(0);
+      });
+
       it("is yellow only when an update is available", async () => {
         setup(undefined, undefined, grants, undefined, { installed: true, version: "0.1.0", binary_status: "update_available", binary_outdated: true, binary_upgrade_available: true, binary_observed: { sha256: sha("1"), architecture: "amd64", version: "0.1.0" }, binary_available: { sha256: sha("2"), architecture: "amd64", version: "0.1.1" } });
         renderPage(Servers);
@@ -1148,6 +1175,7 @@ describe("Servers", () => {
       renderPage(Servers);
       fireEvent.click(await screen.findByRole("button", { name: "Editar" }));
       const dialog = await screen.findByRole("dialog", { name: /Editar servidor/ });
+      fireEvent.click(within(dialog).getByRole("tab", { name: "Conexión" }));
       fireEvent.change(within(dialog).getByLabelText("Nombre"), { target: { value: "frigate-nuevo" } });
       fireEvent.click(within(dialog).getByRole("button", { name: "Guardar" }));
       await waitFor(() => expect(screen.queryByRole("dialog")).not.toBeInTheDocument());
@@ -1160,6 +1188,7 @@ describe("Servers", () => {
       renderPage(Servers);
       fireEvent.click(await screen.findByRole("button", { name: "Editar" }));
       const dialog = await screen.findByRole("dialog", { name: /Editar servidor/ });
+      fireEvent.click(within(dialog).getByRole("tab", { name: "Conexión" }));
       fireEvent.change(within(dialog).getByLabelText(/^Contraseña/), { target: { value: "s3cret" } });
       fireEvent.change(within(dialog).getByLabelText("Sitio"), { target: { value: "s2" } });
       fireEvent.click(within(dialog).getByRole("button", { name: "Guardar" }));
@@ -1173,6 +1202,7 @@ describe("Servers", () => {
       renderPage(Servers);
       fireEvent.click(await screen.findByRole("button", { name: "Editar" }));
       const dialog = await screen.findByRole("dialog", { name: /Editar servidor/ });
+      fireEvent.click(within(dialog).getByRole("tab", { name: "Conexión" }));
       const modeSelect = within(dialog).getByLabelText("Modo de alarmas de eventos");
       expect(modeSelect).toHaveValue("rules_only");
       fireEvent.change(modeSelect, { target: { value: "all_alerts" } });
@@ -1311,6 +1341,111 @@ describe("Servers", () => {
       fireEvent.keyDown(document, { key: "Escape" });
       await waitFor(() => expect(screen.queryByRole("dialog", { name: /Conectar agente/i })).not.toBeInTheDocument());
       expect(screen.getByRole("dialog", { name: /Editar servidor/ })).toBeInTheDocument();
+    });
+  });
+
+  describe("server detail panel", () => {
+    const allow = (permission: string) => ({ permission, effect: "allow", scope_type: "server", scope_id: "a" });
+    const manager = [allow("servers.manage")];
+    const withSecrets = [allow("servers.manage"), allow("servers.config.secrets"), allow("servers.restart")];
+    const same = { sha256: "1".repeat(64), architecture: "amd64", version: "0.4.4" };
+    const agent = { installed: true, version: "0.4.4", binary_status: "current", binary_outdated: false, binary_upgrade_available: false, binary_observed: same, binary_available: same };
+    const yaml = "record:\n  enabled: true\n  retain:\n    days: 30\n    mode: motion\nsnapshots:\n  retain:\n    default: 5\n";
+    const caps = { review: true, preview: true, exports: false, lpr: true, face_recognition: false, semantic_search: false, audio: false, ptz: true };
+    function setupDetail(grants: object[], extra: object = {}) {
+      const fetchMock = vi.fn(stubApi({
+        "/api/v1/servers": () => json({ items: [server("a", "frigate-h01", "s1", { frigate_version: "0.17.1", camera_count: 7, capabilities: caps, storage: { total_mb: 1000000, free_mb: 250000 }, ...extra })] }),
+        "/api/v1/sites": () => json({ items: [{ id: "s1", name: "Helvecia" }] }),
+        "/api/v1/me": () => json({ id: "u", tenant_id: "t", grants }),
+        "/api/v1/servers/a/agent": () => json(agent),
+        "/api/v1/servers/a/frigate-config/raw": () => json({ yaml }),
+        "/api/v1/servers/a/frigate/config": () => json({ config: {} }),
+      }));
+      vi.stubGlobal("fetch", fetchMock);
+      return fetchMock;
+    }
+    const rawCalls = (m: ReturnType<typeof setupDetail>) => m.mock.calls.filter(([r]) => new URL((r as Request).url).pathname.endsWith("/frigate-config/raw"));
+
+    it("opens on the Resumen tab with the server overview", async () => {
+      setupDetail(manager, { status: "degraded", problems: [{ code: "storage_high", used_percent: 93 }] });
+      renderPage(Servers);
+      const dialog = await openServerDialog();
+      const tabs = within(dialog).getAllByRole("tab").map((tab) => tab.textContent);
+      expect(tabs).toEqual(["Resumen", "Conexión", "Frigate", "Acciones"]);
+      expect(within(dialog).getByRole("tab", { name: "Resumen" })).toHaveAttribute("aria-selected", "true");
+      expect(within(dialog).getByRole("tabpanel")).toHaveAccessibleName("Resumen");
+      expect(within(dialog).getByText("7 cámaras")).toBeInTheDocument();
+      expect(within(dialog).getByRole("list", { name: "Motivos del estado degradado" })).toHaveTextContent("93");
+      expect(within(dialog).getByText("Lectura de patentes").closest("li")).toHaveAttribute("data-enabled", "true");
+      expect(within(dialog).getByText("Exportaciones").closest("li")).toHaveAttribute("data-enabled", "false");
+      expect(within(dialog).queryByLabelText("Nombre")).not.toBeInTheDocument();
+      expect(within(dialog).queryByRole("button", { name: /^Eliminar$/ })).not.toBeInTheDocument();
+    });
+
+    it("navigates to the server's cameras from Editar cámaras and closes the dialog", async () => {
+      setupDetail(manager);
+      const view = renderPage(Servers);
+      const dialog = await openServerDialog();
+      fireEvent.click(within(dialog).getByRole("button", { name: "Editar cámaras" }));
+      await waitFor(() => expect(view.router.state.location.pathname).toBe("/cameras"));
+      expect(view.router.state.location.search).toEqual({ server_id: "a" });
+      expect(screen.queryByRole("dialog", { name: /Editar servidor/ })).not.toBeInTheDocument();
+    });
+
+    it("switches tabs and keeps the edit form values while on another tab", async () => {
+      setupDetail(manager);
+      renderPage(Servers);
+      const dialog = await openServerDialog();
+      fireEvent.click(within(dialog).getByRole("tab", { name: "Conexión" }));
+      expect(within(dialog).getByRole("tabpanel")).toHaveAccessibleName("Conexión");
+      fireEvent.change(within(dialog).getByLabelText("Nombre"), { target: { value: "otro-nombre" } });
+      fireEvent.keyDown(within(dialog).getByRole("tab", { name: "Conexión" }), { key: "ArrowRight" });
+      expect(within(dialog).getByRole("tab", { name: "Frigate" })).toHaveAttribute("aria-selected", "true");
+      expect(within(dialog).queryByLabelText("Nombre")).not.toBeInTheDocument();
+      fireEvent.keyDown(within(dialog).getByRole("tab", { name: "Frigate" }), { key: "ArrowLeft" });
+      expect(within(dialog).getByLabelText("Nombre")).toHaveValue("otro-nombre");
+    });
+
+    it("shows the recording summary on the Frigate tab when the user has servers.config.secrets", async () => {
+      setupDetail(withSecrets);
+      renderPage(Servers);
+      const dialog = await openServerDialog();
+      fireEvent.click(within(dialog).getByRole("tab", { name: "Frigate" }));
+      expect(await within(dialog).findByText("30 días")).toBeInTheDocument();
+      expect(within(dialog).getByText("motion")).toBeInTheDocument();
+      expect(within(dialog).getByText("5 días")).toBeInTheDocument();
+    });
+
+    it("explains the missing permission on the Frigate tab and never requests the raw config", async () => {
+      const m = setupDetail(manager);
+      renderPage(Servers);
+      const dialog = await openServerDialog();
+      fireEvent.click(within(dialog).getByRole("tab", { name: "Frigate" }));
+      expect(within(dialog).getByRole("note")).toHaveTextContent(/servers\.config\.secrets/);
+      expect(rawCalls(m)).toHaveLength(0);
+    });
+
+    it("opens the Frigate config editor on top of the dialog and Escape closes only the editor", async () => {
+      setupDetail(withSecrets);
+      renderPage(Servers);
+      const dialog = await openServerDialog();
+      fireEvent.click(within(dialog).getByRole("tab", { name: "Frigate" }));
+      fireEvent.click(within(dialog).getByRole("button", { name: "Abrir editor de configuración de Frigate" }));
+      const editor = await screen.findByRole("dialog", { name: /Configuración de Servidor Frigate/ });
+      expect(editor).not.toBe(dialog);
+      expect(screen.getByRole("dialog", { name: /Editar servidor/ })).toBeInTheDocument();
+      fireEvent.keyDown(document, { key: "Escape" });
+      await waitFor(() => expect(screen.queryByRole("dialog", { name: /Configuración de Servidor Frigate/ })).not.toBeInTheDocument());
+      expect(screen.getByRole("dialog", { name: /Editar servidor/ })).toBeInTheDocument();
+    });
+
+    it("keeps the server actions on the Acciones tab", async () => {
+      setupDetail(withSecrets);
+      renderPage(Servers);
+      const dialog = await openServerActions();
+      expect(within(dialog).getByRole("tab", { name: "Acciones" })).toHaveAttribute("aria-selected", "true");
+      expect(await within(dialog).findByRole("button", { name: /Reiniciar/i })).toBeInTheDocument();
+      expect(within(dialog).getByRole("button", { name: /^Eliminar$/ })).toBeInTheDocument();
     });
   });
 
