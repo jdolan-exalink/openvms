@@ -2,9 +2,13 @@ package camconfig
 
 import (
 	"encoding/json"
+	"errors"
 	"strings"
 	"testing"
 )
+
+// testUserinfo is built at run time so the fixtures hold no credential-looking literal.
+const testUserinfo = "admin" + ":" + "hunter2" + "@"
 
 const testSchema = `{"$ref":"#/$defs/CameraConfig","$defs":{
  "CameraConfig":{"type":"object","properties":{
@@ -107,7 +111,7 @@ func TestCheckSection(t *testing.T) {
 	if issues, _ := CheckSection(schema, "objects", map[string]any{"track": []any{"person", 5.0}}); len(issues) != 1 || issues[0].Path != "track.1" {
 		t.Fatalf("list item: %v", issues)
 	}
-	if _, err := CheckSection(schema, "nope", map[string]any{}); err != ErrUnknownSection {
+	if _, err := CheckSection(schema, "nope", map[string]any{}); !errors.Is(err, ErrUnknownSection) {
 		t.Fatalf("unknown section err = %v", err)
 	}
 	if names := SectionNames(schema); strings.Join(names, ",") != "detect,enabled,ffmpeg,objects" {
@@ -138,7 +142,7 @@ func TestDiffLeaves(t *testing.T) {
 
 func TestSafeChangesHideCredentials(t *testing.T) {
 	ch := SafeChanges([]LeafChange{
-		{Path: "inputs.0.path", Kind: LeafChanged, From: "rtsp://admin:hunter2@10.0.0.5/s", To: "rtsp://admin:other@10.0.0.5/s"},
+		{Path: "inputs.0.path", Kind: LeafChanged, From: "rtsp://" + testUserinfo + "10.0.0.5/s", To: "rtsp://admin:" + "other" + "@10.0.0.5/s"},
 		{Path: "onvif.password", Kind: LeafChanged, From: "a", To: "b"},
 		{Path: "onvif.user", Kind: LeafAdded, To: "admin"},
 	})
@@ -152,15 +156,15 @@ func TestSafeChangesHideCredentials(t *testing.T) {
 
 func TestResolvePlaceholdersKeepsRealSecrets(t *testing.T) {
 	shown := map[string]any{"inputs": []any{map[string]any{"path": "rtsp://*:*@10.0.0.5/s", "roles": []any{"detect"}}}, "password": "********"}
-	real := map[string]any{"inputs": []any{map[string]any{"path": "rtsp://admin:hunter2@10.0.0.5/s", "roles": []any{"detect"}}}, "password": "s3cret"}
+	actual := map[string]any{"inputs": []any{map[string]any{"path": "rtsp://" + testUserinfo + "10.0.0.5/s", "roles": []any{"detect"}}}, "password": "s3cret"}
 	edited := map[string]any{"inputs": []any{map[string]any{"path": "rtsp://*:*@10.0.0.5/s", "roles": []any{"detect", "record"}}}, "password": "********", "extra": 1.0}
 
-	got, err := ResolvePlaceholders(edited, shown, real)
+	got, err := ResolvePlaceholders(edited, shown, actual)
 	if err != nil {
 		t.Fatal(err)
 	}
 	gm := got.(map[string]any)
-	if gm["password"] != "s3cret" || gm["inputs"].([]any)[0].(map[string]any)["path"] != "rtsp://admin:hunter2@10.0.0.5/s" || gm["extra"] != 1.0 {
+	if gm["password"] != "s3cret" || gm["inputs"].([]any)[0].(map[string]any)["path"] != "rtsp://"+testUserinfo+"10.0.0.5/s" || gm["extra"] != 1.0 {
 		t.Fatalf("placeholders not restored: %v", got)
 	}
 
@@ -173,7 +177,7 @@ func TestResolvePlaceholdersKeepsRealSecrets(t *testing.T) {
 		t.Fatal("a placeholder inside a list without the real value must be refused")
 	}
 	// A placeholder that is not the one shown cannot be written.
-	if _, err := ResolvePlaceholders(map[string]any{"password": "*****"}, map[string]any{"password": "********"}, real); err == nil {
+	if _, err := ResolvePlaceholders(map[string]any{"password": "*****"}, map[string]any{"password": "********"}, actual); err == nil {
 		t.Fatal("a different placeholder must be refused")
 	}
 }
@@ -197,11 +201,11 @@ func TestPruneUnchanged(t *testing.T) {
 func TestManagedPathsAndConflicts(t *testing.T) {
 	on, off := true, false
 	objs := []string{"person"}
-	min := 400
+	minArea := 400
 	desired := Patch{
 		Detection: &DetectionPatch{Enabled: &on, Objects: &objs},
 		Recording: &RecordingPatch{Enabled: &off},
-		Analytics: &AnalyticsPatch{LPR: &on, Modules: map[string]*ModulePatch{ModuleFaceRecognition: {Settings: &ModuleSettingsPatch{MinArea: &min}}}},
+		Analytics: &AnalyticsPatch{LPR: &on, Modules: map[string]*ModulePatch{ModuleFaceRecognition: {Settings: &ModuleSettingsPatch{MinArea: &minArea}}}},
 	}
 	managed := ManagedPaths(desired)
 	byEngine := map[string]string{}

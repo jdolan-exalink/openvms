@@ -772,7 +772,7 @@ func resolve(path string, edited, shown, actual any, inList bool) (any, error) {
 }
 
 func errListSecret(path, key string) error {
-	return invalid("%s: contiene un valor oculto que no se puede conservar dentro de una lista; la edición requiere el permiso de secretos", pathLabel(join(path, key)))
+	return invalid("%s: contiene un valor oculto que no se puede conservar dentro de una lista; edítela con el permiso de credenciales", pathLabel(join(path, key)))
 }
 
 func pathLabel(p string) string {

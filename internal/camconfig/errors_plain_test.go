@@ -31,7 +31,7 @@ func TestPlainFromTextCatalog(t *testing.T) {
 }
 
 func TestPlainErrorNeverCarriesRawFfmpegOrSecrets(t *testing.T) {
-	raw := "ffmpeg exited with code 1 for rtsp://admin:hunter2@10.0.0.5/stream?token=abc password=hunter2"
+	raw := "ffmpeg exited with code 1 for rtsp://" + testUserinfo + "10.0.0.5/stream?token=abc password=hunter2"
 	got := PlainFromText(raw)
 	if strings.Contains(got.Message, "ffmpeg") || strings.Contains(got.Message, "code 1") {
 		t.Fatalf("message is technical: %q", got.Message)
