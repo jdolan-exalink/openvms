@@ -1335,6 +1335,7 @@ describe("Servers", () => {
       const dialog = await screen.findByRole("dialog", { name: "Eliminar servidor" });
       expect(dialog).toHaveTextContent("¿Está seguro de eliminar el servidor «frigate-h01»?");
       expect(dialog).toHaveTextContent("Esta acción no se puede deshacer.");
+      expect(dialog).toHaveTextContent("El agente instalado en el host no se desinstala");
       expect(writes(fetchMock, "DELETE")).toHaveLength(0);
       fireEvent.click(within(dialog).getByRole("button", { name: "Eliminar" }));
       await waitFor(() => expect(writes(fetchMock, "DELETE")).toHaveLength(1));

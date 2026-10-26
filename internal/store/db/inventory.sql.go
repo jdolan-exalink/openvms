@@ -1338,12 +1338,36 @@ func (q *Queries) PurgeServerEvents(ctx context.Context, serverID uuid.UUID) (in
 	return result.RowsAffected(), nil
 }
 
+const purgeServerExportJobItems = `-- name: PurgeServerExportJobItems :execrows
+DELETE FROM export_job_items WHERE server_id = $1
+`
+
+func (q *Queries) PurgeServerExportJobItems(ctx context.Context, serverID uuid.UUID) (int64, error) {
+	result, err := q.db.Exec(ctx, purgeServerExportJobItems, serverID)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected(), nil
+}
+
 const purgeServerExports = `-- name: PurgeServerExports :execrows
 DELETE FROM exports WHERE server_id = $1
 `
 
 func (q *Queries) PurgeServerExports(ctx context.Context, serverID uuid.UUID) (int64, error) {
 	result, err := q.db.Exec(ctx, purgeServerExports, serverID)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected(), nil
+}
+
+const purgeServerFaceSightings = `-- name: PurgeServerFaceSightings :execrows
+DELETE FROM face_sightings WHERE server_id = $1
+`
+
+func (q *Queries) PurgeServerFaceSightings(ctx context.Context, serverID uuid.UUID) (int64, error) {
+	result, err := q.db.Exec(ctx, purgeServerFaceSightings, serverID)
 	if err != nil {
 		return 0, err
 	}
@@ -1397,6 +1421,18 @@ DELETE FROM object_snapshots WHERE server_id = $1
 
 func (q *Queries) PurgeServerObjectSnapshots(ctx context.Context, serverID uuid.UUID) (int64, error) {
 	result, err := q.db.Exec(ctx, purgeServerObjectSnapshots, serverID)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected(), nil
+}
+
+const purgeServerObjectTracks = `-- name: PurgeServerObjectTracks :execrows
+DELETE FROM object_tracks WHERE server_id = $1
+`
+
+func (q *Queries) PurgeServerObjectTracks(ctx context.Context, serverID uuid.UUID) (int64, error) {
+	result, err := q.db.Exec(ctx, purgeServerObjectTracks, serverID)
 	if err != nil {
 		return 0, err
 	}
@@ -1476,6 +1512,28 @@ type RenameCameraFolderParams struct {
 func (q *Queries) RenameCameraFolder(ctx context.Context, arg RenameCameraFolderParams) error {
 	_, err := q.db.Exec(ctx, renameCameraFolder, arg.Name, arg.ID)
 	return err
+}
+
+const serverAddressTaken = `-- name: ServerAddressTaken :one
+SELECT EXISTS (
+    SELECT 1 FROM frigate_servers
+    WHERE tenant_id = $1 AND deleted_at IS NULL AND id <> $2
+      AND lower(regexp_replace(base_url, '/+$', '')) = lower(regexp_replace($3::text, '/+$', ''))
+)::boolean AS taken
+`
+
+type ServerAddressTakenParams struct {
+	TenantID uuid.UUID
+	ExceptID uuid.UUID
+	BaseUrl  string
+}
+
+// A server address is registered once per tenant, compared ignoring case and trailing slashes.
+func (q *Queries) ServerAddressTaken(ctx context.Context, arg ServerAddressTakenParams) (bool, error) {
+	row := q.db.QueryRow(ctx, serverAddressTaken, arg.TenantID, arg.ExceptID, arg.BaseUrl)
+	var taken bool
+	err := row.Scan(&taken)
+	return taken, err
 }
 
 const setCameraFolderOrder = `-- name: SetCameraFolderOrder :exec
