@@ -19,7 +19,7 @@ curl -fsSL <release>/install-agent.sh | sudo bash -s -- --port 7419
 |---|---|
 | `--version X.Y.Z` | install that release instead of the one the script came from |
 | `--port N` | port for the first install (default 7419); an existing `agent.env` is never rewritten |
-| `--uninstall` | remove the program and the service, keep `/etc/openvms` and `/var/lib/openvms-agent` |
+| `--uninstall` | remove the program and the service, keep `/etc/openvms` and `/var/lib/openvms-agent`; if a saved original Frigate configuration exists it says where it is and how to restore it (`docs/agent/backup.md`) |
 | `--uninstall --purge` | also remove the configuration and the tokens |
 
 ## What it does
@@ -93,3 +93,8 @@ Registering the printed address and token in OpenVMS is the next step: `docs/age
    (`tools/agent_version.sh`, the CI job "Agent version").
 
 The Frigate compose bundle (`deploy/agent/install.sh`) is a different thing and keeps working as before.
+
+## The original Frigate configuration
+
+When a server is registered, the agent keeps the Frigate `config.yml` as it was before OpenVMS touched it,
+on the host itself. See `docs/agent/backup.md`.

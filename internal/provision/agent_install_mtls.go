@@ -115,8 +115,14 @@ func (m *AgentMTLSInstall) apply(env string, files []agentInstallFile) (string, 
 }
 
 // agentUninstallScript stops and removes the agent, including its enrollment token and the
-// credentials it enrolled for (key, certificate and CA under the state directory).
-func agentUninstallScript() string {
+// credentials it enrolled for (key, certificate and CA under the state directory). With
+// discardBackup it also deletes the original Frigate configuration the agent keeps; without it the
+// backup stays on the host so another OpenVMS can adopt the server.
+func agentUninstallScript(discardBackup bool) string {
+	discard := ""
+	if discardBackup {
+		discard = "rm -rf " + agentStateDir + "/backup\n"
+	}
 	return `set -e
 if systemctl is-active --quiet openvms-agent.service 2>/dev/null; then
   systemctl stop openvms-agent.service
@@ -128,7 +134,7 @@ rm -f /etc/systemd/system/openvms-agent.service
 systemctl daemon-reload
 rm -f /usr/local/bin/openvms-agent
 rm -rf ` + agentMTLSStateDir + `
-rmdir ` + agentStateDir + ` 2>/dev/null || true
+` + discard + `rmdir ` + agentStateDir + ` 2>/dev/null || true
 rm -f ` + agentEnrollTokenPath + `
 rm -rf /etc/openvms
 printf 'openvms_uninstall=ok\n'

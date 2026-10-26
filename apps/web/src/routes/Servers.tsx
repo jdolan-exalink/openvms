@@ -1,5 +1,5 @@
 import { useT } from "@/i18n";
-import { agentInstallFailureText, safeAgentVersion } from "@/lib/agentJobs/failureText";
+import { agentInstallFailureText, agentUninstallFailureText, safeAgentVersion } from "@/lib/agentJobs/failureText";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Activity, AlertTriangle, ArrowDown, ArrowUp, Camera, Check, Copy, Pencil, Plus, RefreshCw, RotateCcw, Terminal, Trash2 } from "lucide-react";
 import { Link, useNavigate, useSearch } from "@tanstack/react-router";
@@ -440,6 +440,8 @@ function computeAgentJobProgress(status?: string, stage?: string, isPending?: bo
       return 85;
     case "registering":
       return 95;
+    case "restoring":
+      return 25;
     case "stopping":
       return 35;
     case "removing":
@@ -469,6 +471,8 @@ function getAgentJobStageLabel(status: string | undefined, stage: string | undef
       return t("servers.agentJobStageActivating");
     case "registering":
       return t("servers.agentJobStageRegistering");
+    case "restoring":
+      return t("servers.agentJobStageRestoring");
     case "stopping":
       return t("servers.agentJobStageStopping");
     case "removing":
@@ -594,7 +598,7 @@ function useAgentJobLogs({
 
     const stageOrder = [
       "validating", "connecting", "transferring", "activating", "registering",
-      "stopping", "removing", "cleaning", "complete",
+      "restoring", "stopping", "removing", "cleaning", "complete",
     ];
     const stageMessages: Record<string, () => string> = {
       validating: () => t("servers.agentLogStageValidating"),
@@ -602,6 +606,7 @@ function useAgentJobLogs({
       transferring: () => t("servers.agentLogStageTransferring"),
       activating: () => t("servers.agentLogStageActivating"),
       registering: () => t("servers.agentLogStageRegistering"),
+      restoring: () => t("servers.agentLogStageRestoring"),
       stopping: () => t("servers.agentLogStageStopping"),
       removing: () => t("servers.agentLogStageRemoving"),
       cleaning: () => t("servers.agentLogStageCleaning"),
@@ -1089,11 +1094,24 @@ function AgentUninstallDialog({
   const tracked = jobs.find((entry) => entry.kind === "uninstall" && entry.serverId === server.id && entry.job.id === job?.id);
   const snapshot = tracked?.job ?? job;
   const [port, setPort] = useState("22");
+  const [restoreOriginal, setRestoreOriginal] = useState(false);
+  const [keepBackup, setKeepBackup] = useState(true);
   const passwordInputRef = useRef<HTMLInputElement>(null);
   const pendingPasswordRef = useRef("");
   const [acceptedAt, setAcceptedAt] = useState<number | null>(null);
   const secureBrowser = location.protocol === "https:";
   const httpsRedirect = useHTTPSRedirect(passwordInputRef, pendingPasswordRef);
+  // The agent's saved original Frigate configuration decides which choices the operator gets. Any
+  // failure (no route, old agent, unreachable) reads as "no backup": the uninstall then keeps the configuration.
+  const backupQuery = useQuery({
+    queryKey: ["server-agent-backup", server.id],
+    queryFn: async () => unwrap(await api.GET("/api/v1/servers/{serverId}/agent/backup", { params: { path: { serverId: server.id } } })),
+    enabled: open && !initialJob,
+    retry: false,
+    staleTime: 0,
+  });
+  const backup = backupQuery.data?.exists ? backupQuery.data : undefined;
+  const willRestore = !!backup && restoreOriginal;
 
   const updateJob = useCallback((next: Schemas["ServerAgentInstallJob"]) => {
     setJob(next);
@@ -1104,10 +1122,10 @@ function AgentUninstallDialog({
   }, [onJob, qc, server.id]);
 
   const start = useMutation({
-    mutationFn: async ({ port, password }: { port: number; password: string }) => {
+    mutationFn: async ({ port, password, configAction, discardBackup }: { port: number; password: string; configAction: "keep" | "restore_original"; discardBackup: boolean }) => {
       return unwrap(await api.POST("/api/v1/servers/{serverId}/agent/uninstall", {
         params: { path: { serverId: server.id } },
-        body: { ssh_port: port, ssh_password: password },
+        body: { ssh_port: port, ssh_password: password, config_action: configAction, discard_backup: discardBackup },
       }));
     },
     onSuccess: (next) => {
@@ -1158,10 +1176,35 @@ function AgentUninstallDialog({
             if (passwordInputRef.current) passwordInputRef.current.value = "";
             pendingPasswordRef.current = "";
             onStart();
-            start.mutate({ port: Number(port), password });
+            start.mutate({ port: Number(port), password, configAction: willRestore ? "restore_original" : "keep", discardBackup: !!backup && !keepBackup });
           }}
         >
           <p className="rounded-m3-lg bg-bad/10 p-3 text-sm text-bad font-medium">{t("servers.agentUninstallScope")}</p>
+          <fieldset className="flex flex-col gap-2 rounded-m3-lg bg-surface-2 p-3">
+            <legend className="px-1 text-sm font-medium">{t("servers.agentUninstallConfigTitle")}</legend>
+            {backupQuery.isPending ? (
+              <p className="text-sm text-muted">{t("servers.agentUninstallBackupLoading")}</p>
+            ) : backup ? (
+              <>
+                <label className="flex items-center gap-2 text-sm">
+                  <input type="radio" name="uninstall-config-action" checked={!restoreOriginal} onChange={() => setRestoreOriginal(false)} />
+                  {t("servers.agentUninstallKeepConfig")}
+                </label>
+                <label className="flex items-center gap-2 text-sm">
+                  <input type="radio" name="uninstall-config-action" checked={restoreOriginal} onChange={() => setRestoreOriginal(true)} />
+                  {t("servers.agentUninstallRestoreConfig", { date: backup.saved_at ? new Date(backup.saved_at).toLocaleString() : "?" })}
+                </label>
+                {restoreOriginal && <p role="alert" className="rounded-m3-lg bg-warn/10 p-3 text-sm">{t("servers.agentUninstallRestoreWarning")}</p>}
+                <label className="flex items-center gap-2 text-sm">
+                  <input type="checkbox" checked={keepBackup} onChange={(event) => setKeepBackup(event.target.checked)} />
+                  {t("servers.agentUninstallKeepBackup")}
+                </label>
+                <p className="text-xs text-muted">{t("servers.agentUninstallKeepBackupHint")}</p>
+              </>
+            ) : (
+              <p className="text-sm text-muted">{t("servers.agentUninstallNoBackup")}</p>
+            )}
+          </fieldset>
           {!secureBrowser && (
             <div className="flex flex-col gap-2">
               <p role="alert" className="rounded-m3-lg bg-bad/10 p-3 text-sm text-bad">{t("servers.agentInstallHttpsRequired")}</p>
@@ -1199,7 +1242,7 @@ function AgentUninstallDialog({
             <p role="status" className="rounded-m3-lg bg-ok/10 p-3 text-sm text-ok font-medium">{t("servers.agentUninstallSuccess")}</p>
           )}
           {snapshot?.status === "failed" && (
-            <p role="alert" className="text-sm text-bad">{snapshot.message ?? t("servers.agentUninstallFailed")}</p>
+            <p role="alert" className="text-sm text-bad">{agentUninstallFailureText(snapshot.message, t) ?? snapshot.message ?? t("servers.agentUninstallFailed")}</p>
           )}
           {pollBudgetExpired && <p role="alert" className="text-sm text-warn">{t("servers.agentInstallOutcomeUnknown")}</p>}
           {(snapshot?.status === "queued" || snapshot?.status === "running") && (

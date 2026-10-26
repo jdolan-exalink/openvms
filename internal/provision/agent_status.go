@@ -104,7 +104,7 @@ func (s *Service) AgentStatus(ctx context.Context, actor authz.Actor, serverID u
 		status := classifyAgentBinaryStatus(true, out.BinaryAvailable, out.BinaryObserved, false)
 		out.BinaryStatus, out.BinaryOutdated, out.BinaryUpgradeAvailable = status.Status, status.Outdated, status.UpgradeAvailable
 	} else {
-		status := classifyAgentBinaryStatus(true, out.BinaryAvailable, nil, errors.Is(healthErr, errAgentHealthUnreachable))
+		status := classifyWithoutIdentity(out.BinaryAvailable, snap.Version, healthErr)
 		out.BinaryStatus, out.BinaryOutdated, out.BinaryUpgradeAvailable = status.Status, status.Outdated, status.UpgradeAvailable
 	}
 	if snap.Version != "" && snap.Version != row.Version {
@@ -153,6 +153,8 @@ func (s *Service) UpdateAgent(ctx context.Context, actor authz.Actor, serverID u
 	for {
 		last, err = s.AgentStatus(ctx, actor, serverID)
 		if err == nil && last.Installed && last.Version == agent.Version && last.Error == "" {
+			// An agent deployed before backups existed gets its copy once it runs this version.
+			s.ensureBackupInBackground(ctx, actor, serverID, "update")
 			return last, nil
 		}
 		if time.Now().After(deadline) {
