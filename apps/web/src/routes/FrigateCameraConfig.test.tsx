@@ -369,6 +369,33 @@ describe("FrigateCameraConfig", () => {
     expect(screen.queryByText("Analítica ONVIF")).not.toBeInTheDocument();
   });
 
+  describe("integration of the LPR test and the camera web view", () => {
+    it("lists the camera web view in the sidebar and shows the viewer when selected", async () => {
+      mountFull({}, { "/api/v1/me": () => json({ id: "u", tenant_id: "t", grants: [{ permission: "cameras.manage", effect: "allow" }, { permission: "servers.manage", effect: "allow" }, { permission: "servers.config.secrets", effect: "allow" }] }) });
+      const nav = await screen.findByRole("navigation", { name: "Secciones de configuración" });
+      fireEvent.click(await within(nav).findByRole("button", { name: /Web de la cámara/ }));
+      expect(await screen.findByRole("region", { name: "Web de la cámara" })).toBeInTheDocument();
+      expect(screen.getByRole("button", { name: "Abrir" })).toBeInTheDocument();
+    });
+
+    it("hides the camera web view entry when the user cannot manage the camera", async () => {
+      mountFull({}, { "/api/v1/me": () => json({ id: "u", tenant_id: "t", grants: [{ permission: "cameras.view", effect: "allow" }] }) });
+      const nav = await screen.findByRole("navigation", { name: "Secciones de configuración" });
+      expect(within(nav).queryByRole("button", { name: /Web de la cámara/ })).not.toBeInTheDocument();
+    });
+
+    it("shows the LPR connection test in General for a camera read by Frigate's own engine", async () => {
+      mountFull({ config: { lpr: { enabled: true } } }, { "/api/v1/cameras/c1": () => cam({ tags: ["lpr"] }) });
+      expect(await screen.findByRole("button", { name: /Probar conexión/ })).toBeInTheDocument();
+    });
+
+    it("does not show the LPR connection test in General for a generic camera", async () => {
+      mountFull({}, { "/api/v1/cameras/c1": () => cam({ tags: [] }) });
+      await screen.findByLabelText("Tipo de cámara");
+      expect(screen.queryByRole("button", { name: /Probar conexión/ })).not.toBeInTheDocument();
+    });
+  });
+
   describe("General fields", () => {
     it("the enabled switch saves the camera in OpenVMS and stages the Frigate section", async () => {
       const fetchMock = mountFull({ config: { enabled: true, detect: { enabled: true, fps: 5 } } });

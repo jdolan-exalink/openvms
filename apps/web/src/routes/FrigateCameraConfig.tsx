@@ -1,8 +1,28 @@
 import {
-  Activity, ArrowLeft, Camera, Car, CircleCheck, Clock, Compass, Eye, HardDrive, History, Layers, Radio,
-  RefreshCw, Settings, ShieldCheck, SlidersHorizontal, Sparkles, TriangleAlert, Video,
+  Activity,
+  ArrowLeft,
+  Camera,
+  Car,
+  CircleCheck,
+  Clock,
+  Compass,
+  Eye,
+  Globe,
+  HardDrive,
+  History,
+  Layers,
+  Radio,
+  RefreshCw,
+  Settings,
+  ShieldCheck,
+  SlidersHorizontal,
+  Sparkles,
+  TriangleAlert,
+  Video,
 } from "lucide-react";
 import { CameraEnabledSwitch, CameraTypeSelect } from "@/components/camera/CameraTopControls";
+import { CameraWebView } from "@/components/camera/CameraWebView";
+import { LprTestCard } from "@/components/provision/LprTestCard";
 import { FrigateGeneralFields, GENERAL_SECTIONS, knowsSection, sectionEnabled, type GeneralFrigate } from "@/components/camera/FrigateGeneralFields";
 import { FisheyeSection } from "@/components/fisheye/FisheyeSection";
 import { AdvertisedAnalytics } from "@/components/provision/AdvertisedAnalytics";
@@ -39,6 +59,7 @@ const HISTORY = "__history";
 const GENERAL = "__general";
 const FISHEYE = "__fisheye";
 const PROVISION = "__provision";
+const CAMERA_WEB = "__camera_web";
 
 function getSectionIcon(section: string) {
   switch (section) {
@@ -46,6 +67,8 @@ function getSectionIcon(section: string) {
       return SlidersHorizontal;
     case PROVISION:
       return Car;
+    case CAMERA_WEB:
+      return Globe;
     case "detect":
     case "ffmpeg":
       return Video;
@@ -118,6 +141,8 @@ export function FrigateCameraConfig() {
   );
   const version = doc.data?.frigate_version ?? "";
   const readOnly = !doc.data?.editable;
+  // The camera web view opens a session that needs the same permissions as the ONVIF probe.
+  const canOpenCameraWeb = can(me.data, "servers.manage") && can(me.data, "servers.config.secrets");
   const canRestart = can(me.data, "servers.restart");
   const secretsVisible = !!doc.data?.secrets_visible;
   const needsRestart = serverId ? (restartPending[serverId] ?? loadRestart(serverId)) : false;
@@ -569,6 +594,28 @@ export function FrigateCameraConfig() {
               </div>
             )}
 
+            {/* Web propia de la cámara, a través del agente */}
+            {canOpenCameraWeb && (
+              <div className="flex flex-col gap-1 rounded-m3-xl border border-outline-variant/40 bg-surface-2 p-1.5">
+                <button
+                  type="button"
+                  aria-current={activeSection === CAMERA_WEB ? "page" : undefined}
+                  onClick={() => setActive(CAMERA_WEB)}
+                  className={cn(
+                    "flex min-h-10 w-full items-center justify-between rounded-m3-lg px-3 text-xs font-bold transition-colors text-left",
+                    activeSection === CAMERA_WEB
+                      ? "bg-primary text-on-primary shadow-sm"
+                      : "text-on-surface hover:bg-surface-3"
+                  )}
+                >
+                  <span className="flex items-center gap-2">
+                    <Icon icon={Globe} size="xs" />
+                    <span>Web de la cámara</span>
+                  </span>
+                </button>
+              </div>
+            )}
+
             {/* 6. Secciones adicionales avanzadas */}
             {otherSections.map((s) => {
               const live = isLiveSection(s);
@@ -627,6 +674,8 @@ export function FrigateCameraConfig() {
               ? "Fisheye"
               : activeSection === PROVISION
               ? "Provision LPR"
+              : activeSection === CAMERA_WEB
+              ? "Acceso web a la cámara"
               : sectionLabel(activeSection ?? "")
           }
           className="flex min-w-0 flex-1 flex-col gap-5 rounded-m3-2xl bg-surface-1 p-5 border border-outline-variant/60 shadow-sm"
@@ -658,6 +707,8 @@ export function FrigateCameraConfig() {
                 }}
               />
             )
+          ) : activeSection === CAMERA_WEB ? (
+            <CameraWebView cameraId={cameraId} />
           ) : activeSection === HISTORY ? (
             <FrigateHistory
               serverId={doc.data.server_id}
@@ -685,6 +736,7 @@ export function FrigateCameraConfig() {
             activeSection !== GENERAL &&
             activeSection !== FISHEYE &&
             activeSection !== PROVISION &&
+            activeSection !== CAMERA_WEB &&
             Object.entries(errors).filter(([p]) => p.split(".")[0] === activeSection).length > 0 && (
               <p role="alert" className="text-xs text-bad">
                 Hay valores no válidos en esta sección.
@@ -965,6 +1017,8 @@ function CameraGeneral({
       />
 
       <FrigateGeneralFields f={frigate} />
+
+      {type === "lpr_frigate" && <LprTestCard cameraId={cameraId} engine="frigate" />}
 
       {/* VMS settings (name, quality, location, description, tags) */}
       <div className="border-t border-outline-variant/60 pt-6">
