@@ -52,3 +52,24 @@ export function agentInstallFailureText(job: Schemas["ServerAgentInstallJob"] | 
   if (job.code === "agent_already_installed") return installedAgentText(job, t);
   return t(failureKeys[job.code]);
 }
+
+const restoredSuffix = "; the original Frigate configuration was already restored";
+const uninstallMessageKeys: Record<string, string> = {
+  "No original configuration is stored on the agent; nothing was changed": "servers.agentUninstallFailNoBackup",
+  "The original configuration could not be read from the agent; nothing was changed": "servers.agentUninstallFailRead",
+  "The original configuration could not be restored; the agent was not uninstalled": "servers.agentUninstallFailRestore",
+  "Could not establish SSH connection to host": "servers.agentUninstallFailSsh",
+  "Failed to remove agent files on host": "servers.agentUninstallFailRemove",
+  "Agent files removed on host but database purge failed": "servers.agentUninstallFailPurge",
+};
+
+/** Localized text for the failure messages of an uninstall job that restores the original configuration; undefined for any other message. */
+export function agentUninstallFailureText(message: string | undefined, t: Translate): string | undefined {
+  if (!message) return undefined;
+  const restored = message.endsWith(restoredSuffix);
+  const base = restored ? message.slice(0, -restoredSuffix.length) : message;
+  const key = uninstallMessageKeys[base];
+  if (!key) return undefined;
+  const text = t(key as Parameters<Translate>[0]);
+  return restored ? `${text} ${t("servers.agentUninstallRestoredNote")}` : text;
+}

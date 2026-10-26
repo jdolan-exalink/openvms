@@ -85,6 +85,8 @@ func statusFor(err error) (int, string, string) {
 		return http.StatusConflict, "discovery_unsupported", "agent discovery is unsupported or the interface is not allowed"
 	case errors.Is(err, provision.ErrAgentDiscoveryUnknown):
 		return http.StatusBadGateway, "discovery_failed", "agent discovery failed"
+	case errors.Is(err, provision.ErrAgentBackupUnsupported):
+		return http.StatusConflict, "agent_backup_unsupported", "update the agent to enable backups"
 	case errors.Is(err, provision.ErrAgentProbeUnavailable), errors.Is(err, provision.ErrAgentProbeFailed):
 		return http.StatusBadGateway, "onvif_probe_failed", "could not complete the ONVIF probe"
 	case errors.Is(err, provision.ErrAgentUnavailable):

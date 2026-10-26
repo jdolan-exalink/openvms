@@ -87,6 +87,9 @@ if [[ "$ACTION" == uninstall ]]; then
     say "Removed the agent and its configuration (tokens included)."
   else
     say "Removed the agent. Kept $CONF_DIR/ and $STATE_DIR/ (use --uninstall --purge to remove them)."
+    if [[ -f "$STATE_DIR/backup/frigate-config.original.yml" ]]; then
+      say "The original Frigate configuration is kept at $STATE_DIR/backup/frigate-config.original.yml: copy it over Frigate's config.yml and restart Frigate to restore it (--purge removes it)."
+    fi
   fi
   exit 0
 fi

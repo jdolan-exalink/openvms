@@ -163,13 +163,25 @@ func (h *Handlers) UninstallServerAgentOverSSH(ctx context.Context, r gen.Uninst
 	if r.Body.SshPort < 1 || r.Body.SshPort > 65535 {
 		return nil, &provision.ValidationError{Msg: "ssh_port must be between 1 and 65535"}
 	}
-	job, err := h.Provision.StartServerAgentUninstall(ctx, a, r.ServerId, provision.AgentUninstallStartRequest{
-		SSHPort: uint16(r.Body.SshPort), Password: *r.Body.SshPassword,
-	})
+	job, err := h.Provision.StartServerAgentUninstall(ctx, a, r.ServerId, agentUninstallStartRequest(r.Body))
 	if err != nil {
 		return nil, err
 	}
 	return gen.UninstallServerAgentOverSSH202JSONResponse(serverAgentInstallJob(job)), nil
+}
+
+// agentUninstallStartRequest maps the body; an omitted config_action means keep and an omitted
+// discard_backup means false. An unknown config_action is rejected later by the provision service.
+func agentUninstallStartRequest(body *gen.ServerAgentUninstallRequest) provision.AgentUninstallStartRequest {
+	// #nosec G115 -- the caller rejects an ssh_port outside 1..65535 before mapping the body.
+	out := provision.AgentUninstallStartRequest{SSHPort: uint16(body.SshPort), Password: *body.SshPassword, ConfigAction: provision.ConfigActionKeep}
+	if body.ConfigAction != nil {
+		out.ConfigAction = string(*body.ConfigAction)
+	}
+	if body.DiscardBackup != nil {
+		out.DiscardBackup = *body.DiscardBackup
+	}
+	return out
 }
 
 func (h *Handlers) GetServerAgentUninstallJob(ctx context.Context, r gen.GetServerAgentUninstallJobRequestObject) (gen.GetServerAgentUninstallJobResponseObject, error) {
@@ -241,6 +253,42 @@ func (h *Handlers) UpdateServerAgent(ctx context.Context, r gen.UpdateServerAgen
 		_, _ = h.SweepServerCamerasOnvif(sweepCtx, a, r.ServerId, nil)
 	}()
 	return gen.UpdateServerAgent200JSONResponse(serverAgent(view)), nil
+}
+
+func (h *Handlers) GetServerAgentBackup(ctx context.Context, r gen.GetServerAgentBackupRequestObject) (gen.GetServerAgentBackupResponseObject, error) {
+	a, err := actor(ctx)
+	if err != nil {
+		return nil, err
+	}
+	backup, err := h.Provision.GetAgentBackup(ctx, a, r.ServerId)
+	if err != nil {
+		return nil, err
+	}
+	return gen.GetServerAgentBackup200JSONResponse(serverAgentBackup(backup)), nil
+}
+
+func (h *Handlers) EnsureServerAgentBackup(ctx context.Context, r gen.EnsureServerAgentBackupRequestObject) (gen.EnsureServerAgentBackupResponseObject, error) {
+	a, err := actor(ctx)
+	if err != nil {
+		return nil, err
+	}
+	backup, err := h.Provision.EnsureOriginalConfigBackup(ctx, a, r.ServerId)
+	if err != nil {
+		return nil, err
+	}
+	return gen.EnsureServerAgentBackup200JSONResponse(serverAgentBackup(backup)), nil
+}
+
+// serverAgentBackup is the metadata of the backup; the configuration itself never leaves the agent.
+func serverAgentBackup(in provision.AgentBackup) gen.ServerAgentBackup {
+	out := gen.ServerAgentBackup{
+		Exists: in.Exists, FrigateVersion: in.FrigateVersion, RegisteredBy: in.RegisteredBy, Sha256: in.SHA256, Size: in.Size,
+	}
+	if !in.SavedAt.IsZero() {
+		saved := in.SavedAt
+		out.SavedAt = &saved
+	}
+	return out
 }
 
 func serverProvision(s provision.Snapshot) gen.ServerProvision {

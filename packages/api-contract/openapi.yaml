@@ -940,12 +940,14 @@ paths:
       tags: [servers]
       operationId: uninstallServerAgentOverSSH
       summary: Uninstall a registered agent from the host over SSH
-      description: Requires servers.manage and servers.config.secrets. Stops and disables the systemd agent service, removes agent files, and removes registration.
+      description: |
+        Requires servers.manage and servers.config.secrets. Stops and disables the systemd agent service, removes agent files, and removes registration.
+        With config_action restore_original the original Frigate configuration saved by the agent is written back (and Frigate restarted) before anything is removed; if the agent holds none, or the write fails, the job fails and nothing is uninstalled.
       requestBody:
         required: true
         content:
           application/json:
-            schema: { $ref: "#/components/schemas/ServerAgentUpdateRequest" }
+            schema: { $ref: "#/components/schemas/ServerAgentUninstallRequest" }
       responses:
         "202":
           description: Ephemeral in-memory uninstall job accepted
@@ -1106,6 +1108,47 @@ paths:
         "401": { $ref: "#/components/responses/Unauthorized" }
         "403": { $ref: "#/components/responses/Forbidden" }
         "404": { $ref: "#/components/responses/NotFound" }
+        "502": { $ref: "#/components/responses/FrigateUnreachable" }
+  /api/v1/servers/{serverId}/agent/backup:
+    parameters:
+      - { name: serverId, in: path, required: true, schema: { type: string, format: uuid } }
+    get:
+      tags: [servers]
+      operationId: getServerAgentBackup
+      summary: Whether the agent keeps the original Frigate configuration
+      description: |
+        Reads the metadata of the original config.yml that the edge agent keeps on its host. The
+        configuration itself is never returned. Requires servers.manage on the server.
+      responses:
+        "200":
+          description: Backup state
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ServerAgentBackup" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { $ref: "#/components/responses/NotFound" }
+        "409": { $ref: "#/components/responses/Conflict" }
+        "502": { $ref: "#/components/responses/FrigateUnreachable" }
+    post:
+      tags: [servers]
+      operationId: ensureServerAgentBackup
+      summary: Make the agent keep the original Frigate configuration
+      description: |
+        Stores, on the agent's host, the Frigate config.yml as it was before OpenVMS changed it. The
+        agent keeps the first copy it receives and never replaces it, so calling this again returns
+        the stored metadata. Requires servers.manage and servers.config.secrets on the server. The
+        409 code agent_backup_unsupported means the agent is older than the release with backups.
+      responses:
+        "200":
+          description: Backup state after the call
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ServerAgentBackup" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { $ref: "#/components/responses/NotFound" }
+        "409": { $ref: "#/components/responses/Conflict" }
         "502": { $ref: "#/components/responses/FrigateUnreachable" }
   /api/v1/cameras:
     get:
@@ -5192,6 +5235,23 @@ components:
       properties:
         ssh_port: { type: integer, minimum: 1, maximum: 65535 }
         ssh_password: { type: string, minLength: 1, maxLength: 4096, writeOnly: true, description: Transient root SSH password; never persisted or echoed. }
+    ServerAgentUninstallRequest:
+      type: object
+      additionalProperties: false
+      description: Same SSH trust rules as ServerAgentUpdateRequest, plus what to do with Frigate's configuration and with the agent's saved original.
+      required: [ssh_port, ssh_password]
+      properties:
+        ssh_port: { type: integer, minimum: 1, maximum: 65535 }
+        ssh_password: { type: string, minLength: 1, maxLength: 4096, writeOnly: true, description: Transient root SSH password; never persisted or echoed. }
+        config_action:
+          type: string
+          enum: [keep, restore_original]
+          default: keep
+          description: keep leaves Frigate's current configuration; restore_original writes back the original saved by the agent and restarts Frigate.
+        discard_backup:
+          type: boolean
+          default: false
+          description: When true the agent's saved original configuration is deleted from the host; otherwise it stays so another OpenVMS can adopt the server.
     AgentEnrollToken:
       type: object
       required: [token, expires_at]
@@ -5700,6 +5760,16 @@ components:
         os: { type: string, description: "Operating system distribution and version" }
         sampled_at: { type: string, format: date-time, description: "UTC time when the agent sample was taken." }
         error: { type: string }
+    ServerAgentBackup:
+      type: object
+      required: [exists, frigate_version, registered_by, sha256, size]
+      properties:
+        exists: { type: boolean, description: "False when the agent holds no original configuration yet." }
+        saved_at: { type: string, format: date-time, nullable: true, description: "UTC time the agent stored the copy." }
+        frigate_version: { type: string }
+        registered_by: { type: string, description: "Free text saying which OpenVMS registered the server." }
+        sha256: { type: string, description: "Hex digest of the stored config.yml." }
+        size: { type: integer, description: "Size of the stored config.yml in bytes." }
     ServerAgentNetworkInterface:
       type: object
       required: [name, rx_bytes_per_second, tx_bytes_per_second]

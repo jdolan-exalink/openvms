@@ -31,7 +31,7 @@ const pollRequestTimeoutMs = 15_000;
 const maximumTrackedJobs = 128;
 
 const statuses = new Set(["queued", "running", "succeeded", "failed"]);
-const stages = new Set(["validating", "connecting", "transferring", "activating", "registering", "stopping", "removing", "cleaning", "complete", "failed"]);
+const stages = new Set(["validating", "connecting", "transferring", "activating", "registering", "restoring", "stopping", "removing", "cleaning", "complete", "failed"]);
 const safeMessages = new Set([
   "Install queued",
   "Validating agent installer",
@@ -40,6 +40,13 @@ const safeMessages = new Set([
   "Stopping and disabling agent service",
   "Purging agent registration from database",
   "Agent uninstalled successfully",
+  "Restoring the original Frigate configuration",
+  "No original configuration is stored on the agent; nothing was changed",
+  "The original configuration could not be read from the agent; nothing was changed",
+  "The original configuration could not be restored; the agent was not uninstalled",
+  "Could not establish SSH connection to host; the original Frigate configuration was already restored",
+  "Failed to remove agent files on host; the original Frigate configuration was already restored",
+  "Agent files removed on host but database purge failed; the original Frigate configuration was already restored",
   "Could not establish SSH connection to host",
   "Failed to remove agent files on host",
   "Agent files removed on host but database purge failed",

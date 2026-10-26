@@ -1,4 +1,4 @@
-import { act, fireEvent, screen, waitFor, within } from "@testing-library/react";
+import { act, cleanup, fireEvent, screen, waitFor, within } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { json, renderPage, stubApi } from "@/test-utils";
 import { Servers, isLanInterfaceName, formatNetworkRate, recordNetworkSample, getNetworkHistory, clearNetworkHistory, LanNetworkMeters } from "./Servers";
@@ -1568,7 +1568,7 @@ describe("Servers", () => {
       fireEvent.click(submitBtn);
 
       await waitFor(() => {
-        expect(uninstallBody).toEqual({ ssh_port: 22, ssh_password: "testpass" });
+        expect(uninstallBody).toEqual({ ssh_port: 22, ssh_password: "testpass", config_action: "keep", discard_backup: false });
       });
 
       // Progress bar and log console appear
@@ -1577,6 +1577,98 @@ describe("Servers", () => {
 
       // Succeeded message
       expect(await within(modal).findByText(/El agente OpenVMS fue desinstalado exitosamente/i)).toBeInTheDocument();
+    });
+
+    async function openUninstallDialog(backup: () => Response, failureMessage?: string) {
+      vi.stubGlobal("location", { protocol: "https:", origin: "https://localhost" });
+      const bodies: Array<Record<string, unknown>> = [];
+      const grants = [
+        { permission: "servers.manage", effect: "allow", scope_type: "server", scope_id: "a" },
+        { permission: "servers.config.secrets", effect: "allow", scope_type: "server", scope_id: "a" },
+      ];
+      const baseStub = stubApi({
+        "/api/v1/servers": () => json({ items: [server("a", "opevms-mimo", "s1")] }),
+        "/api/v1/sites": () => json({ items: [{ id: "s1", name: "Helvecia" }] }),
+        "/api/v1/me": () => json({ id: "u", tenant_id: "t", grants }),
+        "/api/v1/servers/a/agent": () => json({
+          installed: true, version: "0.1.0", binary_status: "current",
+          binary_observed: { sha256: "a".repeat(64), architecture: "amd64", version: "0.1.0" },
+          binary_available: { sha256: "a".repeat(64), architecture: "amd64", version: "0.1.0" },
+          binary_outdated: false, binary_upgrade_available: false,
+        }),
+        "/api/v1/classify/policy": () => json({ servers: [] }),
+        "/api/v1/sync/status": () => json({ items: [] }),
+        "/api/v1/servers/a/agent/backup": backup,
+        "/api/v1/servers/a/agent/uninstall/job-uninstall-1": () => failureMessage
+          ? json({ id: "job-uninstall-1", status: "failed", stage: "failed", message: failureMessage })
+          : json({ id: "job-uninstall-1", status: "succeeded", stage: "complete", message: "Agent uninstalled successfully" }),
+      });
+      vi.stubGlobal("fetch", vi.fn(async (request: Request) => {
+        const url = new URL(request.url);
+        if (url.pathname === "/api/v1/servers/a/agent/uninstall" && request.method === "POST") {
+          bodies.push(await request.clone().json());
+          return json({ id: "job-uninstall-1", status: "queued", stage: "restoring" }, 202);
+        }
+        return baseStub(request);
+      }));
+      renderPage(Servers);
+      fireEvent.click(await screen.findByRole("button", { name: /Desinstalar agente|Uninstall agent/i }));
+      const modal = await screen.findByRole("dialog", { name: /Desinstalar el agente OpenVMS/i });
+      return { modal, bodies };
+    }
+
+    const existingBackup = () => json({ exists: true, saved_at: "2026-10-26T10:00:00Z", frigate_version: "0.16.1", registered_by: "OpenVMS", sha256: "abc", size: 42 });
+
+    async function submitUninstall(modal: HTMLElement) {
+      fireEvent.change(within(modal).getByLabelText(/Contraseña SSH root/i), { target: { value: "testpass" } });
+      fireEvent.click(within(modal).getByRole("button", { name: /Desinstalar agente/i }));
+    }
+
+    it("offers keeping or restoring the original configuration and sends the default keep", async () => {
+      const { modal, bodies } = await openUninstallDialog(existingBackup);
+      const keep = await within(modal).findByRole("radio", { name: /Dejar la configuración actual/i });
+      const restore = within(modal).getByRole("radio", { name: /Volver a la configuración original \(guardada el/i });
+      expect(keep).toBeChecked();
+      expect(restore).not.toBeChecked();
+      expect(within(modal).getByRole("checkbox", { name: /Conservar el respaldo en el equipo/i })).toBeChecked();
+      expect(within(modal).queryByText(/se reemplazará la configuración de Frigate/i)).not.toBeInTheDocument();
+      await submitUninstall(modal);
+      await waitFor(() => expect(bodies).toEqual([{ ssh_port: 22, ssh_password: "testpass", config_action: "keep", discard_backup: false }]));
+    });
+
+    it("restoring warns about the replacement and sends restore_original", async () => {
+      const { modal, bodies } = await openUninstallDialog(existingBackup);
+      fireEvent.click(await within(modal).findByRole("radio", { name: /Volver a la configuración original/i }));
+      expect(within(modal).getByText(/se reemplazará la configuración de Frigate y Frigate se reiniciará/i)).toBeInTheDocument();
+      expect(modal).toHaveTextContent(/cámaras que OpenVMS agregó/i);
+      await submitUninstall(modal);
+      await waitFor(() => expect(bodies).toEqual([{ ssh_port: 22, ssh_password: "testpass", config_action: "restore_original", discard_backup: false }]));
+    });
+
+    it("unchecking the backup checkbox sends discard_backup true", async () => {
+      const { modal, bodies } = await openUninstallDialog(existingBackup);
+      fireEvent.click(await within(modal).findByRole("checkbox", { name: /Conservar el respaldo en el equipo/i }));
+      await submitUninstall(modal);
+      await waitFor(() => expect(bodies).toEqual([{ ssh_port: 22, ssh_password: "testpass", config_action: "keep", discard_backup: true }]));
+    });
+
+    it("without a saved original it shows a note and keeps the configuration", async () => {
+      for (const reply of [() => json({ exists: false, frigate_version: "", registered_by: "", sha256: "", size: 0 }), () => json({ code: "not_found" }, 404)]) {
+        const { modal, bodies } = await openUninstallDialog(reply);
+        expect(await within(modal).findByText(/No hay una configuración original guardada/i)).toBeInTheDocument();
+        expect(within(modal).queryByRole("radio")).not.toBeInTheDocument();
+        expect(within(modal).queryByRole("checkbox")).not.toBeInTheDocument();
+        await submitUninstall(modal);
+        await waitFor(() => expect(bodies).toEqual([{ ssh_port: 22, ssh_password: "testpass", config_action: "keep", discard_backup: false }]));
+        cleanup();
+      }
+    });
+
+    it("shows a localized reason when the restore fails and nothing was uninstalled", async () => {
+      const { modal } = await openUninstallDialog(existingBackup, "No original configuration is stored on the agent; nothing was changed");
+      fireEvent.click(await within(modal).findByRole("radio", { name: /Volver a la configuración original/i }));
+      await submitUninstall(modal);
+      expect(await within(modal).findByText(/No hay una configuración original guardada en el agente; no se cambió nada/i)).toBeInTheDocument();
     });
   });
 });

@@ -770,6 +770,7 @@ export interface paths {
         /**
          * Uninstall a registered agent from the host over SSH
          * @description Requires servers.manage and servers.config.secrets. Stops and disables the systemd agent service, removes agent files, and removes registration.
+         *     With config_action restore_original the original Frigate configuration saved by the agent is written back (and Frigate restarted) before anything is removed; if the agent holds none, or the write fails, the job fails and nothing is uninstalled.
          */
         post: operations["uninstallServerAgentOverSSH"];
         delete?: never;
@@ -927,6 +928,36 @@ export interface paths {
          * @description Requires servers.manage on the server.
          */
         post: operations["updateServerAgent"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/servers/{serverId}/agent/backup": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                serverId: string;
+            };
+            cookie?: never;
+        };
+        /**
+         * Whether the agent keeps the original Frigate configuration
+         * @description Reads the metadata of the original config.yml that the edge agent keeps on its host. The
+         *     configuration itself is never returned. Requires servers.manage on the server.
+         */
+        get: operations["getServerAgentBackup"];
+        put?: never;
+        /**
+         * Make the agent keep the original Frigate configuration
+         * @description Stores, on the agent's host, the Frigate config.yml as it was before OpenVMS changed it. The
+         *     agent keeps the first copy it receives and never replaces it, so calling this again returns
+         *     the stored metadata. Requires servers.manage and servers.config.secrets on the server. The
+         *     409 code agent_backup_unsupported means the agent is older than the release with backups.
+         */
+        post: operations["ensureServerAgentBackup"];
         delete?: never;
         options?: never;
         head?: never;
@@ -3994,6 +4025,23 @@ export interface components {
             /** @description Transient root SSH password; never persisted or echoed. */
             ssh_password: string;
         };
+        /** @description Same SSH trust rules as ServerAgentUpdateRequest, plus what to do with Frigate's configuration and with the agent's saved original. */
+        ServerAgentUninstallRequest: {
+            ssh_port: number;
+            /** @description Transient root SSH password; never persisted or echoed. */
+            ssh_password: string;
+            /**
+             * @description keep leaves Frigate's current configuration; restore_original writes back the original saved by the agent and restarts Frigate.
+             * @default keep
+             * @enum {string}
+             */
+            config_action: "keep" | "restore_original";
+            /**
+             * @description When true the agent's saved original configuration is deleted from the host; otherwise it stays so another OpenVMS can adopt the server.
+             * @default false
+             */
+            discard_backup: boolean;
+        };
         AgentEnrollToken: {
             /** @description One-time secret, shown only in this response. */
             token: string;
@@ -4425,6 +4473,22 @@ export interface components {
              */
             sampled_at?: string;
             error?: string;
+        };
+        ServerAgentBackup: {
+            /** @description False when the agent holds no original configuration yet. */
+            exists: boolean;
+            /**
+             * Format: date-time
+             * @description UTC time the agent stored the copy.
+             */
+            saved_at?: string | null;
+            frigate_version: string;
+            /** @description Free text saying which OpenVMS registered the server. */
+            registered_by: string;
+            /** @description Hex digest of the stored config.yml. */
+            sha256: string;
+            /** @description Size of the stored config.yml in bytes. */
+            size: number;
         };
         ServerAgentNetworkInterface: {
             name: string;
@@ -7928,7 +7992,7 @@ export interface operations {
         };
         requestBody: {
             content: {
-                "application/json": components["schemas"]["ServerAgentUpdateRequest"];
+                "application/json": components["schemas"]["ServerAgentUninstallRequest"];
             };
         };
         responses: {
@@ -8147,6 +8211,60 @@ export interface operations {
             401: components["responses"]["Unauthorized"];
             403: components["responses"]["Forbidden"];
             404: components["responses"]["NotFound"];
+            502: components["responses"]["FrigateUnreachable"];
+        };
+    };
+    getServerAgentBackup: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                serverId: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Backup state */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ServerAgentBackup"];
+                };
+            };
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+            409: components["responses"]["Conflict"];
+            502: components["responses"]["FrigateUnreachable"];
+        };
+    };
+    ensureServerAgentBackup: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                serverId: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Backup state after the call */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ServerAgentBackup"];
+                };
+            };
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+            409: components["responses"]["Conflict"];
             502: components["responses"]["FrigateUnreachable"];
         };
     };

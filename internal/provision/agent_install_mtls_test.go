@@ -211,7 +211,7 @@ func TestServerAgentInstallFailsCleanlyWhenTheEnrollTokenCannotBeCreated(t *test
 }
 
 func TestAgentUninstallScriptRemovesTheMTLSState(t *testing.T) {
-	script := agentUninstallScript()
+	script := agentUninstallScript(false)
 	for _, want := range []string{
 		"rm -rf /var/lib/openvms-agent/agent-mtls",
 		"rm -f /etc/openvms/agent-enroll.token",

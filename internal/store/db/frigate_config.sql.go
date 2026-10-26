@@ -13,6 +13,22 @@ import (
 	"github.com/google/uuid"
 )
 
+const getEarliestFrigateConfigBefore = `-- name: GetEarliestFrigateConfigBefore :one
+SELECT before_yaml FROM frigate_config_revisions
+WHERE server_id = $1 AND before_yaml <> ''
+ORDER BY created_at ASC, id ASC
+LIMIT 1
+`
+
+// The config.yml as it was before OpenVMS first changed it: the before_yaml of the oldest revision
+// of the server (any kind) that recorded one.
+func (q *Queries) GetEarliestFrigateConfigBefore(ctx context.Context, serverID uuid.UUID) (string, error) {
+	row := q.db.QueryRow(ctx, getEarliestFrigateConfigBefore, serverID)
+	var before_yaml string
+	err := row.Scan(&before_yaml)
+	return before_yaml, err
+}
+
 const getFrigateConfigRevision = `-- name: GetFrigateConfigRevision :one
 SELECT id, tenant_id, server_id, camera_id, actor_user_id, actor_name, kind, sections, before_yaml, after_yaml, patch, created_at FROM frigate_config_revisions WHERE id = $1 AND server_id = $2
 `
