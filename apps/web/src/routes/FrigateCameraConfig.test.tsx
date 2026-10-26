@@ -78,6 +78,44 @@ function mount(doc: object, extra: Record<string, () => Response> = {}) {
   return fetchMock;
 }
 
+const goTo = async (name: string) => fireEvent.click(await screen.findByRole("button", { name: new RegExp(`^${name}`) }));
+const manage = () => json({ id: "u", tenant_id: "t", grants: [{ permission: "cameras.manage", effect: "allow" }] });
+const cam = (over: Record<string, unknown> = {}) => json({ id: "c1", display_name: "acceso", enabled: true, default_live_quality: "sub", description: "", location: "", tags: [], ...over });
+const toggle = { type: "object", properties: { enabled: { type: "boolean", default: false } } };
+const fullSchema = {
+  ...schema,
+  $defs: {
+    ...schema.$defs,
+    CameraConfig: {
+      type: "object",
+      properties: {
+        ...schema.$defs.CameraConfig.properties,
+        enabled: { type: "boolean", default: true },
+        ffmpeg: { $ref: "#/$defs/Ffmpeg" },
+        audio: { $ref: "#/$defs/Toggle" },
+        lpr: { $ref: "#/$defs/Toggle" },
+        audio_transcription: { $ref: "#/$defs/Toggle" },
+        timestamp_style: { $ref: "#/$defs/Timestamp" },
+        best_image_timeout: { type: "integer", default: 60, minimum: 0 },
+      },
+    },
+    Toggle: toggle,
+    FaceRecognition: { type: "object", properties: { enabled: { type: "boolean", default: false }, min_score: { type: "number", title: "Minimum score", minimum: 0, maximum: 1 } } },
+    Timestamp: { type: "object", properties: { position: { type: "string", enum: ["tl", "tr", "bl", "br"] }, format: { type: "string" } } },
+    Ffmpeg: { type: "object", properties: { inputs: { type: "array", items: { type: "object", properties: { path: { type: "string" }, roles: { type: "array", items: { type: "string" } } } } } } },
+  },
+};
+const mountFull = (doc: object = {}, extra: Record<string, () => Response> = {}) =>
+  mount(doc, { "/api/v1/me": manage, "/api/v1/cameras/c1": () => cam(), "/api/v1/servers/s1/frigate-config/schema": () => json(fullSchema), ...extra });
+const requests = (fetchMock: ReturnType<typeof mount>) => fetchMock.mock.calls.map(([r]) => r as Request);
+const cameraPatch = (fetchMock: ReturnType<typeof mount>) => requests(fetchMock).find((r) => r.method === "PATCH" && new URL(r.url).pathname === "/api/v1/cameras/c1");
+const frigatePatch = (fetchMock: ReturnType<typeof mount>) => requests(fetchMock).find((r) => r.method === "PATCH" && r.url.endsWith("/frigate-config"));
+async function applyReview() {
+  fireEvent.click(await screen.findByRole("button", { name: "Revisar cambios" }));
+  const dialog = await screen.findByRole("dialog", { name: "Revisar cambios" });
+  fireEvent.click(within(dialog).getByRole("button", { name: "Aplicar" }));
+}
+
 describe("FrigateCameraConfig", () => {
   it("edits a section, shows the diff and patches only the changed keys", async () => {
     const fetchMock = mount({}, {
@@ -87,6 +125,7 @@ describe("FrigateCameraConfig", () => {
     expect(within(nav).getByText("Detección")).toBeInTheDocument();
     expect(within(nav).getAllByText("Requiere reinicio").length).toBeGreaterThan(0);
 
+    await goTo("Detección");
     fireEvent.change(await screen.findByLabelText("Fps"), { target: { value: "12" } });
     fireEvent.click(screen.getByRole("button", { name: "Revisar cambios" }));
     const dialog = await screen.findByRole("dialog", { name: "Revisar cambios" });
@@ -109,6 +148,7 @@ describe("FrigateCameraConfig", () => {
       ] }),
       "/api/v1/cameras/c2/frigate-config": () => json({ camera_id: "c2", camera_name: "patio", server_id: "s1", frigate_version: "0.17.0", editable: true, config: { detect: { enabled: true, fps: 3 } }, sections: [] }),
     });
+    await goTo("Detección");
     fireEvent.change(await screen.findByLabelText("Fps"), { target: { value: "12" } });
     fireEvent.click(screen.getByRole("button", { name: "Aplicar a varias cámaras" }));
     const dialog = await screen.findByRole("dialog", { name: "Aplicar a varias cámaras" });
@@ -140,6 +180,7 @@ describe("FrigateCameraConfig", () => {
       ] }),
       "PATCH /api/v1/cameras/c2/frigate-config": () => json({ code: "forbidden", message: "permission denied" }, 403),
     });
+    await goTo("Detección");
     fireEvent.change(await screen.findByLabelText("Fps"), { target: { value: "12" } });
     fireEvent.click(screen.getByRole("button", { name: "Aplicar a varias cámaras" }));
     const dialog = await screen.findByRole("dialog", { name: "Aplicar a varias cámaras" });
@@ -154,10 +195,11 @@ describe("FrigateCameraConfig", () => {
 
   it("blocks review on invalid values and locks credentials without the secrets permission", async () => {
     mount({});
+    await goTo("Detección");
     fireEvent.change(await screen.findByLabelText("Fps"), { target: { value: "99" } });
     expect(await screen.findByText("Debe ser como máximo 30.")).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Revisar cambios" })).toBeDisabled();
-    fireEvent.click(screen.getByRole("button", { name: /ONVIF/ }));
+    fireEvent.click(screen.getByRole("button", { name: /ONVIF \/ PTZ/ }));
     expect(await screen.findByLabelText("Host")).toHaveValue("10.0.0.2");
     expect(screen.getAllByText("Protegido: requiere permiso de credenciales").length).toBe(1);
     expect(screen.queryByLabelText("Password")).not.toBeInTheDocument();
@@ -166,6 +208,7 @@ describe("FrigateCameraConfig", () => {
   it("is read-only without the config permission", async () => {
     mount({ editable: false });
     expect(await screen.findByText(/Necesitas el permiso servers\.config/)).toBeInTheDocument();
+    await goTo("Detección");
     expect(await screen.findByLabelText("Fps")).toBeDisabled();
     expect(screen.queryByRole("button", { name: "Revisar cambios" })).not.toBeInTheDocument();
   });
@@ -195,17 +238,6 @@ describe("FrigateCameraConfig", () => {
         return { enabled: true };
       },
       expected: { autotracking: { enabled: true } },
-    },
-    {
-      section: "face_recognition",
-      navLabel: "Reconocimiento facial",
-      panelTitle: "Reconocimiento facial",
-      initial: { min_score: 0.6 },
-      edit: async (panel: HTMLElement) => {
-        fireEvent.change(within(panel).getByLabelText("Minimum score"), { target: { value: "0.8" } });
-        return { min_score: 0.8 };
-      },
-      expected: { face_recognition: { min_score: 0.8 } },
     },
     {
       section: "genai",
@@ -273,7 +305,6 @@ describe("FrigateCameraConfig", () => {
       "/api/v1/me": () => json({ id: "u", tenant_id: "t", grants: [{ permission: "cameras.manage", effect: "allow" }] }),
       "/api/v1/cameras/c1": () => json({ id: "c1", display_name: "acceso", enabled: true, default_live_quality: "sub", description: "", location: "", tags: [] }),
     });
-    fireEvent.click(await screen.findByRole("button", { name: "General" }));
     fireEvent.change(await screen.findByLabelText("Ubicación"), { target: { value: "Boca norte" } });
     fireEvent.click(screen.getByRole("button", { name: "Guardar" }));
     await waitFor(() => {
@@ -294,6 +325,8 @@ describe("FrigateCameraConfig", () => {
           server_id: "s1",
           site_id: "site1",
           onvif_endpoint: "http://10.1.1.220/onvif/device_service",
+          tags: [],
+          enabled: true,
           onvif_profile: "ONVIF-T",
           onvif_version: "2.0",
           onvif_capabilities: {
@@ -311,18 +344,169 @@ describe("FrigateCameraConfig", () => {
         }),
     });
 
-    expect(await screen.findByText("Analítica ONVIF")).toBeInTheDocument();
-    expect(screen.getAllByText(/ONVIF-T/).length).toBeGreaterThanOrEqual(1);
+    fireEvent.click(await screen.findByRole("button", { name: "Capacidades ONVIF" }));
+    const dialog = await screen.findByRole("dialog", { name: "Capacidades ONVIF" });
+    expect(within(dialog).getByText("Soporte y Capacidades ONVIF")).toBeInTheDocument();
+    expect(within(dialog).getByText("Hikvision DS-2CD2043G2-I")).toBeInTheDocument();
+    expect(within(dialog).getByText("Soportado (Profile M)")).toBeInTheDocument();
+    expect(within(dialog).getByRole("button", { name: "Comprobar y guardar ONVIF" })).toBeInTheDocument();
+    expect(within(dialog).getByRole("button", { name: "Sincronizar fecha y hora" })).toBeInTheDocument();
 
-    fireEvent.click(screen.getByRole("button", { name: /Capacidades/ }));
-    expect(await screen.findByText("Soporte y Capacidades ONVIF")).toBeInTheDocument();
-    expect(screen.getByText("Hikvision DS-2CD2043G2-I")).toBeInTheDocument();
-    expect(screen.getByText("Soportado (Profile M)")).toBeInTheDocument();
-
-    const applyButton = screen.getByRole("button", { name: "Cargar en Frigate" });
-    fireEvent.click(applyButton);
+    fireEvent.click(within(dialog).getByRole("button", { name: "Cargar en Frigate" }));
     expect(await screen.findByLabelText("Host")).toHaveValue("10.1.1.220");
+    expect(screen.queryByRole("dialog", { name: "Capacidades ONVIF" })).not.toBeInTheDocument();
     expect(screen.getByText(/1 sección modificada/)).toBeInTheDocument();
+  });
+
+  it("opens on General and keeps ONVIF facts out of the sidebar", async () => {
+    mountFull({}, { "/api/v1/cameras/c1": () => cam({ onvif_profile: "ONVIF-T", onvif_capabilities: { manufacturer: "Hikvision", has_analytics: true } }) });
+    const general = await screen.findByRole("button", { name: "General" });
+    expect(general).toHaveAttribute("aria-current", "page");
+    expect(screen.queryByLabelText("Fps")).not.toBeInTheDocument();
+    const nav = screen.getByRole("navigation", { name: "Secciones de configuración" });
+    expect(within(nav).queryByRole("button", { name: /^Capacidades/ })).not.toBeInTheDocument();
+    expect(screen.queryByText("Soporte y Capacidades ONVIF")).not.toBeInTheDocument();
+    expect(screen.queryByText("Analítica ONVIF")).not.toBeInTheDocument();
+  });
+
+  describe("General fields", () => {
+    it("the enabled switch saves the camera in OpenVMS and stages the Frigate section", async () => {
+      const fetchMock = mountFull({ config: { enabled: true, detect: { enabled: true, fps: 5 } } });
+      const sw = await screen.findByRole("switch", { name: "Cámara habilitada" });
+      expect(sw).toHaveAttribute("aria-checked", "true");
+      expect(screen.getByText(/también detiene el procesamiento en Frigate/i)).toBeInTheDocument();
+      fireEvent.click(sw);
+      await waitFor(() => expect(cameraPatch(fetchMock)).toBeDefined());
+      expect(await cameraPatch(fetchMock)!.clone().json()).toEqual({ enabled: false });
+      expect(await screen.findByText(/1 sección modificada/)).toBeInTheDocument();
+      await applyReview();
+      await waitFor(() => expect(frigatePatch(fetchMock)).toBeDefined());
+      expect(await frigatePatch(fetchMock)!.clone().json()).toEqual({ sections: { enabled: false } });
+    });
+
+    it.each([
+      { tags: [], frigate: undefined, expected: "generic" },
+      { tags: ["lpr"], frigate: false, expected: "lpr_frigate" },
+      { tags: [], frigate: true, expected: "lpr_frigate" },
+      { tags: ["lpr", "provision"], frigate: false, expected: "lpr_provision" },
+      { tags: ["lpr", "provision_isr"], frigate: false, expected: "lpr_provision" },
+    ])("derives the camera type $expected from tags $tags", async ({ tags, frigate, expected }) => {
+      mountFull({ config: { lpr: frigate === undefined ? undefined : { enabled: frigate } } }, { "/api/v1/cameras/c1": () => cam({ tags }) });
+      expect(await screen.findByLabelText("Tipo de cámara")).toHaveValue(expected);
+      expect(screen.getByText(/Frigate lee las matrículas/)).toBeInTheDocument();
+    });
+
+    it("lpr_frigate edits the tags and stages lpr.enabled=true", async () => {
+      const fetchMock = mountFull({ config: { lpr: { enabled: false } } }, { "/api/v1/cameras/c1": () => cam({ tags: ["ptz", "provision"] }) });
+      fireEvent.change(await screen.findByLabelText("Tipo de cámara"), { target: { value: "lpr_frigate" } });
+      await waitFor(() => expect(cameraPatch(fetchMock)).toBeDefined());
+      expect(await cameraPatch(fetchMock)!.clone().json()).toEqual({ tags: ["ptz", "lpr"] });
+      await applyReview();
+      await waitFor(() => expect(frigatePatch(fetchMock)).toBeDefined());
+      expect(await frigatePatch(fetchMock)!.clone().json()).toEqual({ sections: { lpr: { enabled: true } } });
+    });
+
+    it("switching from lpr_frigate to generic removes lpr and stages lpr.enabled=false", async () => {
+      const fetchMock = mountFull({ config: { lpr: { enabled: true } } }, { "/api/v1/cameras/c1": () => cam({ tags: ["lpr", "norte"] }) });
+      fireEvent.change(await screen.findByLabelText("Tipo de cámara"), { target: { value: "generic" } });
+      await waitFor(() => expect(cameraPatch(fetchMock)).toBeDefined());
+      expect(await cameraPatch(fetchMock)!.clone().json()).toEqual({ tags: ["norte"] });
+      await applyReview();
+      await waitFor(() => expect(frigatePatch(fetchMock)).toBeDefined());
+      expect(await frigatePatch(fetchMock)!.clone().json()).toEqual({ sections: { lpr: { enabled: false } } });
+    });
+
+    it("lpr_provision adds the provision tags without touching Frigate", async () => {
+      const fetchMock = mountFull({ config: { lpr: { enabled: false } } });
+      fireEvent.change(await screen.findByLabelText("Tipo de cámara"), { target: { value: "lpr_provision" } });
+      await waitFor(() => expect(cameraPatch(fetchMock)).toBeDefined());
+      expect(await cameraPatch(fetchMock)!.clone().json()).toEqual({ tags: ["provision", "lpr"] });
+      expect(screen.getByRole("button", { name: "Revisar cambios" })).toBeDisabled();
+    });
+
+    it("shows the Provision LPR section for a provision-typed camera", async () => {
+      mountFull({}, { "/api/v1/cameras/c1": () => cam({ tags: ["lpr", "provision"] }) });
+      expect(await screen.findByRole("button", { name: /Provision LPR/ })).toBeInTheDocument();
+    });
+
+    it("keeps the audio transcription switch disabled while audio is off", async () => {
+      mountFull({ config: { audio: { enabled: false }, audio_transcription: { enabled: false } } });
+      const transcription = await screen.findByRole("switch", { name: "Transcripción de audio" });
+      expect(transcription).toBeDisabled();
+      expect(screen.getByText(/Requiere activar el audio/)).toBeInTheDocument();
+      fireEvent.click(screen.getByRole("switch", { name: "Audio" }));
+      expect(screen.getByRole("switch", { name: "Transcripción de audio" })).toBeEnabled();
+    });
+
+    it("enables audio transcription when audio is on and patches both sections", async () => {
+      const fetchMock = mountFull({ config: { audio: { enabled: true }, audio_transcription: { enabled: false } } });
+      fireEvent.click(await screen.findByRole("switch", { name: "Transcripción de audio" }));
+      await applyReview();
+      await waitFor(() => expect(frigatePatch(fetchMock)).toBeDefined());
+      expect(await frigatePatch(fetchMock)!.clone().json()).toEqual({ sections: { audio_transcription: { enabled: true } } });
+    });
+
+    it("stages LPR, face recognition and timestamp settings as Frigate sections", async () => {
+      const fetchMock = mountFull({ config: { lpr: { enabled: false }, face_recognition: { enabled: false, min_score: 0.6 }, timestamp_style: { position: "tl", format: "%H" } } });
+      fireEvent.click(await screen.findByRole("switch", { name: "LPR" }));
+      fireEvent.click(screen.getByRole("switch", { name: "Reconocimiento facial" }));
+      fireEvent.change(screen.getByLabelText("Posición"), { target: { value: "br" } });
+      await applyReview();
+      await waitFor(() => expect(frigatePatch(fetchMock)).toBeDefined());
+      expect(await frigatePatch(fetchMock)!.clone().json()).toEqual({
+        sections: { lpr: { enabled: true }, face_recognition: { enabled: true }, timestamp_style: { position: "br" } },
+      });
+    });
+
+    it("keeps the rest of the face recognition settings reachable from General", async () => {
+      mountFull({ config: { face_recognition: { enabled: true, min_score: 0.6 } } });
+      fireEvent.click(await screen.findByText("Más ajustes de Reconocimiento facial"));
+      expect((await screen.findAllByLabelText("Minimum score")).length).toBeGreaterThan(0);
+      expect(within(screen.getByRole("navigation", { name: "Secciones de configuración" })).queryByRole("button", { name: /Reconocimiento facial/ })).not.toBeInTheDocument();
+    });
+
+    it("edits the best image timeout when the schema has it", async () => {
+      const fetchMock = mountFull({ config: { best_image_timeout: 60 } });
+      const input = await screen.findByLabelText(/Tiempo de mejor imagen/);
+      expect(input).toHaveValue(60);
+      fireEvent.change(input, { target: { value: "90" } });
+      await applyReview();
+      await waitFor(() => expect(frigatePatch(fetchMock)).toBeDefined());
+      expect(await frigatePatch(fetchMock)!.clone().json()).toEqual({ sections: { best_image_timeout: 90 } });
+    });
+
+    it("shows the input streams editor in General with masked URLs and no Streams FFmpeg entry", async () => {
+      mountFull({ secrets_visible: false, config: { ffmpeg: { inputs: [{ path: "rtsp://u:p@10.0.0.9/1", roles: ["detect"] }] } } });
+      expect(await screen.findByText("Streams de entrada")).toBeInTheDocument();
+      expect(screen.queryByLabelText("Ruta del stream 1")).not.toBeInTheDocument();
+      expect(screen.getAllByText(/requieren permiso de credenciales/).length).toBeGreaterThan(0);
+      expect(screen.queryByText(/rtsp:\/\/u:p/)).not.toBeInTheDocument();
+      expect(within(screen.getByRole("navigation", { name: "Secciones de configuración" })).queryByText("Streams FFmpeg")).not.toBeInTheDocument();
+    });
+
+    it("edits the input streams from General when credentials are visible", async () => {
+      const fetchMock = mountFull({ secrets_visible: true, config: { ffmpeg: { inputs: [{ path: "rtsp://10.0.0.9/1", roles: ["detect"] }] } } });
+      fireEvent.change(await screen.findByLabelText("Ruta del stream 1"), { target: { value: "rtsp://10.0.0.9/2" } });
+      await applyReview();
+      await waitFor(() => expect(frigatePatch(fetchMock)).toBeDefined());
+      expect(await frigatePatch(fetchMock)!.clone().json()).toEqual({ sections: { ffmpeg: { inputs: [{ path: "rtsp://10.0.0.9/2", roles: ["detect"] }] } } });
+    });
+
+    it("locks the Frigate fields without the config permission", async () => {
+      mountFull({ editable: false, config: { audio: { enabled: true } } });
+      expect(await screen.findByRole("switch", { name: "Audio" })).toBeDisabled();
+    });
+
+    it("hides the controls of sections an older Frigate schema does not have", async () => {
+      mountFull({}, { "/api/v1/servers/s1/frigate-config/schema": () => json(schema) });
+      expect(await screen.findByRole("switch", { name: "Cámara habilitada" })).toBeInTheDocument();
+      for (const name of ["Audio", "LPR", "Transcripción de audio"]) expect(screen.queryByRole("switch", { name })).not.toBeInTheDocument();
+      expect(screen.queryByLabelText("Posición")).not.toBeInTheDocument();
+      expect(screen.queryByText("Streams de entrada")).not.toBeInTheDocument();
+      expect(screen.queryByText(/detiene el procesamiento en Frigate/)).not.toBeInTheDocument();
+      expect(screen.getByLabelText(/Tiempo de mejor imagen/)).toBeDisabled();
+      expect(screen.getByText(/no la expone/)).toBeInTheDocument();
+    });
   });
 
   describe("persisted OpenVMS zones", () => {

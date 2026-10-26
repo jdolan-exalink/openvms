@@ -2,6 +2,8 @@ import {
   Activity, ArrowLeft, Camera, Car, CircleCheck, Clock, Compass, Eye, HardDrive, History, Layers, Radio,
   RefreshCw, Settings, ShieldCheck, SlidersHorizontal, Sparkles, TriangleAlert, Video,
 } from "lucide-react";
+import { CameraEnabledSwitch, CameraTypeSelect } from "@/components/camera/CameraTopControls";
+import { FrigateGeneralFields, GENERAL_SECTIONS, knowsSection, sectionEnabled, type GeneralFrigate } from "@/components/camera/FrigateGeneralFields";
 import { FisheyeSection } from "@/components/fisheye/FisheyeSection";
 import { AdvertisedAnalytics } from "@/components/provision/AdvertisedAnalytics";
 import { isProvisionCamera, ProvisionLprSection } from "@/components/provision/ProvisionLprSection";
@@ -20,11 +22,12 @@ import { type FormCtx } from "@/components/frigate/SchemaForm";
 import { SectionPanel } from "@/components/frigate/SectionPanel";
 import { Modal } from "@/components/Modal";
 import { ZoneEditorModal, type ZoneEditorValue } from "@/components/zones/ZoneEditorModal";
-import { Button, ErrorNote, Field, LinkButton, PageHeader, Select, Switch, TextInput } from "@/components/ui";
+import { Button, ErrorNote, Field, LinkButton, PageHeader, Select, TextInput } from "@/components/ui";
 import { cn } from "@/lib/cn";
+import { cameraTypeOf, TYPE_TAGS } from "@/lib/cameraType";
 import {
   buildPatch, deepEqual, diffValues, formatValue, isLiveSection, type JSchema, kindOf, orderSections, pathLabel, resolve, schemaAt,
-  sectionLabel, validateTree,
+  sectionLabel, setIn, validateTree,
 } from "@/lib/frigateSchema";
 import { pickerLabels } from "@/lib/labelEmoji";
 import { loadRestart, saveRestart } from "@/lib/frigateRestart";
@@ -34,7 +37,6 @@ import { persistedToEditorValue, planManagedZoneChanges, splitFrigateZones, zone
 type SectionResult = Schemas["FrigateSectionResult"];
 const HISTORY = "__history";
 const GENERAL = "__general";
-const ONVIF = "__onvif";
 const FISHEYE = "__fisheye";
 const PROVISION = "__provision";
 
@@ -42,8 +44,6 @@ function getSectionIcon(section: string) {
   switch (section) {
     case GENERAL:
       return SlidersHorizontal;
-    case ONVIF:
-      return ShieldCheck;
     case PROVISION:
       return Car;
     case "detect":
@@ -198,7 +198,7 @@ export function FrigateCameraConfig() {
     ...otherServerCameras.map(({ id, display_name }) => ({ id, display_name })),
   ];
 
-  const activeSection = active ?? sections[0] ?? GENERAL;
+  const activeSection = active ?? GENERAL;
 
   const frigateZones = () => (isRec(valueOf("zones")) ? valueOf("zones") : {}) as ZoneEditorValue["zones"];
 
@@ -282,6 +282,7 @@ export function FrigateCameraConfig() {
   const objectsDraft = valueOf("objects") as Record<string, unknown> | undefined;
   const zoneLabels = pickerLabels(Object.keys(isRec(objectsDraft?.filters) ? objectsDraft.filters : {}), Array.isArray(objectsDraft?.track) ? (objectsDraft.track as string[]) : []);
   const ctx: FormCtx = { root: root ?? {}, secretsVisible, readOnly };
+  const setSection = (section: string, value: unknown) => setEdits((e) => ({ ...e, [section]: value }));
 
   const header = (
     <PageHeader
@@ -303,7 +304,7 @@ export function FrigateCameraConfig() {
   }
 
   // Filter sections that are handled in our unified sections:
-  const unifiedHandled = new Set(["detect", "objects", "motion", "record", "snapshots", "zones", "review", "ffmpeg", "birdseye"]);
+  const unifiedHandled = new Set(["detect", "objects", "motion", "record", "snapshots", "zones", "review", "birdseye", ...GENERAL_SECTIONS]);
   const otherSections = sections.filter((s) => !unifiedHandled.has(s));
 
   return (
@@ -341,7 +342,7 @@ export function FrigateCameraConfig() {
           </div>
 
           <nav aria-label="Secciones de configuración" className="flex flex-col gap-1.5">
-            {/* 1. General y Capacidades */}
+            {/* 1. General */}
             <div className="flex flex-col gap-1 rounded-m3-xl border border-outline-variant/40 bg-surface-2 p-1.5">
               <div className="flex items-center gap-1">
                 <button
@@ -357,20 +358,7 @@ export function FrigateCameraConfig() {
                 >
                   <Icon icon={SlidersHorizontal} size="xs" />
                   <span>General</span>
-                </button>
-                <button
-                  type="button"
-                  aria-current={activeSection === ONVIF ? "page" : undefined}
-                  onClick={() => setActive(ONVIF)}
-                  className={cn(
-                    "flex min-h-10 items-center gap-1.5 rounded-m3-lg px-2.5 text-xs font-bold transition-colors text-left",
-                    activeSection === ONVIF
-                      ? "bg-primary text-on-primary shadow-sm"
-                      : "text-on-surface-variant hover:bg-surface-3"
-                  )}
-                >
-                  <Icon icon={ShieldCheck} size="xs" />
-                  <span>Capacidades</span>
+                  {GENERAL_SECTIONS.some((g) => dirty.includes(g)) && <span aria-label="con cambios" className="ml-auto text-primary">●</span>}
                 </button>
               </div>
             </div>
@@ -581,30 +569,6 @@ export function FrigateCameraConfig() {
               </div>
             )}
 
-            {/* 7. Streams FFmpeg */}
-            {sections.includes("ffmpeg") && (
-              <button
-                type="button"
-                aria-current={activeSection === "ffmpeg" ? "page" : undefined}
-                onClick={() => setActive("ffmpeg")}
-                className={cn(
-                  "flex min-h-10 w-full items-center justify-between rounded-m3-lg px-3 text-xs font-bold transition-colors text-left",
-                  activeSection === "ffmpeg"
-                    ? "bg-primary text-on-primary shadow-sm"
-                    : "text-on-surface hover:bg-surface-2"
-                )}
-              >
-                <span className="flex items-center gap-2">
-                  <Icon icon={Video} size="xs" />
-                  <span>Streams FFmpeg</span>
-                </span>
-                <span className="flex items-center gap-1.5">
-                  {dirty.includes("ffmpeg") && <span aria-label="con cambios" className="text-primary">●</span>}
-                  <LiveBadge live={isLiveSection("ffmpeg")} />
-                </span>
-              </button>
-            )}
-
             {/* 6. Secciones adicionales avanzadas */}
             {otherSections.map((s) => {
               const live = isLiveSection(s);
@@ -659,8 +623,6 @@ export function FrigateCameraConfig() {
               ? "Historial"
               : activeSection === GENERAL
               ? t("common.general")
-              : activeSection === ONVIF
-              ? "ONVIF"
               : activeSection === FISHEYE
               ? "Fisheye"
               : activeSection === PROVISION
@@ -673,16 +635,7 @@ export function FrigateCameraConfig() {
             <CameraGeneral
               cameraId={cameraId}
               canManage={can(me.data, "cameras.manage")}
-              onApplyToFrigate={(patch) => {
-                setEdits((e) => ({ ...e, onvif: patch }));
-                setActive("onvif");
-              }}
-            />
-          ) : activeSection === ONVIF ? (
-            <CameraOnvifPanel
-              cameraId={cameraId}
-              camera={camera.data}
-              canManage={can(me.data, "cameras.manage")}
+              frigate={{ root, camProps, config, doc: doc.data, ctx, valueOf, setSection }}
               onApplyToFrigate={(patch) => {
                 setEdits((e) => ({ ...e, onvif: patch }));
                 setActive("onvif");
@@ -730,7 +683,6 @@ export function FrigateCameraConfig() {
 
           {activeSection !== HISTORY &&
             activeSection !== GENERAL &&
-            activeSection !== ONVIF &&
             activeSection !== FISHEYE &&
             activeSection !== PROVISION &&
             Object.entries(errors).filter(([p]) => p.split(".")[0] === activeSection).length > 0 && (
@@ -867,9 +819,6 @@ function CameraIdentity({
   const width = typeof detect?.width === "number" ? detect.width : undefined;
   const height = typeof detect?.height === "number" ? detect.height : undefined;
   const fps = typeof detect?.fps === "number" ? detect.fps : undefined;
-  const onvif = isRec(config.onvif) ? config.onvif : undefined;
-  const host = typeof onvif?.host === "string" && onvif.host && !onvif.host.includes("*") ? onvif.host : undefined;
-  const onvifProfile = camera?.onvif_profile;
   const onvifCaps = camera?.onvif_capabilities;
   const isOnline = camera?.enabled && camera.status === "online";
   const snapshotUrl = cameraId ? `/media/v1/cameras/${cameraId}/snapshot.jpg?h=360` : undefined;
@@ -923,31 +872,6 @@ function CameraIdentity({
               <div className="flex flex-col gap-1">
                 <div className="flex flex-wrap items-center gap-2">
                   <h1 className="text-[22px] font-bold tracking-tight text-ink sm:text-2xl">{name}</h1>
-                  {onvifProfile && (
-                    <span
-                      className="inline-flex items-center gap-1 rounded-m3-sm border border-primary/30 bg-primary/12 px-2 py-0.5 font-mono text-xs font-semibold text-primary"
-                      title={[
-                        onvifProfile,
-                        camera?.onvif_version ? `v${camera.onvif_version}` : null,
-                        onvifCaps?.has_analytics ? "Detecciones/Analítica soportadas" : null,
-                        onvifCaps?.has_ptz ? "PTZ soportado" : null,
-                      ].filter(Boolean).join(" · ")}
-                    >
-                      <Icon icon={Radio} size="xs" />
-                      <span>{onvifProfile}</span>
-                      {camera?.onvif_version && <span className="ml-1 opacity-75 font-normal">v{camera.onvif_version}</span>}
-                    </span>
-                  )}
-                  {onvifCaps?.has_analytics && (
-                    <span className="inline-flex items-center gap-1 rounded-m3-sm border border-ok/30 bg-ok/12 px-2 py-0.5 text-xs font-medium text-ok">
-                      <Icon icon={Sparkles} size="xs" /> Analítica ONVIF
-                    </span>
-                  )}
-                  {onvifCaps?.has_ptz && (
-                    <span className="rounded-m3-sm border border-secondary/30 bg-secondary/12 px-2 py-0.5 font-mono text-xs font-semibold text-secondary">
-                      PTZ
-                    </span>
-                  )}
                   {camera?.lpr && (
                     <span className="rounded-m3-sm bg-secondary-container px-2 py-0.5 font-mono text-xs font-bold text-on-secondary-container">
                       LPR
@@ -957,6 +881,7 @@ function CameraIdentity({
                 <p className="font-mono text-xs text-muted">
                   {camera?.remote_name ? `ID / Origen Frigate: ${camera.remote_name}` : `Cámara: ${name}`}
                   {version && ` · Frigate ${version}`}
+                  {(onvifCaps?.manufacturer || onvifCaps?.model) && ` · ${[onvifCaps.manufacturer, onvifCaps.model].filter(Boolean).join(" ")}`}
                 </p>
               </div>
               <LinkButton to="/cameras" variant="tonal" className="self-start text-xs">
@@ -965,14 +890,12 @@ function CameraIdentity({
             </div>
           </div>
 
-          {/* Avigilon Enterprise Telemetry Grid */}
-          <dl className="grid grid-cols-2 gap-2 text-xs sm:grid-cols-4">
+          {/* Telemetry grid (ONVIF facts live in the "Capacidades ONVIF" popup of General) */}
+          <dl className="grid grid-cols-2 gap-2 text-xs">
             <div className="flex flex-col gap-0.5 rounded-m3-lg border border-outline-variant/40 bg-surface-2 p-3">
               <dt className="text-muted font-medium">Versión</dt>
               <dd className="font-mono text-ink font-semibold">{version || "—"}</dd>
-              <span className="truncate text-[10px] text-muted">
-                {onvifCaps?.manufacturer ? `Marca: ${onvifCaps.manufacturer}` : "Frigate NVR"}
-              </span>
+              <span className="truncate text-[10px] text-muted">Frigate NVR</span>
             </div>
 
             <div className="flex flex-col gap-0.5 rounded-m3-lg border border-outline-variant/40 bg-surface-2 p-3">
@@ -980,24 +903,6 @@ function CameraIdentity({
               <dd className="font-mono text-ink font-semibold">{width && height ? `${width}×${height}` : "—"}</dd>
               <span className="font-mono text-[10px] text-muted">
                 {fps ? `${fps} fps` : (camera?.fps ? `${camera.fps.toFixed(1)} fps` : "1080p standard")}
-              </span>
-            </div>
-
-            <div className="flex flex-col gap-0.5 rounded-m3-lg border border-outline-variant/40 bg-surface-2 p-3">
-              <dt className="text-muted font-medium">Host</dt>
-              <dd className="truncate font-mono text-ink font-semibold">{host ?? (camera?.onvif_endpoint ? displayEndpointHost(camera.onvif_endpoint) : "—")}</dd>
-              <span className="truncate text-[10px] text-muted">
-                {camera?.onvif_endpoint ? "ONVIF vinculado" : "Stream RTSP"}
-              </span>
-            </div>
-
-            <div className="flex flex-col gap-0.5 rounded-m3-lg border border-outline-variant/40 bg-surface-2 p-3">
-              <dt className="text-muted font-medium">Soporte ONVIF</dt>
-              <dd className="font-medium text-ink">
-                {onvifProfile ? `${onvifProfile}${onvifCaps?.has_analytics ? " · Detecciones" : ""}` : "No vinculado"}
-              </dd>
-              <span className="truncate text-[10px] text-muted">
-                {onvifCaps?.profiles && onvifCaps.profiles.length > 0 ? onvifCaps.profiles.join(", ") : "WSDL estándar"}
               </span>
             </div>
           </dl>
@@ -1014,65 +919,91 @@ function CameraIdentity({
 function CameraGeneral({
   cameraId,
   canManage,
+  frigate,
   onApplyToFrigate,
 }: {
   cameraId: string;
   canManage: boolean;
+  frigate: GeneralFrigate;
   onApplyToFrigate: (patch: Record<string, unknown>) => void;
 }) {
   const camera = useQuery(cameraQuery(cameraId));
+  const [onvifOpen, setOnvifOpen] = useState(false);
   if (camera.isLoading) return <p className="text-sm text-muted">Cargando ajustes…</p>;
   if (camera.error || !camera.data) return <ErrorNote error={camera.error ?? new Error("No se pudo leer la cámara.")} />;
 
-  return (
-    <div className="flex flex-col gap-8">
-      {/* VMS Settings & Camera Type Variants */}
-      <CameraGeneralForm camera={camera.data} canManage={canManage} />
+  const canEditFrigate = !frigate.ctx.readOnly;
+  const stage = (section: string) => (canEditFrigate && knowsSection(frigate, section) ? section : undefined);
+  const lprDraft = knowsSection(frigate, "lpr") ? sectionEnabled(frigate, "lpr") : undefined;
+  const type = cameraTypeOf(camera.data.tags, {
+    frigateLpr: lprDraft,
+    looksProvision: isProvisionCamera(camera.data),
+  });
 
-      {/* Hardware & ONVIF Capabilities */}
-      <div className="border-t border-outline-variant/60 pt-6">
-        <CameraOnvifPanel
-          cameraId={cameraId}
-          camera={camera.data}
-          canManage={canManage}
-          onApplyToFrigate={onApplyToFrigate}
-        />
+  return (
+    <div className="flex flex-col gap-6">
+      <div className="flex flex-wrap items-center justify-between gap-3">
+        <h2 className="flex items-center gap-2 text-lg font-semibold">
+          <Icon icon={SlidersHorizontal} size="sm" className="text-primary" />
+          <span>Ajustes generales</span>
+        </h2>
+        <Button type="button" variant="secondary" onClick={() => setOnvifOpen(true)}>
+          <Icon icon={ShieldCheck} size="xs" /> Capacidades ONVIF
+        </Button>
       </div>
+
+      <CameraEnabledSwitch
+        camera={camera.data}
+        canManage={canManage}
+        onStageFrigate={stage("enabled") ? (next) => frigate.setSection("enabled", next) : undefined}
+      />
+      <CameraTypeSelect
+        camera={camera.data}
+        current={type}
+        canManage={canManage}
+        onStageLpr={stage("lpr") ? (next) => frigate.setSection("lpr", setIn(frigate.valueOf("lpr"), ["enabled"], next)) : undefined}
+      />
+
+      <FrigateGeneralFields f={frigate} />
+
+      {/* VMS settings (name, quality, location, description, tags) */}
+      <div className="border-t border-outline-variant/60 pt-6">
+        <CameraGeneralForm camera={camera.data} canManage={canManage} />
+      </div>
+
+      {onvifOpen && (
+        <Modal title="Capacidades ONVIF" onClose={() => setOnvifOpen(false)} className="max-w-5xl">
+          <CameraOnvifPanel cameraId={cameraId} camera={camera.data} canManage={canManage} onApplyToFrigate={onApplyToFrigate} />
+        </Modal>
+      )}
     </div>
   );
 }
 
+const MANAGED_TAGS = new Set<string>(TYPE_TAGS);
+
 function CameraGeneralForm({ camera, canManage }: { camera: Schemas["Camera"]; canManage: boolean }) {
   const qc = useQueryClient();
   const [name, setName] = useState(camera.display_name);
-  const [enabled, setEnabled] = useState(camera.enabled);
   const [quality, setQuality] = useState(camera.default_live_quality);
   const [description, setDescription] = useState(camera.description);
   const [location, setLocation] = useState(camera.location);
-  const [tags, setTags] = useState(camera.tags.join(", "));
+  // Type-managed tags (lpr/provision) are edited with the camera type selector, not here.
+  const [tags, setTags] = useState(camera.tags.filter((t) => !MANAGED_TAGS.has(t.toLowerCase())).join(", "));
   const [invalid, setInvalid] = useState(false);
 
   // Camera Type / Variants (Nx Witness / Avigilon ACC compact toggles)
-  const [isLpr, setIsLpr] = useState(camera.lpr ?? camera.tags.includes("lpr"));
   const [isPtz, setIsPtz] = useState(camera.onvif_capabilities?.has_ptz ?? camera.tags.includes("ptz"));
   const [isFisheye, setIsFisheye] = useState(camera.tags.includes("fisheye") || camera.tags.includes("ojo_de_pez"));
-  const [isProvision, setIsProvision] = useState(camera.tags.includes("provision") || camera.tags.includes("provision_isr"));
   const [hasAudio, setHasAudio] = useState(camera.tags.includes("audio") || camera.tags.includes("mic"));
   const [isThermal, setIsThermal] = useState(camera.tags.includes("thermal") || camera.tags.includes("termica"));
 
   const save = useMutation({
     mutationFn: async () => {
-      const parsedTags = new Set(tags.split(",").map((t) => t.trim().toLowerCase()).filter(Boolean));
-      if (isLpr) parsedTags.add("lpr"); else parsedTags.delete("lpr");
+      const parsedTags = new Set(tags.split(",").map((t) => t.trim().toLowerCase()).filter((t) => t && !MANAGED_TAGS.has(t)));
       if (isPtz) parsedTags.add("ptz"); else parsedTags.delete("ptz");
       if (isFisheye) parsedTags.add("fisheye"); else parsedTags.delete("fisheye");
-      if (isProvision) {
-        parsedTags.add("provision");
-        parsedTags.add("lpr");
-      } else {
-        parsedTags.delete("provision");
-        parsedTags.delete("provision_isr");
-      }
+      for (const tag of camera.tags) if (MANAGED_TAGS.has(tag.toLowerCase())) parsedTags.add(tag);
       if (hasAudio) parsedTags.add("audio"); else parsedTags.delete("audio");
       if (isThermal) parsedTags.add("thermal"); else parsedTags.delete("thermal");
 
@@ -1081,7 +1012,7 @@ function CameraGeneralForm({ camera, canManage }: { camera: Schemas["Camera"]; c
           params: { path: { cameraId: camera.id } },
           body: {
             display_name: name.trim(),
-            enabled,
+            enabled: camera.enabled,
             default_live_quality: quality,
             description: description.trim(),
             location: location.trim(),
@@ -1137,28 +1068,6 @@ function CameraGeneralForm({ camera, canManage }: { camera: Schemas["Camera"]; c
           <label
             className={cn(
               "flex items-center gap-2.5 rounded-m3-lg border p-3 cursor-pointer select-none transition-colors",
-              isLpr
-                ? "border-primary bg-primary/10 text-ink font-semibold shadow-xs"
-                : "border-outline-variant/60 bg-surface-1 text-on-surface hover:bg-surface-3"
-            )}
-          >
-            <input
-              type="checkbox"
-              checked={isLpr}
-              onChange={(e) => setIsLpr(e.target.checked)}
-              className="size-4 rounded accent-primary"
-            />
-            <div className="flex flex-col">
-              <span className="text-xs font-bold flex items-center gap-1.5">
-                <Icon icon={Car} size="xs" /> LPR / Matrículas
-              </span>
-              <span className="text-[11px] text-muted">Reconocimiento automático de patentes</span>
-            </div>
-          </label>
-
-          <label
-            className={cn(
-              "flex items-center gap-2.5 rounded-m3-lg border p-3 cursor-pointer select-none transition-colors",
               isPtz
                 ? "border-primary bg-primary/10 text-ink font-semibold shadow-xs"
                 : "border-outline-variant/60 bg-surface-1 text-on-surface hover:bg-surface-3"
@@ -1197,31 +1106,6 @@ function CameraGeneralForm({ camera, canManage }: { camera: Schemas["Camera"]; c
                 <Icon icon={Eye} size="xs" /> Ojo de Pez (360°)
               </span>
               <span className="text-[11px] text-muted">Lente panorámica y dewarping</span>
-            </div>
-          </label>
-
-          <label
-            className={cn(
-              "flex items-center gap-2.5 rounded-m3-lg border p-3 cursor-pointer select-none transition-colors",
-              isProvision
-                ? "border-primary bg-primary/10 text-ink font-semibold shadow-xs"
-                : "border-outline-variant/60 bg-surface-1 text-on-surface hover:bg-surface-3"
-            )}
-          >
-            <input
-              type="checkbox"
-              checked={isProvision}
-              onChange={(e) => {
-                setIsProvision(e.target.checked);
-                if (e.target.checked) setIsLpr(true);
-              }}
-              className="size-4 rounded accent-primary"
-            />
-            <div className="flex flex-col">
-              <span className="text-xs font-bold flex items-center gap-1.5">
-                <Icon icon={Car} size="xs" /> Provision-ISR LPR
-              </span>
-              <span className="text-[11px] text-muted">Forzar compatibilidad Provision LPR</span>
             </div>
           </label>
 
@@ -1282,7 +1166,6 @@ function CameraGeneralForm({ camera, canManage }: { camera: Schemas["Camera"]; c
         <Field label="Nombre">
           <TextInput value={name} onChange={(e) => setName(e.target.value)} aria-invalid={invalid} />
         </Field>
-        <Switch className="self-end" label="Habilitada" checked={enabled} onChange={setEnabled} />
         {invalid && <p role="alert" className="text-xs text-bad sm:col-span-2">El nombre no puede estar vacío.</p>}
         <Field label="Calidad en vivo por defecto" hint="Flujo que usa la cámara al añadirla a la grilla de Vivo.">
           <Select value={quality} onChange={(e) => setQuality(e.target.value as Schemas["Camera"]["default_live_quality"])}>
