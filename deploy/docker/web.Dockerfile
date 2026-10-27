@@ -24,7 +24,11 @@ RUN mkdir /src && cd /src && go mod init caddybuild \
 FROM caddy:2-alpine
 # The base image lags the Alpine repositories: upgrade first so a fixed vulnerability in a base library
 # (the image scan fails the build on HIGH or CRITICAL findings that have a fix) is not shipped.
-RUN apk upgrade --no-cache && apk add --no-cache coreutils openssl
+# APK_REFRESH changes on every deploy (the build time) and every CI day, so the cached layer below is
+# rebuilt and a library fix published since the last build is not skipped.
+ARG APK_REFRESH=
+RUN echo "apk refresh: ${APK_REFRESH:-none}" \
+ && apk upgrade --no-cache && apk add --no-cache coreutils openssl
 COPY --from=caddy /out/caddy /usr/bin/caddy
 COPY deploy/docker/Caddyfile /etc/caddy/Caddyfile
 COPY deploy/docker/prepare-web-tls.sh /usr/local/bin/prepare-web-tls.sh
