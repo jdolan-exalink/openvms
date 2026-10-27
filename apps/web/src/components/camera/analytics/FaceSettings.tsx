@@ -12,14 +12,14 @@ type Props = {
 };
 
 /**
- * Facial analytics, split in two: detecting faces is not recognising identities, and a camera
- * may do the first without the second.
+ * Facial analytics shown as two modules. Frigate has no "detect without recognising" mode, so the
+ * detection card mirrors recognition and says why it has no switch of its own (the engine's reason).
  */
 export function FaceSettings({ detection, recognition, patch, setPatch, readOnly }: Props) {
   return (
     <section aria-label="Reconocimiento / detección facial" className="flex flex-col gap-3">
       <h3 className="text-sm font-bold text-on-surface">Reconocimiento / detección facial</h3>
-      <ModuleCard module={detection} enabled={draftEnabled(patch, detection)} onToggle={(v) => setPatch(enabledPatch(detection.id, v))} readOnly={readOnly}>
+      <ModuleCard module={detection} enabled={draftEnabled(patch, recognition)} onToggle={(v) => setPatch(enabledPatch(detection.id, v))} readOnly={readOnly}>
         <Advanced items={detection.advanced} />
       </ModuleCard>
       <ModuleCard module={recognition} enabled={draftEnabled(patch, recognition)} onToggle={(v) => setPatch(enabledPatch(recognition.id, v))} readOnly={readOnly}>

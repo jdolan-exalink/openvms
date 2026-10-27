@@ -172,6 +172,15 @@ type Camera struct {
 	HqCodec            string
 }
 
+type CameraAnalyticsSetting struct {
+	CameraID  uuid.UUID
+	TenantID  uuid.UUID
+	Module    string
+	Enabled   bool
+	UpdatedBy *uuid.UUID
+	UpdatedAt time.Time
+}
+
 type CameraConfigProfile struct {
 	ID          uuid.UUID
 	TenantID    uuid.UUID

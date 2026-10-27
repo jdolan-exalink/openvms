@@ -5443,13 +5443,15 @@ export interface components {
             /** @description OpenVMS can switch the module through its engine */
             writable: boolean;
             /** @enum {string} */
-            engine: "frigate" | "provision" | "native" | "none";
+            engine: "frigate" | "provision" | "native" | "openvms" | "none";
             /** @description Why the module cannot be switched on from here */
             reason?: string;
             /** @description Only fields with a real backing in the engine */
             settings: {
                 /** @description Smallest object area */
                 min_area?: number;
+                /** @description Frigate per-camera LPR image enhancement level (lpr only) */
+                enhancement?: number;
             };
             /** @description Read-only summary of the engine-specific parameters */
             advanced: {
@@ -5465,8 +5467,10 @@ export interface components {
          *     sending it together with `detection.objects` is a 400, and ids the model cannot honor are
          *     listed in the review `unsupported` and rejected on apply), `recording.enabled` (boolean),
          *     `analytics.lpr` (boolean), `analytics.modules.<id>.enabled` (boolean; `lpr` is the same
-         *     switch as `analytics.lpr`) and `analytics.modules.<id>.settings.min_area` (lpr and
-         *     face_recognition), where an unknown module id is a 400 and so is a module that is not
+         *     switch as `analytics.lpr`), `analytics.modules.<id>.settings.min_area` (lpr and
+         *     face_recognition) and `analytics.modules.<id>.settings.enhancement` (lpr, 0 to 10; the
+         *     OpenVMS-side modules vehicle_classification, vehicle_color and clothing_color take only
+         *     `enabled`), where an unknown module id is a 400 and so is a module that is not
          *     available or not configurable for the camera (for example Provision LPR), and
          *     `streams.primary` / `streams.detection`, each a sparse object
          *     with `resolution` ({width, height}), `fps`, `codec` (h264, h265, mjpeg, mpeg4),

@@ -33,6 +33,14 @@ export const enabledPatch = (id: ModuleId, enabled: boolean): Draft =>
   // `analytics.lpr` is the LPR module's switch; using one spelling keeps the header and the card from disagreeing.
   id === "lpr" ? { analytics: { lpr: enabled } } : { analytics: { modules: { [id]: { enabled } } } };
 export const minAreaPatch = (id: ModuleId, minArea: number): Draft => ({ analytics: { modules: { [id]: { settings: { min_area: minArea } } } } });
+export const enhancementPatch = (id: ModuleId, level: number): Draft => ({ analytics: { modules: { [id]: { settings: { enhancement: level } } } } });
+
+/** The LPR image-enhancement level (0 to 10) as the user sees it. */
+export function draftEnhancement(patch: Draft, m: AnalyticsModule): number | undefined {
+  const s = draftOf(patch, m.id).settings;
+  const v = isRec(s) ? s.enhancement : undefined;
+  return typeof v === "number" ? v : m.settings.enhancement;
+}
 
 /** Whether any module can be shown: the Analíticas tab stays hidden otherwise. */
 export const anyModuleAvailable = (modules: readonly Pick<AnalyticsModule, "available">[] | undefined): boolean => !!modules?.some((m) => m.available);
@@ -41,5 +49,6 @@ export const engineLabel: Record<AnalyticsModule["engine"], string> = {
   frigate: "Frigate",
   provision: "Provision ISR",
   native: "Analítica nativa de la cámara",
+  openvms: "OpenVMS",
   none: "Sin motor",
 };

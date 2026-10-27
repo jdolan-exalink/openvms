@@ -12,6 +12,7 @@ The version of OpenVMS lives in `VERSION` and the version of the edge agent in
 
 ### Added
 
+- Camera analytics modules: LPR enhancement, read-only face detection mirror, and per-camera switches for vehicle classification, vehicle color and clothing color (new `camera_analytics_settings`, migration 00080; default unchanged).
 - Camera advanced tab (backend): contextual YAML of one Frigate section (`GET /cameras/{id}/frigate-yaml`,
   `.../validate`, `.../apply`: syntax with line and column, schema check, diff, parameters OpenVMS manages;
   untouched masked secrets never overwrite the real ones; a confirmed edit of managed parameters leaves the

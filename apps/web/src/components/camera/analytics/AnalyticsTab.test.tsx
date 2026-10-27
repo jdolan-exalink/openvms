@@ -2,7 +2,7 @@ import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { fireEvent, render, screen, within } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { AnalyticsTab } from "./AnalyticsTab";
-import { type AnalyticsModule, anyModuleAvailable, draftEnabled, draftMinArea, enabledPatch, minAreaPatch } from "./draft";
+import { type AnalyticsModule, anyModuleAvailable, draftEnabled, draftEnhancement, draftMinArea, enabledPatch, enhancementPatch, minAreaPatch } from "./draft";
 
 afterEach(() => vi.unstubAllGlobals());
 
@@ -89,6 +89,57 @@ describe("AnalyticsTab", () => {
     expect(setPatch).toHaveBeenLastCalledWith({ analytics: { modules: { face_recognition: { enabled: false } } } });
   });
 
+  it("shows the face detection card mirroring recognition, with the engine's reason and no switch of its own", () => {
+    const reason = "Frigate detecta rostros solo mientras el reconocimiento facial está activo; no tiene un interruptor de detección aparte";
+    renderTab(all({
+      face_detection: { available: true, engine: "frigate", enabled: true, reason, advanced: [{ label: "Umbral de detección (servidor)", value: "0.7" }] },
+      face_recognition: { available: true, writable: true, engine: "frigate", reason: undefined, enabled: true, settings: { min_area: 750 }, advanced: [{ label: "Base de rostros", value: "Las listas de vigilancia son del tenant" }] },
+    }));
+    const det = screen.getByTestId("module-face_detection");
+    expect(within(det).getByRole("switch")).toBeDisabled();
+    expect(within(det).getByRole("switch")).toHaveAttribute("aria-checked", "true");
+    expect(within(det).getByText(reason)).toBeInTheDocument();
+    expect(within(det).getByText("Umbral de detección (servidor)")).toBeInTheDocument();
+    expect(screen.getByText("Base de rostros")).toBeInTheDocument();
+  });
+
+  it("OpenVMS modules are switchable and show their detail only while on", () => {
+    const openvms = (id: AnalyticsModule["id"], label: string, enabled: boolean) =>
+      mod({ id, label, available: true, writable: true, enabled, engine: "openvms", reason: undefined, advanced: [{ label: "Alcance", value: "Eventos nuevos de esta cámara" }] });
+    const modules = all().map((m) =>
+      m.id === "vehicle_color" ? openvms("vehicle_color", "Color de vehículo", true) : m.id === "clothing_color" ? openvms("clothing_color", "Color de ropa", false) : m,
+    );
+    const setPatch = renderTab(modules);
+    const on = screen.getByTestId("module-vehicle_color");
+    expect(within(on).getByText("Motor: OpenVMS")).toBeInTheDocument();
+    expect(within(on).getByText("Eventos nuevos de esta cámara")).toBeInTheDocument();
+    expect(within(screen.getByTestId("module-clothing_color")).queryByText("Eventos nuevos de esta cámara")).not.toBeInTheDocument();
+    fireEvent.click(within(screen.getByTestId("module-clothing_color")).getByRole("switch"));
+    expect(setPatch).toHaveBeenLastCalledWith({ analytics: { modules: { clothing_color: { enabled: true } } } });
+  });
+
+  it("shows a server-wide lock as the reason and keeps the switch disabled", () => {
+    const k = mod({ id: "vehicle_classification", label: "Clasificación de vehículo", available: true, writable: false, enabled: false, engine: "openvms", reason: "Desactivado para todo el servidor" });
+    renderTab(all().map((m) => (m.id === "vehicle_classification" ? k : m)));
+    const card = screen.getByTestId("module-vehicle_classification");
+    expect(within(card).getByRole("switch")).toBeDisabled();
+    expect(within(card).getByText("Desactivado para todo el servidor")).toBeInTheDocument();
+  });
+
+  it("stages the LPR enhancement level, bounded to 0..10", () => {
+    const setPatch = renderTab(all({ lpr: { enabled: true, settings: { min_area: 1000, enhancement: 2 } } }));
+    const input = screen.getByLabelText(/Mejora de imagen/);
+    expect(input).toHaveValue(2);
+    fireEvent.change(input, { target: { value: "99" } });
+    expect(setPatch).toHaveBeenLastCalledWith({ analytics: { modules: { lpr: { settings: { enhancement: 10 } } } } });
+  });
+
+  it("shows the specific reason of an unavailable module", () => {
+    const why = "Frigate ofrece la búsqueda semántica para todo el servidor, no por cámara, y OpenVMS no calcula similitud de vehículos";
+    renderTab(all().map((m) => (m.id === "similar_search" ? { ...m, reason: why } : m)));
+    expect(within(screen.getByTestId("module-similar_search")).getByText(why)).toBeInTheDocument();
+  });
+
   it("waits for the model", () => {
     renderTab(undefined);
     expect(screen.getByText("Cargando analíticas…")).toBeInTheDocument();
@@ -104,6 +155,9 @@ describe("draft helpers", () => {
     expect(draftEnabled({ analytics: { lpr: true } }, m)).toBe(true);
     expect(draftMinArea({ analytics: { modules: { lpr: { settings: { min_area: 7 } } } } }, m)).toBe(7);
     expect(draftMinArea({}, m)).toBe(1000);
+    expect(enhancementPatch("lpr", 4)).toEqual({ analytics: { modules: { lpr: { settings: { enhancement: 4 } } } } });
+    expect(draftEnhancement({ analytics: { modules: { lpr: { settings: { enhancement: 6 } } } } }, m)).toBe(6);
+    expect(draftEnhancement({}, lpr({ settings: { enhancement: 1 } }))).toBe(1);
   });
 
   it("anyModuleAvailable needs positive evidence", () => {

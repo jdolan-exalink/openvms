@@ -38,6 +38,7 @@ func (h *Handlers) GetCameraConfig(ctx context.Context, r gen.GetCameraConfigReq
 		return nil, err
 	}
 	ad := h.composedAdapter(ctx, a, ce)
+	h.withLocalState(&ad, a, ce)
 	model, err := ad.Read(ctx, cameraInventory(ce))
 	if err != nil {
 		return nil, err
@@ -67,6 +68,13 @@ func (h *Handlers) GetCameraConfig(ctx context.Context, r gen.GetCameraConfigReq
 
 func cameraInventory(ce inventory.CameraEngine) camconfig.Inventory {
 	return inventory.CameraConfigInventory(ce.Camera, ce.ServerName)
+}
+
+// withLocalState lets the adapter read the switches of the analytics OpenVMS runs itself.
+func (h *Handlers) withLocalState(ad *camconfig.ComposedAdapter, a authz.Actor, ce inventory.CameraEngine) {
+	if h.Inv != nil {
+		ad.Frigate.LocalState = h.Inv.LocalAnalyticsSource(a, ce.Camera)
+	}
 }
 
 // camConfigWriter reviews and applies changes of the normalized configuration; the production
@@ -167,7 +175,9 @@ func (h *Handlers) guardAnalyticsModules(ctx context.Context, a authz.Actor, id 
 	if err != nil {
 		return err
 	}
-	current, err := h.composedAdapter(ctx, a, ce).Read(ctx, cameraInventory(ce))
+	ad := h.composedAdapter(ctx, a, ce)
+	h.withLocalState(&ad, a, ce)
+	current, err := ad.Read(ctx, cameraInventory(ce))
 	if err != nil {
 		return err
 	}
