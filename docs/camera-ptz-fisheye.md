@@ -11,16 +11,14 @@ Control order: 1. ONVIF PTZ, 2. manufacturer driver/API, 3. specific adapter. On
 |---|---|
 | Move, zoom, stop, speed | Works through `POST /api/v1/cameras/{id}/onvif/ptz` (`continuous_move`, `stop`). Press starts, release stops. Speed is a 0.1..1 fraction. Needs `cameras.manage`. |
 | Presets: list, go | Works (`get_presets`, `goto_preset`). |
-| Presets: create, rename, delete; home position | Disabled in the UI. `internal/onvif` has `SetPreset` (rename is `SetPreset` with the existing token), `RemovePreset`, `GotoHomePosition`, `SetHomePosition` and `GetNodes`, but the edge agent endpoint (`internal/agent/onvifdiscover`) only dispatches four actions, so nothing can reach them yet. |
+| Presets: create, rename, delete; home position | Works with agent 0.4.5 or later: `set_preset` (create; `preset_name` optional; rename is `set_preset` with the existing `preset_token`, which also re-saves the position), `remove_preset`, `goto_home`, `set_home`, all needing `cameras.config.ptz` (legacy `cameras.manage` keeps it) and audited as ONVIF mutations. `get_presets` and `get_nodes` return `capabilities` read from ONVIF `GetNodes`: `preset_edit` (the node stores presets), `home` (a home position exists), `home_set` (home exists and is not fixed), `pan_tilt`, `zoom`, `focus` (always false). When they cannot be read, `known` is false and `reason` is `agent_outdated` (update the agent) or `unavailable`; the UI then disables the controls and says why. With several PTZ nodes the first one that stores presets decides. |
 | Focus | Disabled: ONVIF focus lives in the Imaging service, not PTZ. |
 | Limits | Disabled: not exposed over ONVIF PTZ here. |
-| Tours | Stored per camera (table `camera_ptz_tours`, API `/api/v1/cameras/{id}/ptz/tours`): name, steps (preset, dwell seconds, speed), repeat count (0 = until stopped). `cameras.view` lists, `cameras.manage` writes; rows are tenant-isolated by RLS. There is no runner: tours are stored, not executed. |
+| Tours | Stored per camera (table `camera_ptz_tours`, API `/api/v1/cameras/{id}/ptz/tours`): name, steps (preset, dwell seconds, speed), repeat count (0 = until stopped). `cameras.view` lists, `cameras.manage` writes; rows are tenant-isolated by RLS. |
+| Tour runner | `POST .../ptz/tours/{tourId}/start` and `.../stop` (`cameras.config.ptz`); the tours GET carries the camera's `status` (`idle`, `running`, `finished`, `stopped`, `failed`, with step, round and stop reason). It goes to each preset with `goto_preset` through the same agent path, waits the dwell time (at least 1 s between steps) and repeats. One tour runs per camera (409 `tour_running`); it refuses to start without presets (409 `no_presets`), with a preset that no longer exists (409 `preset_missing`) or when the PTZ does not answer (502 `ptz_unavailable`). Any manual movement (`continuous_move`, `stop`, `goto_preset`, `goto_home`) cancels the running tour, as does editing or deleting it and an API shutdown (`Handlers.StopPTZTours`). The runner is in memory: restarting the API stops the tours and, with several API replicas, each one only knows the tours it started. The step `speed` is stored but not applied: `GotoPreset` carries no speed here. |
 | Test from the preview | While the PTZ tab is open (and the user can manage the camera) the preview shows a compact pad. |
 
-Follow-up to enable preset edit and home: add `set_preset`, `remove_preset`, `goto_home`, `set_home`
-and `get_nodes` to the agent PTZ handler (agent version bump), then enable the buttons by node
-capabilities (`MaximumPresets`, `HomeSupported`, `FixedHomePosition`). A tour runner (server side,
-cancelable) would also go through that agent path.
+Restart: `POST /api/v1/cameras/{id}/restart` with `{"confirm": true}` sends ONVIF `SystemReboot` through the agent (operation `reboot`; direct private-network call when the server has no agent). It needs `cameras.restart` (legacy `servers.restart` holders keep it, nobody else gains it) and writes an audit event `CAMERA_RESTART` (user, camera, started and result).
 
 ## Fisheye
 

@@ -2,17 +2,20 @@ package api
 
 import (
 	"context"
+	"errors"
 	"net/http"
 	"strings"
 	"sync"
 	"time"
 
 	"github.com/google/uuid"
+	"github.com/jdolan-exalink/openvms/internal/agent/onvifdiscover"
 	"github.com/jdolan-exalink/openvms/internal/api/gen"
 	"github.com/jdolan-exalink/openvms/internal/authz"
 	"github.com/jdolan-exalink/openvms/internal/camconfig"
 	"github.com/jdolan-exalink/openvms/internal/inventory"
 	"github.com/jdolan-exalink/openvms/internal/onvif"
+	"github.com/jdolan-exalink/openvms/internal/provision"
 	"github.com/jdolan-exalink/openvms/internal/store/db"
 )
 
@@ -68,8 +71,44 @@ func (h *Handlers) cameraVideoLink(ctx context.Context, a authz.Actor, cam db.Ge
 		link.Reason = camconfig.VideoNoCredential
 		return link, nil
 	}
-	link.Device = &lazyVideoDevice{endpoint: endpoint, user: user, pass: pass}
+	link.Device = h.videoDeviceFor(ctx, a, cam, endpoint, user, pass)
 	return link, nil
+}
+
+// agentVideoProvider is the part of the Provision service that reaches a camera's video through
+// the agent of its server; tests replace it.
+type agentVideoProvider interface {
+	HasRegisteredAgent(ctx context.Context, actor authz.Actor, serverID uuid.UUID) bool
+	ExecuteOnvifVideoDevice(ctx context.Context, actor authz.Actor, serverID uuid.UUID, req onvifdiscover.VideoDeviceRequest) (onvifdiscover.VideoDeviceResult, int, error)
+}
+
+func (h *Handlers) agentVideo() agentVideoProvider {
+	if h.camAgentVideo != nil {
+		return h.camAgentVideo
+	}
+	if h.Provision != nil {
+		return h.Provision
+	}
+	return nil
+}
+
+// videoDeviceFor chooses how the camera's video is reached. A camera whose server has an agent is
+// reached through it, because the cameras of a site live on a LAN the central API cannot dial; a
+// server without an agent keeps the direct dial, which only goes to private addresses.
+func (h *Handlers) videoDeviceFor(ctx context.Context, a authz.Actor, cam db.GetCameraRow, endpoint, user, pass string) camconfig.VideoDevice {
+	if p := h.agentVideo(); p != nil && p.HasRegisteredAgent(ctx, a, cam.ServerID) {
+		return &camconfig.AgentVideoDevice{
+			Endpoint: endpoint, Username: user, Password: pass,
+			Call: func(ctx context.Context, req onvifdiscover.VideoDeviceRequest) (onvifdiscover.VideoDeviceResult, int, error) {
+				res, status, err := p.ExecuteOnvifVideoDevice(ctx, a, cam.ServerID, req)
+				if errors.Is(err, provision.ErrAgentOpUnsupported) {
+					err = camconfig.ErrAgentOutdated
+				}
+				return res, status, err
+			},
+		}
+	}
+	return &lazyVideoDevice{endpoint: endpoint, user: user, pass: pass}
 }
 
 // lazyVideoDevice connects on first use, so a request that never needs the camera never talks

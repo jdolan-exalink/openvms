@@ -23,6 +23,7 @@ const REASONS: Record<VideoReason, string> = {
   no_credentials: "Faltan las credenciales de la cámara",
   unreachable: "No se pudo contactar a la cámara",
   unsupported: "La cámara no permite cambiar estos valores",
+  agent_outdated: "Actualizá el agente para configurar el video de esta cámara",
 };
 
 export const reasonText = (reason: VideoReason | undefined): string => REASONS[reason ?? "unsupported"] ?? REASONS.unsupported;

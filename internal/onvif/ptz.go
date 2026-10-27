@@ -92,8 +92,11 @@ func (p *PTZClient) GotoPreset(ctx context.Context, profileToken, presetToken st
 // an existing token overwrites that preset (ONVIF has no rename: renaming is SetPreset with the
 // same token and a new name, which also overwrites the stored position). It returns the token.
 func (p *PTZClient) SetPreset(ctx context.Context, profileToken, name, presetToken string) (string, error) {
-	content := `<tptz:ProfileToken>` + escapeXML(profileToken) + `</tptz:ProfileToken>` +
-		`<tptz:PresetName>` + escapeXML(name) + `</tptz:PresetName>`
+	content := `<tptz:ProfileToken>` + escapeXML(profileToken) + `</tptz:ProfileToken>`
+	if name != "" {
+		// The name is optional in ONVIF; without one the device picks its own.
+		content += `<tptz:PresetName>` + escapeXML(name) + `</tptz:PresetName>`
+	}
 	if presetToken != "" {
 		content += `<tptz:PresetToken>` + escapeXML(presetToken) + `</tptz:PresetToken>`
 	}

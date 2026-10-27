@@ -1813,8 +1813,10 @@ paths:
         probe); credentials and device addresses are never returned. When the camera cannot be
         asked the answer is still 200 with `available: false` and a reason code: `no_onvif`
         (no ONVIF endpoint), `no_credentials` (none stored), `unreachable` (the camera did not
-        answer) or `unsupported` (it does not expose the settings, or the stream's ONVIF profile
-        could not be identified). `apply_via` tells, per field, whether a change goes to the
+        answer), `unsupported` (it does not expose the settings, or the stream's ONVIF profile
+        could not be identified) or `agent_outdated` (the camera is reached through its server's
+        agent, which has to be updated first). A camera whose server has an agent is always reached
+        through it; without an agent the API dials the camera directly on private addresses. `apply_via` tells, per field, whether a change goes to the
         camera (`onvif`), to Frigate's detect section (`frigate`) or cannot be made (`none`).
         Applying changes goes through the normalized-config review and apply endpoints with
         `streams.primary` / `streams.detection`; a change that restarts the stream says so in
@@ -1956,7 +1958,15 @@ paths:
       tags: [cameras]
       operationId: controlCameraOnvifPTZ
       summary: Control camera PTZ via ONVIF
-      description: Sends ContinuousMove, Stop, or GotoPreset commands to the camera. Requires cameras.manage.
+      description: |
+        Sends PTZ commands to the camera through its server's agent: `continuous_move`, `stop`,
+        `goto_preset`, `get_presets`, and (agent 0.4.5 and later) `set_preset` (create, or rename
+        with an existing `preset_token`; `preset_name` is optional), `remove_preset`, `goto_home`,
+        `set_home` and `get_nodes`. Everything but `get_presets` and `get_nodes` requires
+        `cameras.config.ptz` (legacy `cameras.manage` holders keep it). Movement commands
+        (`continuous_move`, `stop`, `goto_preset`, `goto_home`) cancel the camera's running tour.
+        `get_presets` and `get_nodes` also return `capabilities`: what the device really supports,
+        so a client enables only that.
       requestBody:
         required: true
         content:
@@ -2064,7 +2074,7 @@ paths:
       tags: [cameras]
       operationId: listCameraPtzTours
       summary: List the PTZ tours stored for a camera
-      description: Requires cameras.view. Tours are a stored sequence of device presets; this API does not run them.
+      description: Requires cameras.view. Tours are a stored sequence of device presets; `status` tells which one, if any, is running now.
       responses:
         "200":
           description: PTZ tours
@@ -2130,6 +2140,79 @@ paths:
         "401": { $ref: "#/components/responses/Unauthorized" }
         "403": { $ref: "#/components/responses/Forbidden" }
         "404": { $ref: "#/components/responses/NotFound" }
+  /api/v1/cameras/{cameraId}/ptz/tours/{tourId}/start:
+    parameters:
+      - { name: cameraId, in: path, required: true, schema: { type: string, format: uuid } }
+      - { name: tourId, in: path, required: true, schema: { type: string, format: uuid } }
+    post:
+      tags: [cameras]
+      operationId: startCameraPtzTour
+      summary: Run a stored PTZ tour
+      description: |
+        Requires cameras.config.ptz. Runs the tour's steps (go to the preset, wait the dwell time) for
+        its repeat count (0 repeats until stopped) through the same PTZ path as manual commands.
+        One tour runs per camera (409 `tour_running` while another does), the camera must have
+        presets and the PTZ must answer (409 `no_presets`, 409 `preset_missing`, 502 `ptz_unavailable`).
+        Any manual movement command cancels it. The runner lives in the API process memory.
+      responses:
+        "200":
+          description: Tour started
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/CameraPtzTourStatus" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { $ref: "#/components/responses/NotFound" }
+        "409": { $ref: "#/components/responses/Conflict" }
+        "502": { $ref: "#/components/responses/FrigateUnreachable" }
+  /api/v1/cameras/{cameraId}/ptz/tours/{tourId}/stop:
+    parameters:
+      - { name: cameraId, in: path, required: true, schema: { type: string, format: uuid } }
+      - { name: tourId, in: path, required: true, schema: { type: string, format: uuid } }
+    post:
+      tags: [cameras]
+      operationId: stopCameraPtzTour
+      summary: Stop the running PTZ tour
+      description: Requires cameras.config.ptz. Stopping a tour that is not running is not an error.
+      responses:
+        "200":
+          description: Status after stopping
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/CameraPtzTourStatus" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { $ref: "#/components/responses/NotFound" }
+  /api/v1/cameras/{cameraId}/restart:
+    parameters:
+      - { name: cameraId, in: path, required: true, schema: { type: string, format: uuid } }
+    post:
+      tags: [cameras]
+      operationId: restartCamera
+      summary: Restart the camera device
+      description: |
+        ONVIF SystemReboot through the server's agent (or a direct private-network call when the
+        server has no agent). Requires cameras.restart (legacy servers.restart holders keep it) and
+        `confirm: true` (400 `confirmation_required` otherwise). The camera stops streaming while it
+        restarts. 409 `agent_outdated` when the agent has no reboot operation. Every attempt is audited
+        with the user, the camera and the result.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/CameraRestartRequest" }
+      responses:
+        "200":
+          description: The camera accepted the restart
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/CameraRestartResult" }
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { $ref: "#/components/responses/NotFound" }
+        "409": { $ref: "#/components/responses/Conflict" }
+        "502": { $ref: "#/components/responses/FrigateUnreachable" }
   /api/v1/cameras/{cameraId}/zones:
     parameters:
       - { name: cameraId, in: path, required: true, schema: { type: string, format: uuid } }
@@ -6179,17 +6262,38 @@ components:
         username: { type: string, maxLength: 128 }
         password: { type: string, maxLength: 256, writeOnly: true }
         profile_token: { type: string, maxLength: 128 }
-        action: { type: string, enum: [continuous_move, stop, goto_preset, get_presets] }
+        action: { type: string, enum: [continuous_move, stop, goto_preset, get_presets, set_preset, remove_preset, goto_home, set_home, get_nodes] }
         pan: { type: number }
         tilt: { type: number }
         zoom: { type: number }
         preset_token: { type: string, maxLength: 128 }
+        preset_name: { type: string, maxLength: 128, description: Name for set_preset; optional. }
+    CameraPtzCapabilities:
+      type: object
+      additionalProperties: false
+      required: [known, preset_edit, max_presets, home, home_set, pan_tilt, zoom, focus]
+      description: |
+        What the camera's PTZ node declares (ONVIF GetNodes). When `known` is false nothing could be
+        read and every flag is false; `reason` says why (`agent_outdated`: the agent has no PTZ
+        node operation, update it; `unavailable`: the camera did not answer).
+      properties:
+        known: { type: boolean }
+        reason: { type: string, enum: [agent_outdated, unavailable] }
+        preset_edit: { type: boolean, description: The device stores presets (create, rename, delete). }
+        max_presets: { type: integer }
+        home: { type: boolean, description: The device has a home position to go to. }
+        home_set: { type: boolean, description: The home position can be saved (supported and not fixed). }
+        pan_tilt: { type: boolean }
+        zoom: { type: boolean }
+        focus: { type: boolean, description: Always false; focus needs the ONVIF Imaging service, which OpenVMS does not drive yet. }
     CameraOnvifPTZResult:
       type: object
       additionalProperties: false
       required: [success]
       properties:
         success: { type: boolean }
+        preset_token: { type: string, description: Token of the preset saved by set_preset. }
+        capabilities: { $ref: "#/components/schemas/CameraPtzCapabilities" }
         presets:
           type: array
           items:
@@ -6647,6 +6751,22 @@ components:
         repeat_count: { type: integer }
         created_at: { type: string, format: date-time }
         updated_at: { type: string, format: date-time }
+    CameraPtzTourStatus:
+      type: object
+      required: [state]
+      description: |
+        The tour runner is in memory and per API process: a restart of the API stops the running
+        tour. One tour runs per camera; any manual movement command cancels it.
+      properties:
+        state: { type: string, enum: [idle, running, finished, stopped, failed] }
+        tour_id: { type: string, format: uuid }
+        tour_name: { type: string }
+        started_at: { type: string, format: date-time }
+        ended_at: { type: string, format: date-time }
+        step: { type: integer, description: Zero-based index of the step running or last run. }
+        round: { type: integer, description: Zero-based repetition. }
+        stop_reason: { type: string, enum: [user, manual_command, tour_changed, shutdown, error, done] }
+        error: { type: string, description: Short code of the failure, never a device message. }
     CameraPtzTourList:
       type: object
       required: [tours]
@@ -6654,6 +6774,19 @@ components:
         tours:
           type: array
           items: { $ref: "#/components/schemas/CameraPtzTour" }
+        status: { $ref: "#/components/schemas/CameraPtzTourStatus" }
+    CameraRestartRequest:
+      type: object
+      additionalProperties: false
+      required: [confirm]
+      properties:
+        confirm: { type: boolean, description: Must be true; the camera stops streaming while it restarts. }
+    CameraRestartResult:
+      type: object
+      required: [restarted, via]
+      properties:
+        restarted: { type: boolean }
+        via: { type: string, enum: [agent, direct] }
     CameraZoneList:
       type: object
       required: [zones]
@@ -6793,7 +6926,7 @@ components:
         warnings: { type: array, items: { type: string } }
     CameraVideoReason:
       type: string
-      enum: [no_onvif, no_credentials, unreachable, unsupported]
+      enum: [no_onvif, no_credentials, unreachable, unsupported, agent_outdated]
     CameraVideoOptions:
       type: object
       required: [camera_id, available, streams]

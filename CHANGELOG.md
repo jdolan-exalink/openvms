@@ -33,6 +33,11 @@ The version of OpenVMS lives in `VERSION` and the version of the edge agent in
   controls over the preview) and a Fisheye tab that separates the original stream and recording from the
   dewarped view; tours use migration 00079 and `/api/v1/cameras/{id}/ptz/tours`. Preset editing and home
   position need agent support (see docs/camera-ptz-fisheye.md).
+- Camera editor behind an agent (agent 0.4.5): cameras whose server has an agent are configured through it
+  (video options and changes, PTZ presets/home/nodes, reboot); an older agent reads as `agent_outdated`.
+  The PTZ endpoint reports the device `capabilities`, tours can be run (`/cameras/{id}/ptz/tours/{id}/start|stop`,
+  in memory, one per camera, cancelled by manual movement) and `POST /cameras/{id}/restart` (`cameras.restart`,
+  explicit confirm, audited) restarts the camera. See docs/camera-ptz-fisheye.md.
 - Agent 0.4.0 (in progress): the agent version is one file, `deploy/agent/VERSION`, embedded in
   the API as the version it expects (it used to be a second string stuck at 0.2.1), and a check
   (`tools/agent_version.sh`, `make hooks`, CI job "Agent version") requires a new version for any
@@ -55,7 +60,7 @@ The version of OpenVMS lives in `VERSION` and the version of the edge agent in
 
 ### Changed
 
-- Agent 0.4.5: schema-only change: sqlc models gain camera_config_state (no behaviour change in the agent)
+- Agent 0.4.5: schema-only change: sqlc models gain camera_config_state. It also adds the ONVIF operations the camera editor needs behind a site: `POST /v1/onvif/video-device` (`profile_streams`, `video_options`, `set_video_encoder`), `POST /v1/onvif/reboot` and the PTZ actions `set_preset`, `remove_preset`, `goto_home`, `set_home`, `get_nodes` (scope `control`; credentials arrive in the request and are never logged or returned).
 - Agent 0.4.4: Rebuilt with the server delete purge queries; no change in agent behavior.
 - Agent 0.4.3: Revoking or re-creating the openvms token keeps /etc/openvms/openvms.apikey in step: revoke removes it, create saves the new key.
 - Agent 0.4.2: The installer keeps the OpenVMS key in /etc/openvms/openvms.apikey and ends with the host addresses and the steps to connect it in OpenVMS

@@ -7,14 +7,22 @@ import { Button, ErrorNote, Field, Select, TextInput } from "@/components/ui";
 type Step = Schemas["CameraPtzTourStep"];
 type Draft = { id?: string; name: string; repeat: number; steps: Step[] };
 
-export const TOUR_RUN_NOTE = "Los tours se guardan en OpenVMS; la ejecución automática todavía no está disponible. Mientras tanto se recorren manualmente con «Ir» en cada preset.";
+export const TOUR_RUN_NOTE = "Un tour recorre sus presets en orden. Solo corre uno por cámara y cualquier movimiento manual lo cancela. Si OpenVMS se reinicia, los tours en ejecución se detienen.";
+export const TOUR_NEEDS_PRESETS = "La cámara no tiene presets: no se puede ejecutar un tour.";
+export const TOUR_STOP_REASON: Record<string, string> = {
+  manual_command: "Se detuvo por un comando manual.",
+  tour_changed: "Se detuvo porque el tour cambió.",
+  shutdown: "Se detuvo porque OpenVMS se reinició.",
+  user: "Detenido.",
+  done: "Terminó.",
+};
 
 const emptyDraft = (): Draft => ({ name: "", repeat: 0, steps: [] });
 
-/** Stored tours: sequence of presets with dwell time and speed, repeat count. CRUD only; no runner. */
+/** Stored tours (sequence of presets with dwell time and speed, repeat count) and their runner. */
 export function ToursPanel({ cameraId, canManage }: { cameraId: string; canManage: boolean }) {
   const qc = useQueryClient();
-  const tours = useQuery(cameraPtzToursQuery(cameraId));
+  const tours = useQuery({ ...cameraPtzToursQuery(cameraId), refetchInterval: (q) => (q.state.data?.status?.state === "running" ? 3000 : false) });
   const presets = useQuery({ ...cameraPtzPresetsQuery(cameraId), enabled: canManage });
   const [draft, setDraft] = useState<Draft | null>(null);
   const refresh = () => qc.invalidateQueries({ queryKey: ["cameras", cameraId, "ptz-tours"] });
@@ -36,7 +44,18 @@ export function ToursPanel({ cameraId, canManage }: { cameraId: string; canManag
     onSuccess: () => void refresh(),
   });
 
+  const start = useMutation({
+    mutationFn: async (tourId: string) => unwrap(await api.POST("/api/v1/cameras/{cameraId}/ptz/tours/{tourId}/start", { params: { path: { cameraId, tourId } } })),
+    onSuccess: () => void refresh(),
+  });
+  const stop = useMutation({
+    mutationFn: async (tourId: string) => unwrap(await api.POST("/api/v1/cameras/{cameraId}/ptz/tours/{tourId}/stop", { params: { path: { cameraId, tourId } } })),
+    onSuccess: () => void refresh(),
+  });
   const available = presets.data?.presets ?? [];
+  const noPresets = presets.isSuccess && available.length === 0;
+  const status = tours.data?.status;
+  const running = status?.state === "running";
   const setStep = (i: number, patch: Partial<Step>) => setDraft((d) => d && { ...d, steps: d.steps.map((s, j) => (j === i ? { ...s, ...patch } : s)) });
   const valid = !!draft && draft.name.trim() !== "" && draft.steps.length > 0 && draft.steps.every((s) => s.preset_token !== "");
 
@@ -45,6 +64,12 @@ export function ToursPanel({ cameraId, canManage }: { cameraId: string; canManag
       <h3 className="text-sm font-semibold">Tours</h3>
       <p className="text-xs text-muted">{TOUR_RUN_NOTE}</p>
       {tours.isError && <ErrorNote error={tours.error} />}
+      {status && status.state !== "idle" && (
+        <p role="status" className="text-xs text-muted">
+          {running ? `Ejecutando «${status.tour_name}» (paso ${(status.step ?? 0) + 1}).` : status.state === "failed" ? `El tour «${status.tour_name}» falló.` : `${status.tour_name}: ${TOUR_STOP_REASON[status.stop_reason ?? "done"] ?? "Detenido."}`}
+        </p>
+      )}
+      {canManage && noPresets && <p className="text-xs text-muted">{TOUR_NEEDS_PRESETS}</p>}
       {tours.isSuccess && tours.data.tours.length === 0 && !draft && <p className="text-xs text-muted">Esta cámara no tiene tours guardados.</p>}
       <ul className="flex flex-col gap-1.5">
         {tours.data?.tours.map((t) => (
@@ -54,6 +79,11 @@ export function ToursPanel({ cameraId, canManage }: { cameraId: string; canManag
             </span>
             {canManage && (
               <span className="flex gap-1.5">
+                {running && status?.tour_id === t.id ? (
+                  <Button size="sm" disabled={stop.isPending} onClick={() => stop.mutate(t.id)} aria-label={`Detener ${t.name}`}>Detener</Button>
+                ) : (
+                  <Button size="sm" disabled={running || noPresets || start.isPending} title={running ? "Ya hay un tour en ejecución." : noPresets ? TOUR_NEEDS_PRESETS : undefined} onClick={() => start.mutate(t.id)} aria-label={`Iniciar ${t.name}`}>Iniciar</Button>
+                )}
                 <Button size="sm" onClick={() => setDraft({ id: t.id, name: t.name, repeat: t.repeat_count, steps: t.steps })} aria-label={`Editar ${t.name}`}>Editar</Button>
                 <Button size="sm" disabled={remove.isPending} onClick={() => remove.mutate(t.id)} aria-label={`Eliminar ${t.name}`}>Eliminar</Button>
               </span>
@@ -62,6 +92,8 @@ export function ToursPanel({ cameraId, canManage }: { cameraId: string; canManag
         ))}
       </ul>
       <ErrorNote error={remove.error} />
+      <ErrorNote error={start.error} />
+      <ErrorNote error={stop.error} />
 
       {canManage && !draft && (
         <div>

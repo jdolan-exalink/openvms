@@ -30,7 +30,7 @@ import { IntegrationsTab } from "@/components/camera/integrations/IntegrationsTa
 import { CameraTabs } from "@/components/camera/CameraTabs";
 import { VideoTab } from "@/components/camera/video/VideoTab";
 import { CameraWebView } from "@/components/camera/CameraWebView";
-import { MoreActions } from "@/components/camera/MoreActions";
+import { MoreActions, RESTART_CAMERA_LABEL, RestartCameraDialog } from "@/components/camera/MoreActions";
 import { PendingChangesBar } from "@/components/camera/PendingChangesBar";
 import { capabilityList, deviceRows, NONE, statusChips, videoRows } from "@/components/camera/summary";
 import { LprTestCard } from "@/components/provision/LprTestCard";
@@ -159,6 +159,8 @@ function FrigateCameraConfigScreen({ cameraId }: { cameraId: string }) {
   // The camera web view needs cameras.web.access (the legacy servers.manage + secrets pair counts).
   const canOpenCameraWeb = canCamera(me.data, "cameras.web.access");
   const canRestart = can(me.data, "servers.restart");
+  const canRestartCamera = canCamera(me.data, "cameras.restart");
+  const [restartingCamera, setRestartingCamera] = useState(false);
   const secretsVisible = !!doc.data?.secrets_visible;
   const needsRestart = serverId ? (restartPending[serverId] ?? loadRestart(serverId)) : false;
   const setNeedsRestart = (on: boolean) => {
@@ -456,8 +458,10 @@ function FrigateCameraConfigScreen({ cameraId }: { cameraId: string }) {
                 { id: "bulk", label: "Aplicar a varias cámaras", disabled: readOnly || !dirty.length || errorCount > 0 || !serverId, onSelect: openBulk },
                 { id: "onvif", label: "Capacidades ONVIF", onSelect: () => setActive(ONVIF_INFO) },
                 { id: "history", label: "Historial de cambios", onSelect: () => setActive(HISTORY) },
+                ...(canRestartCamera ? [{ id: "restart", label: RESTART_CAMERA_LABEL, onSelect: () => setRestartingCamera(true) }] : []),
               ]}
             />
+            {restartingCamera && <RestartCameraDialog cameraId={cameraId} onClose={() => setRestartingCamera(false)} />}
           </>
         }
       />

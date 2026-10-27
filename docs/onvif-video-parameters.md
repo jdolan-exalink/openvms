@@ -30,7 +30,7 @@ Package `internal/onvif`. The UI talks about video (resolution, FPS, codec, bitr
 
 **Read.** The primary stream gets resolution, FPS, bitrate and GOP (and the codec when go2rtc did not report one) from the profile. The detection stream keeps Frigate's detect size and rate and only gains missing values. The `onvif` entry of `sources` is `ok` or `unavailable` with a reason code in `detail`.
 
-**Reason codes** (`video-options`, `sources[onvif].detail`): `no_onvif` (no ONVIF endpoint), `no_credentials` (none stored, or no permission to use them), `unreachable` (the camera did not answer), `unsupported` (it does not expose the settings or the stream's profile is unknown). Error text from the device is never copied.
+**Reason codes** (`video-options`, `sources[onvif].detail`): `no_onvif` (no ONVIF endpoint), `no_credentials` (none stored, or no permission to use them), `unreachable` (the camera did not answer), `unsupported` (it does not expose the settings or the stream's profile is unknown), `agent_outdated` (the camera is reached through its server's agent, which does not have the video operations yet: "Actualizá el agente para configurar el video de esta cámara"). Error text from the device is never copied.
 
 **Patch** (`streams.primary` / `streams.detection`, fields `resolution {width,height}`, `fps`, `codec`, `bitrate_kbps`, `gop`) and the path each field takes:
 
@@ -40,3 +40,17 @@ Package `internal/onvif`. The UI talks about video (resolution, FPS, codec, bitr
 | codec, bitrate_kbps, gop | ONVIF encoder | ONVIF encoder | rejected (`unsupported` item) |
 
 Review reads the device (read only), runs `ValidateVideoChange` (each violation is an `unsupported` item such as "Stream principal: La resolución 3840x2160 no está soportada con H264.") and `ClassifyImpact` (impact `stream_restart`, "Este cambio reiniciará el stream durante aproximadamente algunos segundos."). Apply runs through the desired/effective pipeline: the desired state is recorded first, the camera is written before Frigate (`SetVideoEncoder`, read-modify-write and verification) so a refusal leaves everything else untouched, and the outcome and audit row carry old/new values and origin. A refused or unverified write ends in `sync_state: error` with a sanitized `last_error`. Stream fields are not part of the drift comparison: the verification is the one `SetVideoEncoder` does against the device.
+
+## Cameras behind an agent
+
+A camera whose server has a registered agent is read and changed **through that agent**, because the
+cameras of a site live on a LAN the central API cannot dial. The API sends the agent
+`POST /v1/onvif/video-device` (scope `control`) with `op` = `profile_streams`, `video_options` or
+`set_video_encoder`; the agent runs the same read-modify-write-and-verify code as the direct path and
+answers with the streams, the options, or a coded refusal (`validation_failed` with the violated
+limits, `not_applied` with the fields the camera ignored, `profile_not_found`, `no_video_encoder`,
+`gop_not_writable`, `camera_error`). The camera credentials travel in the request to the agent only
+(the same rule as the ONVIF probe: `servers.manage` and `servers.config.secrets` on the server) and
+are never logged or returned. A server without an agent keeps the direct dial, which only connects to
+private addresses. An agent that answers 404/405 for the operation is older than 0.4.5: the reason is
+`agent_outdated`.

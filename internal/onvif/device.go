@@ -192,6 +192,15 @@ func (d *DeviceClient) SetSystemDateAndTime(ctx context.Context, utcTime time.Ti
 	return err
 }
 
+// SystemReboot asks the device to restart. The camera stops streaming until it is back; the
+// device may answer before it goes down or drop the connection, so the caller should not treat a
+// transport failure after the request as proof that nothing happened.
+func (d *DeviceClient) SystemReboot(ctx context.Context) error {
+	body := `<tds:SystemReboot xmlns:tds="` + deviceNamespace + `"/>`
+	_, err := d.client.Call(ctx, d.endpoint, deviceNamespace+"/SystemReboot", body, Mutating)
+	return err
+}
+
 func decodeOperation(data []byte, name string, target any) error {
 	decoder := xml.NewDecoder(bytes.NewReader(data))
 	for {

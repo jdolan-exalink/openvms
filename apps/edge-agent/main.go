@@ -380,6 +380,8 @@ func buildMuxWithAuth(auth *authenticator, variant string, sampler *agent.Sample
 		mux.Handle("POST /v1/onvif/ptz", control(opsHandler.HandlePTZ))
 		mux.Handle("POST /v1/onvif/video-config", control(opsHandler.HandleVideoConfig))
 		mux.Handle("POST /v1/onvif/video-encoding", control(opsHandler.HandleVideoEncoding))
+		mux.Handle("POST /v1/onvif/video-device", control(opsHandler.HandleVideoDevice))
+		mux.Handle("POST /v1/onvif/reboot", control(opsHandler.HandleReboot))
 		mux.Handle("POST /v1/onvif/imaging", control(opsHandler.HandleImaging))
 		mux.Handle("POST /v1/onvif/snapshot", control(opsHandler.HandleSnapshot))
 	}
