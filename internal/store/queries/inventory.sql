@@ -132,8 +132,11 @@ WHERE id = @id;
 UPDATE cameras SET site_id = @site_id, updated_at = now() WHERE server_id = @server_id;
 
 -- name: UpsertCamera :one
+-- A tombstoned (server_id, remote_name) is skipped: the statement returns no row, so a camera that
+-- was deleted here is not brought back by the sync while Frigate still lists it.
 INSERT INTO cameras (tenant_id, site_id, server_id, remote_name, display_name, enabled, zones, lpr, live_stream, hq_stream, live_codec, hq_codec)
-VALUES (@tenant_id, @site_id, @server_id, @remote_name, @display_name, @enabled, @zones, @lpr, @live_stream, @hq_stream, @live_codec, @hq_codec)
+SELECT @tenant_id::uuid, @site_id::uuid, @server_id::uuid, @remote_name::text, @display_name::text, @enabled::boolean, @zones::text[], @lpr::boolean, @live_stream::text, @hq_stream::text, @live_codec::text, @hq_codec::text
+WHERE NOT EXISTS (SELECT 1 FROM camera_tombstones t WHERE t.server_id = @server_id::uuid AND t.remote_name = @remote_name::text)
 ON CONFLICT (server_id, remote_name) WHERE deleted_at IS NULL DO UPDATE SET
     zones = excluded.zones,
     lpr = excluded.lpr,

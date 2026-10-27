@@ -1946,7 +1946,8 @@ func (q *Queries) UpdateSite(ctx context.Context, arg UpdateSiteParams) error {
 
 const upsertCamera = `-- name: UpsertCamera :one
 INSERT INTO cameras (tenant_id, site_id, server_id, remote_name, display_name, enabled, zones, lpr, live_stream, hq_stream, live_codec, hq_codec)
-VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)
+SELECT $1::uuid, $2::uuid, $3::uuid, $4::text, $5::text, $6::boolean, $7::text[], $8::boolean, $9::text, $10::text, $11::text, $12::text
+WHERE NOT EXISTS (SELECT 1 FROM camera_tombstones t WHERE t.server_id = $3::uuid AND t.remote_name = $4::text)
 ON CONFLICT (server_id, remote_name) WHERE deleted_at IS NULL DO UPDATE SET
     zones = excluded.zones,
     lpr = excluded.lpr,
@@ -1976,6 +1977,8 @@ type UpsertCameraParams struct {
 	HqCodec     string
 }
 
+// A tombstoned (server_id, remote_name) is skipped: the statement returns no row, so a camera that
+// was deleted here is not brought back by the sync while Frigate still lists it.
 func (q *Queries) UpsertCamera(ctx context.Context, arg UpsertCameraParams) (bool, error) {
 	row := q.db.QueryRow(ctx, upsertCamera,
 		arg.TenantID,
