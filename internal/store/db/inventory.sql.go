@@ -1209,12 +1209,14 @@ const listDueCameraPurges = `-- name: ListDueCameraPurges :many
 SELECT camera_id FROM camera_tombstones
 WHERE purged_at IS NULL AND retain_days IS NOT NULL
   AND deleted_at + make_interval(days => retain_days) <= $1::timestamptz
+  AND camera_id <> ALL($2::uuid[])
 ORDER BY deleted_at
-LIMIT $2
+LIMIT $3
 `
 
 type ListDueCameraPurgesParams struct {
 	Now   time.Time
+	Skip  []uuid.UUID
 	Batch int32
 }
 
@@ -1223,7 +1225,7 @@ type ListDueCameraPurgesParams struct {
 // Exports and export jobs (evidence people made) and the server-wide face sightings and object
 // snapshots are kept.
 func (q *Queries) ListDueCameraPurges(ctx context.Context, arg ListDueCameraPurgesParams) ([]uuid.UUID, error) {
-	rows, err := q.db.Query(ctx, listDueCameraPurges, arg.Now, arg.Batch)
+	rows, err := q.db.Query(ctx, listDueCameraPurges, arg.Now, arg.Skip, arg.Batch)
 	if err != nil {
 		return nil, err
 	}

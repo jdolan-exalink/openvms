@@ -18,49 +18,58 @@ import (
 // ActionCameraHistoryPurged records the purge of a deleted camera's history.
 const ActionCameraHistoryPurged = "CAMERA_HISTORY_PURGED"
 
-const purgeBatch = 50
+// purgeBatch is how many due cameras are listed at a time; every due camera is still attempted per run.
+var purgeBatch int32 = 50
 
 // PurgeDeletedCameraHistory removes the history OpenVMS keeps for deleted cameras whose recording
 // window has passed: events, plate reads, alarms, tracks, watermarked clips, notifications and rule
-// firings, and the stored objects they point to (after the commit, best effort). The window is the
+// firings, and the stored objects they point to. The window is the
 // retain_days their tombstone recorded when they were deleted; a camera with an unknown window is never
 // purged. Exports and export jobs, face sightings and object snapshots are kept. The camera row and its
 // tombstone stay, so the sync still skips the name and the camera can still be restored (without that
-// history). A camera whose purge fails is logged and retried on the next run. It returns how many
-// cameras were purged.
+// history). The stored objects are deleted first, while the camera's tombstone is locked, and the rows
+// only afterwards in the same transaction: a failure or a crash in between leaves the rows (and so the
+// keys) in place and the camera is retried on the next run, instead of orphaning objects. A camera whose
+// purge fails is logged and skipped for the rest of the run, so it cannot hold back the others; every
+// due camera is attempted in each run. It returns how many cameras were purged.
 func (s *Service) PurgeDeletedCameraHistory(ctx context.Context, now time.Time) (int, error) {
-	var due []uuid.UUID
-	err := s.Store.Tx(ctx, store.AllTenants, func(q *db.Queries) error {
-		var err error
-		due, err = q.ListDueCameraPurges(ctx, db.ListDueCameraPurgesParams{Now: now, Batch: purgeBatch})
-		return err
-	})
-	if err != nil {
-		return 0, err
-	}
 	purged := 0
-	for _, id := range due {
-		var keys []string
-		var serverID uuid.UUID
-		var done bool
-		err := retryOnDeadlock(ctx, func() error {
-			keys, done = nil, false
-			return s.purgeCameraHistoryTx(ctx, id, now, &keys, &serverID, &done)
+	skip := []uuid.UUID{}
+	for {
+		var due []uuid.UUID
+		err := s.Store.Tx(ctx, store.AllTenants, func(q *db.Queries) error {
+			var err error
+			due, err = q.ListDueCameraPurges(ctx, db.ListDueCameraPurgesParams{Now: now, Batch: purgeBatch, Skip: skip})
+			return err
 		})
 		if err != nil {
-			s.Log.WarnContext(ctx, "inventory: purge history of a deleted camera", "camera_id", id, "error", err)
-			continue
+			return purged, err
 		}
-		if !done {
-			continue
+		if len(due) == 0 {
+			return purged, nil
 		}
-		s.deleteBlobs(ctx, serverID, keys)
-		purged++
+		for _, id := range due {
+			var done bool
+			err := retryOnDeadlock(ctx, func() error {
+				done = false
+				return s.purgeCameraHistoryTx(ctx, id, now, &done)
+			})
+			if err != nil {
+				s.Log.WarnContext(ctx, "inventory: purge history of a deleted camera", "camera_id", id, "error", err)
+			}
+			if err != nil || !done {
+				skip = append(skip, id) // failed, or locked by another replica: not again in this run
+				continue
+			}
+			purged++
+		}
+		if ctx.Err() != nil {
+			return purged, ctx.Err()
+		}
 	}
-	return purged, nil
 }
 
-func (s *Service) purgeCameraHistoryTx(ctx context.Context, id uuid.UUID, now time.Time, keys *[]string, serverID *uuid.UUID, done *bool) error {
+func (s *Service) purgeCameraHistoryTx(ctx context.Context, id uuid.UUID, now time.Time, done *bool) error {
 	return s.Store.Tx(ctx, store.AllTenants, func(q *db.Queries) error {
 		tomb, err := q.LockCameraTombstoneForPurge(ctx, db.LockCameraTombstoneForPurgeParams{CameraID: id, Now: now})
 		if errors.Is(err, pgx.ErrNoRows) {
@@ -69,9 +78,18 @@ func (s *Service) purgeCameraHistoryTx(ctx context.Context, id uuid.UUID, now ti
 		if err != nil {
 			return err
 		}
-		*serverID = tomb.ServerID
-		if *keys, err = q.ListCameraBlobKeys(ctx, id); err != nil {
+		keys, err := q.ListCameraBlobKeys(ctx, id)
+		if err != nil {
 			return err
+		}
+		// Objects first, under the tombstone's row lock, then the rows that name them. Deleting an
+		// object that is already gone succeeds, so a retry after a failure is safe.
+		if s.Blobs != nil {
+			for _, key := range keys {
+				if err := s.Blobs.Delete(ctx, key); err != nil {
+					return fmt.Errorf("delete stored object %s: %w", key, err)
+				}
+			}
 		}
 		counts := map[string]int64{}
 		steps := []struct {

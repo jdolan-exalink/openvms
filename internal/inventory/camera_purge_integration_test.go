@@ -4,12 +4,16 @@ package inventory_test
 
 import (
 	"context"
+	"errors"
+	"strings"
+	"sync"
 	"testing"
 	"time"
 
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
 
+	"github.com/jdolan-exalink/openvms/internal/inventory"
 	"github.com/jdolan-exalink/openvms/internal/store"
 	"github.com/jdolan-exalink/openvms/internal/store/db"
 	"github.com/jdolan-exalink/openvms/internal/testutil/demofix"
@@ -203,5 +207,85 @@ func TestPurgeLeavesHistoryAloneBeforeTheWindowEndsWithoutAWindowOrAfterARestore
 				t.Errorf("%s: %s rows = %d, want 1 (history must stay)", name, table, n)
 			}
 		}
+	}
+}
+
+// selectiveBlobs fails to delete the objects whose key contains failOn, while it is set.
+type selectiveBlobs struct {
+	mu      sync.Mutex
+	failOn  string
+	deleted []string
+}
+
+func (b *selectiveBlobs) Delete(_ context.Context, key string) error {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	if b.failOn != "" && strings.Contains(key, b.failOn) {
+		return errors.New("storage down")
+	}
+	b.deleted = append(b.deleted, key)
+	return nil
+}
+
+// A camera whose stored objects cannot be deleted keeps its rows (so the keys are not lost) and is
+// retried later, and it does not hold back the cameras behind it, even when the listing returns one
+// camera at a time.
+func TestPurgeRetriesACameraWhoseObjectsCannotBeDeletedWithoutBlockingTheOthers(t *testing.T) {
+	defer inventory.SetPurgeBatchForTest(1)()
+	env := demofix.Setup(t)
+	ctx := context.Background()
+	blobs := &selectiveBlobs{failOn: "bad"}
+	env.Svc.Blobs = blobs
+	bad := env.Cameras["frigate-h01/plaza"]
+	good1 := env.Cameras["frigate-h01/acceso_norte"]
+	good2 := env.Cameras["frigate-h01/cementerio"]
+	retain := int32(7)
+	for _, c := range []struct {
+		cam  db.GetCameraRow
+		tag  string
+		days int
+	}{{bad, "bad", 20}, {good1, "good1", 10}, {good2, "good2", 10}} {
+		seedCameraHistory(t, env, c.cam, c.tag)
+		if err := env.Svc.DeleteCamera(ctx, env.Admin, c.cam.ID, &retain, nil); err != nil {
+			t.Fatal(err)
+		}
+		ageDeletion(t, env, c.cam.ID, c.days)
+	}
+
+	purged, err := env.Svc.PurgeDeletedCameraHistory(ctx, time.Now())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if purged != 2 {
+		t.Fatalf("purged cameras = %d, want the 2 healthy ones even though the oldest camera fails", purged)
+	}
+	for table, n := range historyRows(t, env, bad.ID) {
+		if n != 1 {
+			t.Errorf("failing camera: %s rows = %d, want 1 (rows must stay while its objects are not deleted)", table, n)
+		}
+	}
+	for _, c := range []db.GetCameraRow{good1, good2} {
+		if n := historyRows(t, env, c.ID)["events"]; n != 0 {
+			t.Errorf("healthy camera %s kept %d events, want them purged", c.RemoteName, n)
+		}
+	}
+
+	blobs.mu.Lock()
+	blobs.failOn = ""
+	blobs.mu.Unlock()
+	if again, err := env.Svc.PurgeDeletedCameraHistory(ctx, time.Now()); err != nil || again != 1 {
+		t.Fatalf("purge after the storage came back = (%d, %v), want the failed camera purged", again, err)
+	}
+	if n := historyRows(t, env, bad.ID)["events"]; n != 0 {
+		t.Fatalf("failed camera kept %d events after the retry, want 0", n)
+	}
+	blobs.mu.Lock()
+	defer blobs.mu.Unlock()
+	var sawBad bool
+	for _, k := range blobs.deleted {
+		sawBad = sawBad || strings.Contains(k, "bad")
+	}
+	if !sawBad {
+		t.Fatalf("the failed camera's objects were never deleted: %v", blobs.deleted)
 	}
 }

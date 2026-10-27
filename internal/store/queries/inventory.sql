@@ -501,6 +501,7 @@ WHERE jsonb_typeof(v.layout->'cells') = 'array'
 SELECT camera_id FROM camera_tombstones
 WHERE purged_at IS NULL AND retain_days IS NOT NULL
   AND deleted_at + make_interval(days => retain_days) <= @now::timestamptz
+  AND camera_id <> ALL(@skip::uuid[])
 ORDER BY deleted_at
 LIMIT @batch;
 
