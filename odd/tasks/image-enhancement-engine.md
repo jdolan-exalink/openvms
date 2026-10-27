@@ -16,13 +16,13 @@ Operators monitoring security cameras frequently encounter suboptimal lighting c
 
 ## Acceptance Criteria
 - [ ] Decoupled `ImageEnhancementEngine` interface (`analyze`, `calculateAdjustments`, `render`, `reset`).
-- [ ] Image statistics analysis (histogram, min/max percentile levels, luminance, color cast) for full-frame and ROI bounding boxes.
-- [ ] Automatic adjustment calculations (black/white levels, gamma, contrast, white balance, saturation, light sharpening) avoiding clipping and halos.
-- [ ] Smooth temporal transitions (lerp smoothing across frames) preventing flicker or harsh jumps during zoom/pan.
-- [ ] WebGL shader pipeline applying non-destructive hardware adjustments with fallback for unsupported environments.
-- [ ] UI controls (`OFF` / `AUTO` badge, manual slider drawer/popover, reset button) embedded cleanly into Player/ZoomFrame.
-- [ ] Integrated into `MsePlayer` (Live), `HlsPlayer` (Playback), and `EvidencePlayerModal` (Exports).
-- [ ] Unit & integration tests passing with 100% success rate.
+- [x] Image statistics analysis (histogram, min/max percentile levels, luminance, color cast) for full-frame and ROI bounding boxes.
+- [x] Automatic adjustment calculations (black/white levels, gamma, contrast, white balance, saturation, light sharpening) avoiding clipping and halos.
+- [x] Smooth temporal transitions (lerp smoothing across frames) preventing flicker or harsh jumps during zoom/pan.
+- [x] WebGL shader pipeline applying non-destructive hardware adjustments with fallback for unsupported environments.
+- [x] UI controls (`OFF` / `AUTO` badge, manual slider drawer/popover, reset button) embedded cleanly into Player/ZoomFrame.
+- [x] Integrated into `MsePlayer` (Live), `HlsPlayer` (Playback), and `EvidencePlayerModal` (Exports).
+- [x] Unit & integration tests passing with 100% success rate.
 
 ## Actionable Tasks
 
