@@ -40,6 +40,26 @@ func (q *Queries) ClearCameraGroupMembers(ctx context.Context, groupID uuid.UUID
 	return err
 }
 
+const clearCameraViewCells = `-- name: ClearCameraViewCells :execrows
+UPDATE views v SET layout = jsonb_set(v.layout, '{cells}', (
+    SELECT coalesce(jsonb_agg(CASE WHEN cell->>'camera_id' = $1::text THEN 'null'::jsonb ELSE cell END ORDER BY ord), '[]'::jsonb)
+    FROM jsonb_array_elements(v.layout->'cells') WITH ORDINALITY AS t(cell, ord)
+)), updated_at = now()
+WHERE jsonb_typeof(v.layout->'cells') = 'array'
+  AND EXISTS (
+      SELECT 1 FROM jsonb_array_elements(v.layout->'cells') AS c(cell)
+      WHERE cell->>'camera_id' = $1::text)
+`
+
+// Saved views keep their shape: the cell showing the deleted camera becomes empty.
+func (q *Queries) ClearCameraViewCells(ctx context.Context, cameraID string) (int64, error) {
+	result, err := q.db.Exec(ctx, clearCameraViewCells, cameraID)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected(), nil
+}
+
 const clearServerViewCells = `-- name: ClearServerViewCells :execrows
 UPDATE views v SET layout = jsonb_set(v.layout, '{cells}', (
     SELECT coalesce(jsonb_agg(CASE WHEN cell->>'camera_id' IN (SELECT cam.id::text FROM cameras cam WHERE cam.server_id = $1)
@@ -271,6 +291,18 @@ func (q *Queries) DeleteCameraFolder(ctx context.Context, id uuid.UUID) error {
 	return err
 }
 
+const deleteCameraTombstone = `-- name: DeleteCameraTombstone :execrows
+DELETE FROM camera_tombstones WHERE camera_id = $1
+`
+
+func (q *Queries) DeleteCameraTombstone(ctx context.Context, cameraID uuid.UUID) (int64, error) {
+	result, err := q.db.Exec(ctx, deleteCameraTombstone, cameraID)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected(), nil
+}
+
 const getCamera = `-- name: GetCamera :one
 SELECT c.id, c.tenant_id, c.site_id, c.server_id, c.remote_name, c.display_name, c.enabled, c.zones, c.lpr, c.live_stream, c.hq_stream, c.status, c.fps, c.missing_since, c.created_at, c.updated_at, c.deleted_at, c.deleted_by, c.default_live_quality, c.description, c.location, c.tags, c.folder_id, c.sort_order, c.onvif_endpoint, c.onvif_profile, c.onvif_version, c.onvif_capabilities, c.live_codec, c.hq_codec,
     coalesce((SELECT array_agg(m.group_id ORDER BY m.group_id) FROM camera_group_members m
@@ -404,6 +436,48 @@ func (q *Queries) GetCameraGroup(ctx context.Context, id uuid.UUID) (CameraGroup
 		&i.DeletedBy,
 		&i.Filter,
 		&i.Version,
+	)
+	return i, err
+}
+
+const getDeletedCamera = `-- name: GetDeletedCamera :one
+SELECT id, tenant_id, site_id, server_id, remote_name, display_name, enabled, zones, lpr, live_stream, hq_stream, status, fps, missing_since, created_at, updated_at, deleted_at, deleted_by, default_live_quality, description, location, tags, folder_id, sort_order, onvif_endpoint, onvif_profile, onvif_version, onvif_capabilities, live_codec, hq_codec FROM cameras WHERE id = $1 AND deleted_at IS NOT NULL
+`
+
+func (q *Queries) GetDeletedCamera(ctx context.Context, id uuid.UUID) (Camera, error) {
+	row := q.db.QueryRow(ctx, getDeletedCamera, id)
+	var i Camera
+	err := row.Scan(
+		&i.ID,
+		&i.TenantID,
+		&i.SiteID,
+		&i.ServerID,
+		&i.RemoteName,
+		&i.DisplayName,
+		&i.Enabled,
+		&i.Zones,
+		&i.Lpr,
+		&i.LiveStream,
+		&i.HqStream,
+		&i.Status,
+		&i.Fps,
+		&i.MissingSince,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+		&i.DeletedAt,
+		&i.DeletedBy,
+		&i.DefaultLiveQuality,
+		&i.Description,
+		&i.Location,
+		&i.Tags,
+		&i.FolderID,
+		&i.SortOrder,
+		&i.OnvifEndpoint,
+		&i.OnvifProfile,
+		&i.OnvifVersion,
+		&i.OnvifCapabilities,
+		&i.LiveCodec,
+		&i.HqCodec,
 	)
 	return i, err
 }
@@ -682,6 +756,32 @@ func (q *Queries) GetTenantBySlug(ctx context.Context, slug string) (Tenant, err
 		&i.DeletedBy,
 	)
 	return i, err
+}
+
+const insertCameraTombstone = `-- name: InsertCameraTombstone :exec
+INSERT INTO camera_tombstones (camera_id, tenant_id, server_id, remote_name, retain_days, deleted_by)
+VALUES ($1, $2, $3, $4, $5, $6)
+`
+
+type InsertCameraTombstoneParams struct {
+	CameraID   uuid.UUID
+	TenantID   uuid.UUID
+	ServerID   uuid.UUID
+	RemoteName string
+	RetainDays *int32
+	DeletedBy  *uuid.UUID
+}
+
+func (q *Queries) InsertCameraTombstone(ctx context.Context, arg InsertCameraTombstoneParams) error {
+	_, err := q.db.Exec(ctx, insertCameraTombstone,
+		arg.CameraID,
+		arg.TenantID,
+		arg.ServerID,
+		arg.RemoteName,
+		arg.RetainDays,
+		arg.DeletedBy,
+	)
+	return err
 }
 
 const listAllActiveServers = `-- name: ListAllActiveServers :many
@@ -1514,6 +1614,19 @@ func (q *Queries) RenameCameraFolder(ctx context.Context, arg RenameCameraFolder
 	return err
 }
 
+const restoreCamera = `-- name: RestoreCamera :execrows
+UPDATE cameras SET deleted_at = NULL, deleted_by = NULL, missing_since = NULL, updated_at = now()
+WHERE id = $1 AND deleted_at IS NOT NULL
+`
+
+func (q *Queries) RestoreCamera(ctx context.Context, id uuid.UUID) (int64, error) {
+	result, err := q.db.Exec(ctx, restoreCamera, id)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected(), nil
+}
+
 const serverAddressTaken = `-- name: ServerAddressTaken :one
 SELECT EXISTS (
     SELECT 1 FROM frigate_servers
@@ -1578,6 +1691,25 @@ type SetServerCamerasStatusParams struct {
 func (q *Queries) SetServerCamerasStatus(ctx context.Context, arg SetServerCamerasStatusParams) error {
 	_, err := q.db.Exec(ctx, setServerCamerasStatus, arg.Status, arg.ServerID)
 	return err
+}
+
+const softDeleteCamera = `-- name: SoftDeleteCamera :execrows
+UPDATE cameras SET deleted_at = now(), deleted_by = $1, updated_at = now()
+WHERE id = $2 AND deleted_at IS NULL
+`
+
+type SoftDeleteCameraParams struct {
+	DeletedBy *uuid.UUID
+	ID        uuid.UUID
+}
+
+// A deleted camera keeps its row (events, alarms and exports stay attached); it only stops being live.
+func (q *Queries) SoftDeleteCamera(ctx context.Context, arg SoftDeleteCameraParams) (int64, error) {
+	result, err := q.db.Exec(ctx, softDeleteCamera, arg.DeletedBy, arg.ID)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected(), nil
 }
 
 const softDeleteCameraGroup = `-- name: SoftDeleteCameraGroup :exec

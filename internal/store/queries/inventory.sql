@@ -438,3 +438,33 @@ WHERE id = @id AND deleted_at IS NULL;
 -- Tenants in any state, soft-deleted included: the first-start bootstrap must not
 -- resurrect a tenant an operator removed.
 SELECT count(*) FROM tenants;
+
+-- A deleted camera keeps its row (events, alarms and exports stay attached); it only stops being live.
+-- name: SoftDeleteCamera :execrows
+UPDATE cameras SET deleted_at = now(), deleted_by = @deleted_by, updated_at = now()
+WHERE id = @id AND deleted_at IS NULL;
+
+-- name: GetDeletedCamera :one
+SELECT * FROM cameras WHERE id = @id AND deleted_at IS NOT NULL;
+
+-- name: RestoreCamera :execrows
+UPDATE cameras SET deleted_at = NULL, deleted_by = NULL, missing_since = NULL, updated_at = now()
+WHERE id = @id AND deleted_at IS NOT NULL;
+
+-- name: InsertCameraTombstone :exec
+INSERT INTO camera_tombstones (camera_id, tenant_id, server_id, remote_name, retain_days, deleted_by)
+VALUES (@camera_id, @tenant_id, @server_id, @remote_name, sqlc.narg('retain_days'), @deleted_by);
+
+-- name: DeleteCameraTombstone :execrows
+DELETE FROM camera_tombstones WHERE camera_id = @camera_id;
+
+-- Saved views keep their shape: the cell showing the deleted camera becomes empty.
+-- name: ClearCameraViewCells :execrows
+UPDATE views v SET layout = jsonb_set(v.layout, '{cells}', (
+    SELECT coalesce(jsonb_agg(CASE WHEN cell->>'camera_id' = @camera_id::text THEN 'null'::jsonb ELSE cell END ORDER BY ord), '[]'::jsonb)
+    FROM jsonb_array_elements(v.layout->'cells') WITH ORDINALITY AS t(cell, ord)
+)), updated_at = now()
+WHERE jsonb_typeof(v.layout->'cells') = 'array'
+  AND EXISTS (
+      SELECT 1 FROM jsonb_array_elements(v.layout->'cells') AS c(cell)
+      WHERE cell->>'camera_id' = @camera_id::text);

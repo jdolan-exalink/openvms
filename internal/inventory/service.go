@@ -79,6 +79,8 @@ const (
 	ActionServerRemoved       = "SERVER_REMOVED"
 	ActionServerSynced        = "SERVER_SYNCED"
 	ActionCameraUpdated       = "CAMERA_UPDATED"
+	ActionCameraRemoved       = "CAMERA_REMOVED"
+	ActionCameraRestored      = "CAMERA_RESTORED"
 	ActionCameraVideoEncoding = "CAMERA_VIDEO_ENCODING_CHANGED"
 	ActionCameraGroupChanged  = "CAMERA_GROUP_CHANGED"
 	ActionPermissionChanged   = "PERMISSION_CHANGED"
