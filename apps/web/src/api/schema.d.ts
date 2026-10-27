@@ -1653,7 +1653,14 @@ export interface paths {
         put?: never;
         /**
          * Control camera PTZ via ONVIF
-         * @description Sends ContinuousMove, Stop, or GotoPreset commands to the camera. Requires cameras.manage.
+         * @description Sends PTZ commands to the camera through its server's agent: `continuous_move`, `stop`,
+         *     `goto_preset`, `get_presets`, and (agent 0.4.5 and later) `set_preset` (create, or rename
+         *     with an existing `preset_token`; `preset_name` is optional), `remove_preset`, `goto_home`,
+         *     `set_home` and `get_nodes`. Everything but `get_presets` and `get_nodes` requires
+         *     `cameras.config.ptz` (legacy `cameras.manage` holders keep it). Movement commands
+         *     (`continuous_move`, `stop`, `goto_preset`, `goto_home`) cancel the camera's running tour.
+         *     `get_presets` and `get_nodes` also return `capabilities`: what the device really supports,
+         *     so a client enables only that.
          */
         post: operations["controlCameraOnvifPTZ"];
         delete?: never;
@@ -1750,7 +1757,7 @@ export interface paths {
         };
         /**
          * List the PTZ tours stored for a camera
-         * @description Requires cameras.view. Tours are a stored sequence of device presets; this API does not run them.
+         * @description Requires cameras.view. Tours are a stored sequence of device presets; `status` tells which one, if any, is running now.
          */
         get: operations["listCameraPtzTours"];
         put?: never;
@@ -1787,6 +1794,82 @@ export interface paths {
          * @description Requires cameras.manage.
          */
         delete: operations["deleteCameraPtzTour"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/cameras/{cameraId}/ptz/tours/{tourId}/start": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                cameraId: string;
+                tourId: string;
+            };
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Run a stored PTZ tour
+         * @description Requires cameras.config.ptz. Runs the tour's steps (go to the preset, wait the dwell time) for
+         *     its repeat count (0 repeats until stopped) through the same PTZ path as manual commands.
+         *     One tour runs per camera (409 `tour_running` while another does), the camera must have
+         *     presets and the PTZ must answer (409 `no_presets`, 409 `preset_missing`, 502 `ptz_unavailable`).
+         *     Any manual movement command cancels it. The runner lives in the API process memory.
+         */
+        post: operations["startCameraPtzTour"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/cameras/{cameraId}/ptz/tours/{tourId}/stop": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                cameraId: string;
+                tourId: string;
+            };
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Stop the running PTZ tour
+         * @description Requires cameras.config.ptz. Stopping a tour that is not running is not an error.
+         */
+        post: operations["stopCameraPtzTour"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/cameras/{cameraId}/restart": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                cameraId: string;
+            };
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Restart the camera device
+         * @description ONVIF SystemReboot through the server's agent (or a direct private-network call when the
+         *     server has no agent). Requires cameras.restart (legacy servers.restart holders keep it) and
+         *     `confirm: true` (400 `confirmation_required` otherwise). The camera stops streaming while it
+         *     restarts. 409 `agent_outdated` when the agent has no reboot operation. Every attempt is audited
+         *     with the user, the camera and the result.
+         */
+        post: operations["restartCamera"];
+        delete?: never;
         options?: never;
         head?: never;
         patch?: never;
@@ -4833,14 +4916,40 @@ export interface components {
             password?: string;
             profile_token?: string;
             /** @enum {string} */
-            action: "continuous_move" | "stop" | "goto_preset" | "get_presets";
+            action: "continuous_move" | "stop" | "goto_preset" | "get_presets" | "set_preset" | "remove_preset" | "goto_home" | "set_home" | "get_nodes";
             pan?: number;
             tilt?: number;
             zoom?: number;
             preset_token?: string;
+            /** @description Name for set_preset; optional. */
+            preset_name?: string;
+        };
+        /**
+         * @description What the camera's PTZ node declares (ONVIF GetNodes). When `known` is false nothing could be
+         *     read and every flag is false; `reason` says why (`agent_outdated`: the agent has no PTZ
+         *     node operation, update it; `unavailable`: the camera did not answer).
+         */
+        CameraPtzCapabilities: {
+            known: boolean;
+            /** @enum {string} */
+            reason?: "agent_outdated" | "unavailable";
+            /** @description The device stores presets (create */
+            preset_edit: boolean;
+            max_presets: number;
+            /** @description The device has a home position to go to. */
+            home: boolean;
+            /** @description The home position can be saved (supported and not fixed). */
+            home_set: boolean;
+            pan_tilt: boolean;
+            zoom: boolean;
+            /** @description Always false; focus needs the ONVIF Imaging service */
+            focus: boolean;
         };
         CameraOnvifPTZResult: {
             success: boolean;
+            /** @description Token of the preset saved by set_preset. */
+            preset_token?: string;
+            capabilities?: components["schemas"]["CameraPtzCapabilities"];
             presets?: {
                 token?: string;
                 name?: string;
@@ -5260,8 +5369,41 @@ export interface components {
             /** Format: date-time */
             updated_at: string;
         };
+        /**
+         * @description The tour runner is in memory and per API process: a restart of the API stops the running
+         *     tour. One tour runs per camera; any manual movement command cancels it.
+         */
+        CameraPtzTourStatus: {
+            /** @enum {string} */
+            state: "idle" | "running" | "finished" | "stopped" | "failed";
+            /** Format: uuid */
+            tour_id?: string;
+            tour_name?: string;
+            /** Format: date-time */
+            started_at?: string;
+            /** Format: date-time */
+            ended_at?: string;
+            /** @description Zero-based index of the step running or last run. */
+            step?: number;
+            /** @description Zero-based repetition. */
+            round?: number;
+            /** @enum {string} */
+            stop_reason?: "user" | "manual_command" | "tour_changed" | "shutdown" | "error" | "done";
+            /** @description Short code of the failure */
+            error?: string;
+        };
         CameraPtzTourList: {
             tours: components["schemas"]["CameraPtzTour"][];
+            status?: components["schemas"]["CameraPtzTourStatus"];
+        };
+        CameraRestartRequest: {
+            /** @description Must be true; the camera stops streaming while it restarts. */
+            confirm: boolean;
+        };
+        CameraRestartResult: {
+            restarted: boolean;
+            /** @enum {string} */
+            via: "agent" | "direct";
         };
         CameraZoneList: {
             zones: components["schemas"]["CameraZone"][];
@@ -10675,6 +10817,92 @@ export interface operations {
             401: components["responses"]["Unauthorized"];
             403: components["responses"]["Forbidden"];
             404: components["responses"]["NotFound"];
+        };
+    };
+    startCameraPtzTour: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                cameraId: string;
+                tourId: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Tour started */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["CameraPtzTourStatus"];
+                };
+            };
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+            409: components["responses"]["Conflict"];
+            502: components["responses"]["FrigateUnreachable"];
+        };
+    };
+    stopCameraPtzTour: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                cameraId: string;
+                tourId: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Status after stopping */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["CameraPtzTourStatus"];
+                };
+            };
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+        };
+    };
+    restartCamera: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                cameraId: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["CameraRestartRequest"];
+            };
+        };
+        responses: {
+            /** @description The camera accepted the restart */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["CameraRestartResult"];
+                };
+            };
+            400: components["responses"]["BadRequest"];
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+            409: components["responses"]["Conflict"];
+            502: components["responses"]["FrigateUnreachable"];
         };
     };
     listCameraZones: {
