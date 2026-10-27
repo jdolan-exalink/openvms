@@ -358,12 +358,16 @@ func floatOf(v any) float64 {
 
 func intOf(v any) int { return int(floatOf(v)) }
 
-// RedactURL reduces a stream URL to scheme, host and path: userinfo, query and fragment are
-// dropped. Anything that does not parse as an absolute URL yields "".
+// RedactURL reduces a stream URL to scheme, host and a credential-free path: userinfo (even
+// when the password holds '@' or '/'), query, fragment and any credential-looking path segment
+// onwards are dropped. Anything that does not look like an absolute URL yields "".
 func RedactURL(raw string) string {
-	u, err := url.Parse(strings.TrimSpace(raw))
-	if err != nil || u.Scheme == "" || u.Host == "" {
+	raw = strings.TrimSpace(raw)
+	if i := strings.Index(raw, "://"); i <= 0 || strings.ContainsAny(raw[:i], " \t/") {
 		return ""
 	}
-	return (&url.URL{Scheme: u.Scheme, Host: u.Host, Path: u.Path}).String()
+	if out := safeURLToken(raw); out != hidden {
+		return out
+	}
+	return ""
 }

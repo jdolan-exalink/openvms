@@ -3,6 +3,7 @@ package camconfig
 import (
 	"encoding/json"
 	"errors"
+	"fmt"
 	"strings"
 	"testing"
 )
@@ -242,5 +243,54 @@ func TestManagedPathsAndConflicts(t *testing.T) {
 	zones := ManagedZonePaths(map[string]any{"ovms_door": map[string]any{}, "mine": map[string]any{}})
 	if len(zones) != 1 || zones[0].EnginePath != "zones.ovms_door" {
 		t.Fatalf("zones = %+v", zones)
+	}
+}
+
+func TestSafeValueHidesEveryCredentialShape(t *testing.T) {
+	secret := "Qu3ryS3cret"
+	cases := map[string]string{
+		"ffmpeg.inputs.path":  "rtsp://10.0.0.5:554/user=admin&password=" + secret + "&channel=1&stream=0.sdp",
+		"a.path":              "rtsp://10.0.0.5:554/cam?user=admin&password=" + secret,
+		"b.path":              "rtsp://admin:" + secret + "@h:554/main",
+		"c.path":              "rtsp://admin:p@" + secret + "@h/main",
+		"d.path":              "rtsp://admin:pa/" + secret + "@h/main",
+		"e.path":              "rtsp://admin:pa?" + secret + "@h/main",
+		"f.input_args":        "-rtsp_transport tcp -i rtsp://u:" + secret + "@h/x",
+		"onvif.api_key":       secret,
+		"onvif.passwd":        secret,
+		"x.credentials":       secret,
+		"x.auth":              secret,
+		"x.cookie":            secret,
+		"x.bearer":            secret,
+		"g.url":               "http://h/live?token=" + secret,
+		"h.path":              "rtsp://h/stream/" + secret + "=1",
+		"ffmpeg.inputs.input": "rtsp://[::1/" + secret + "@",
+	}
+	for path, val := range cases {
+		for name, got := range map[string]any{"scalar": SafeValue(path, val), "list": SafeValue(path, []any{map[string]any{"v": val}})} {
+			raw := fmt.Sprint(got)
+			if strings.Contains(raw, secret) {
+				t.Errorf("%s (%s) leaks the credential: %v", path, name, got)
+			}
+		}
+	}
+	if got := SafeValue("ffmpeg.inputs.path", "rtsp://admin:x@10.0.0.5:554/Streaming/Channels/101?a=b"); got != "rtsp://10.0.0.5:554/Streaming/Channels/101" {
+		t.Errorf("a plain stream URL keeps scheme, host and path: %v", got)
+	}
+}
+
+func TestRedactURLDropsEmbeddedCredentials(t *testing.T) {
+	for _, raw := range []string{
+		"rtsp://10.0.0.5:554/user=admin&password=Qu3ryS3cret&channel=1",
+		"rtsp://admin:p@Qu3ryS3cret@h/main",
+		"rtsp://admin:pa/Qu3ryS3cret@h/main",
+		"rtsp://h/main?password=Qu3ryS3cret",
+	} {
+		if got := RedactURL(raw); strings.Contains(got, "Qu3ryS3cret") {
+			t.Errorf("RedactURL(%q) leaks: %q", raw, got)
+		}
+	}
+	if RedactURL("not a url") != "" || RedactURL("rtsp://admin:x@10.0.0.5:554/a/b") != "rtsp://10.0.0.5:554/a/b" {
+		t.Error("RedactURL contract changed")
 	}
 }
