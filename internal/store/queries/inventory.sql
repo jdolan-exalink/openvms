@@ -452,8 +452,24 @@ UPDATE cameras SET deleted_at = NULL, deleted_by = NULL, missing_since = NULL, u
 WHERE id = @id AND deleted_at IS NOT NULL;
 
 -- name: InsertCameraTombstone :exec
-INSERT INTO camera_tombstones (camera_id, tenant_id, server_id, remote_name, retain_days, deleted_by)
-VALUES (@camera_id, @tenant_id, @server_id, @remote_name, sqlc.narg('retain_days'), @deleted_by);
+INSERT INTO camera_tombstones (camera_id, tenant_id, server_id, remote_name, retain_days, config_revision_id, deleted_by)
+VALUES (@camera_id, @tenant_id, @server_id, @remote_name, sqlc.narg('retain_days'), sqlc.narg('config_revision_id'), @deleted_by);
+
+-- name: GetCameraTombstone :one
+SELECT * FROM camera_tombstones WHERE camera_id = @camera_id;
+
+-- name: CountCameraTombstonesNamed :one
+SELECT count(*) FROM camera_tombstones WHERE server_id = @server_id AND remote_name = @remote_name;
+
+-- name: CountLiveCamerasNamed :one
+SELECT count(*) FROM cameras WHERE server_id = @server_id AND remote_name = @remote_name AND deleted_at IS NULL;
+
+-- name: ListDeletedCameras :many
+SELECT c.id, c.server_id, c.remote_name, c.display_name, c.deleted_at, t.retain_days,
+       (t.config_revision_id IS NOT NULL)::boolean AS has_frigate_config
+FROM cameras c JOIN camera_tombstones t ON t.camera_id = c.id
+WHERE c.server_id = @server_id AND c.deleted_at IS NOT NULL
+ORDER BY c.deleted_at DESC;
 
 -- name: DeleteCameraTombstone :execrows
 DELETE FROM camera_tombstones WHERE camera_id = @camera_id;

@@ -689,8 +689,10 @@ func (s *Service) UpdateCameraFrigateConfig(ctx context.Context, actor authz.Act
 // DeleteCamera removes a camera from OpenVMS without touching its history. The row is kept
 // (soft delete) so events, alarms and exports stay attached, and a tombstone stops the Frigate sync
 // from adding the same remote_name again. retainDays is the camera's recording window, kept for the
-// purge of its history; nil means unknown. It needs servers.manage on the camera's server.
-func (s *Service) DeleteCamera(ctx context.Context, actor authz.Actor, id uuid.UUID, retainDays *int32) error {
+// purge of its history; nil means unknown. configRevisionID is the Frigate config revision that took the
+// camera out of Frigate, kept so a restore can put its block back. It needs servers.manage on the
+// camera's server. This only changes OpenVMS; RemoveCamera also removes the camera from Frigate.
+func (s *Service) DeleteCamera(ctx context.Context, actor authz.Actor, id uuid.UUID, retainDays *int32, configRevisionID *uuid.UUID) error {
 	return s.tx(ctx, actor, func(q *db.Queries, c *access.Checker) error {
 		cam, err := q.GetCamera(ctx, id)
 		if err != nil {
@@ -708,7 +710,7 @@ func (s *Service) DeleteCamera(ctx context.Context, actor authz.Actor, id uuid.U
 		}
 		if err := q.InsertCameraTombstone(ctx, db.InsertCameraTombstoneParams{
 			CameraID: cam.ID, TenantID: cam.TenantID, ServerID: cam.ServerID, RemoteName: cam.RemoteName,
-			RetainDays: retainDays, DeletedBy: &actor.UserID,
+			RetainDays: retainDays, ConfigRevisionID: configRevisionID, DeletedBy: &actor.UserID,
 		}); err != nil {
 			return store.Classify(err)
 		}
@@ -720,6 +722,7 @@ func (s *Service) DeleteCamera(ctx context.Context, actor authz.Actor, id uuid.U
 		}
 		return audit(ctx, q, actor, &cam.TenantID, ActionCameraRemoved, "camera", id, map[string]any{
 			"remote_name": cam.RemoteName, "display_name": cam.DisplayName, "server_id": cam.ServerID, "retain_days": retainDays,
+			"config_revision_id": configRevisionID,
 		})
 	})
 }

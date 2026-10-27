@@ -256,13 +256,14 @@ type CameraPtzTour struct {
 }
 
 type CameraTombstone struct {
-	CameraID   uuid.UUID
-	TenantID   uuid.UUID
-	ServerID   uuid.UUID
-	RemoteName string
-	RetainDays *int32
-	DeletedBy  *uuid.UUID
-	DeletedAt  time.Time
+	CameraID         uuid.UUID
+	TenantID         uuid.UUID
+	ServerID         uuid.UUID
+	RemoteName       string
+	RetainDays       *int32
+	ConfigRevisionID *uuid.UUID
+	DeletedBy        *uuid.UUID
+	DeletedAt        time.Time
 }
 
 type CameraZone struct {

@@ -41,13 +41,26 @@ func deletedStateOf(t *testing.T, env *demofix.Env, id uuid.UUID) deletedState {
 	return st
 }
 
+// insertLiveCamera adds a live camera row, as something other than the sync would.
+func insertLiveCamera(t *testing.T, env *demofix.Env, tenantID, siteID, serverID uuid.UUID, remoteName string) {
+	t.Helper()
+	err := env.Store.TxRaw(context.Background(), store.AllTenants, func(tx pgx.Tx) error {
+		_, err := tx.Exec(context.Background(), `INSERT INTO cameras (tenant_id, site_id, server_id, remote_name, display_name) VALUES ($1, $2, $3, $4, 'other')`,
+			tenantID, siteID, serverID, remoteName)
+		return err
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+}
+
 func TestDeleteCameraKeepsTheRowAndLeavesATombstone(t *testing.T) {
 	env := demofix.Setup(t)
 	ctx := context.Background()
 	cam := env.Cameras["frigate-h01/plaza"]
 	retain := int32(7)
 
-	if err := env.Svc.DeleteCamera(ctx, env.Admin, cam.ID, &retain); err != nil {
+	if err := env.Svc.DeleteCamera(ctx, env.Admin, cam.ID, &retain, nil); err != nil {
 		t.Fatal(err)
 	}
 
@@ -77,7 +90,7 @@ func TestDeleteCameraKeepsTheRowAndLeavesATombstone(t *testing.T) {
 func TestDeleteCameraWithoutARetentionWindowStoresNone(t *testing.T) {
 	env := demofix.Setup(t)
 	cam := env.Cameras["frigate-h01/plaza"]
-	if err := env.Svc.DeleteCamera(context.Background(), env.Admin, cam.ID, nil); err != nil {
+	if err := env.Svc.DeleteCamera(context.Background(), env.Admin, cam.ID, nil, nil); err != nil {
 		t.Fatal(err)
 	}
 	if st := deletedStateOf(t, env, cam.ID); st.tombstones != 1 || st.retainDays != nil {
@@ -91,19 +104,19 @@ func TestDeleteCameraNeedsServersManageAndAnExistingCamera(t *testing.T) {
 	cam := env.Cameras["frigate-h01/plaza"]
 
 	operator := env.Actor(t, "operador")
-	if err := env.Svc.DeleteCamera(ctx, operator, cam.ID, nil); !errors.Is(err, access.ErrForbidden) {
+	if err := env.Svc.DeleteCamera(ctx, operator, cam.ID, nil, nil); !errors.Is(err, access.ErrForbidden) {
 		t.Fatalf("delete by an operator without servers.manage = %v, want forbidden", err)
 	}
 	if st := deletedStateOf(t, env, cam.ID); st.deletedAt || st.tombstones != 0 {
 		t.Fatalf("a refused delete changed the camera: %+v", st)
 	}
-	if err := env.Svc.DeleteCamera(ctx, env.Admin, uuid.New(), nil); !errors.Is(err, store.ErrNotFound) {
+	if err := env.Svc.DeleteCamera(ctx, env.Admin, uuid.New(), nil, nil); !errors.Is(err, store.ErrNotFound) {
 		t.Fatalf("delete of an unknown camera = %v, want not found", err)
 	}
-	if err := env.Svc.DeleteCamera(ctx, env.Admin, cam.ID, nil); err != nil {
+	if err := env.Svc.DeleteCamera(ctx, env.Admin, cam.ID, nil, nil); err != nil {
 		t.Fatal(err)
 	}
-	if err := env.Svc.DeleteCamera(ctx, env.Admin, cam.ID, nil); !errors.Is(err, store.ErrNotFound) {
+	if err := env.Svc.DeleteCamera(ctx, env.Admin, cam.ID, nil, nil); !errors.Is(err, store.ErrNotFound) {
 		t.Fatalf("second delete of the same camera = %v, want not found", err)
 	}
 	if got := auditCount(t, env, "CAMERA_REMOVED", cam.ID); got != 1 {
@@ -126,7 +139,7 @@ func TestDeleteCameraEmptiesItsSavedViewCells(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	if err := env.Svc.DeleteCamera(ctx, env.Admin, gone.ID, nil); err != nil {
+	if err := env.Svc.DeleteCamera(ctx, env.Admin, gone.ID, nil, nil); err != nil {
 		t.Fatal(err)
 	}
 
@@ -147,7 +160,7 @@ func TestRestoreCameraReturnsTheSameRowAndLiftsTheTombstone(t *testing.T) {
 	env := demofix.Setup(t)
 	ctx := context.Background()
 	cam := env.Cameras["frigate-h01/plaza"]
-	if err := env.Svc.DeleteCamera(ctx, env.Admin, cam.ID, nil); err != nil {
+	if err := env.Svc.DeleteCamera(ctx, env.Admin, cam.ID, nil, nil); err != nil {
 		t.Fatal(err)
 	}
 
@@ -181,18 +194,11 @@ func TestRestoreCameraRefusesWhenALiveCameraHasTheName(t *testing.T) {
 	env := demofix.Setup(t)
 	ctx := context.Background()
 	cam := env.Cameras["frigate-h01/plaza"]
-	if err := env.Svc.DeleteCamera(ctx, env.Admin, cam.ID, nil); err != nil {
+	if err := env.Svc.DeleteCamera(ctx, env.Admin, cam.ID, nil, nil); err != nil {
 		t.Fatal(err)
 	}
 	// Something created a live camera under the same name in the meantime.
-	err := env.Store.TxRaw(ctx, store.AllTenants, func(tx pgx.Tx) error {
-		_, err := tx.Exec(ctx, `INSERT INTO cameras (tenant_id, site_id, server_id, remote_name, display_name) VALUES ($1, $2, $3, $4, 'other')`,
-			cam.TenantID, cam.SiteID, cam.ServerID, cam.RemoteName)
-		return err
-	})
-	if err != nil {
-		t.Fatal(err)
-	}
+	insertLiveCamera(t, env, cam.TenantID, cam.SiteID, cam.ServerID, cam.RemoteName)
 
 	if _, err := env.Svc.RestoreCamera(ctx, env.Admin, cam.ID); !errors.Is(err, store.ErrConflict) {
 		t.Fatalf("restore over a live camera of the same name = %v, want conflict", err)
@@ -210,7 +216,7 @@ func TestRestoreCameraNeedsServersManageAndADeletedCamera(t *testing.T) {
 	if _, err := env.Svc.RestoreCamera(ctx, env.Admin, cam.ID); !errors.Is(err, store.ErrNotFound) {
 		t.Fatalf("restore of a camera that is not deleted = %v, want not found", err)
 	}
-	if err := env.Svc.DeleteCamera(ctx, env.Admin, cam.ID, nil); err != nil {
+	if err := env.Svc.DeleteCamera(ctx, env.Admin, cam.ID, nil, nil); err != nil {
 		t.Fatal(err)
 	}
 	operator := env.Actor(t, "operador")

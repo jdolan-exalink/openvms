@@ -94,6 +94,22 @@ func (q *Queries) CountAllTenants(ctx context.Context) (int64, error) {
 	return count, err
 }
 
+const countCameraTombstonesNamed = `-- name: CountCameraTombstonesNamed :one
+SELECT count(*) FROM camera_tombstones WHERE server_id = $1 AND remote_name = $2
+`
+
+type CountCameraTombstonesNamedParams struct {
+	ServerID   uuid.UUID
+	RemoteName string
+}
+
+func (q *Queries) CountCameraTombstonesNamed(ctx context.Context, arg CountCameraTombstonesNamedParams) (int64, error) {
+	row := q.db.QueryRow(ctx, countCameraTombstonesNamed, arg.ServerID, arg.RemoteName)
+	var count int64
+	err := row.Scan(&count)
+	return count, err
+}
+
 const countCamerasInTenant = `-- name: CountCamerasInTenant :one
 SELECT count(*)::int FROM cameras WHERE id = ANY($1::uuid[]) AND tenant_id = $2 AND deleted_at IS NULL
 `
@@ -119,6 +135,22 @@ func (q *Queries) CountFolderCameras(ctx context.Context, folderID *uuid.UUID) (
 	var column_1 int32
 	err := row.Scan(&column_1)
 	return column_1, err
+}
+
+const countLiveCamerasNamed = `-- name: CountLiveCamerasNamed :one
+SELECT count(*) FROM cameras WHERE server_id = $1 AND remote_name = $2 AND deleted_at IS NULL
+`
+
+type CountLiveCamerasNamedParams struct {
+	ServerID   uuid.UUID
+	RemoteName string
+}
+
+func (q *Queries) CountLiveCamerasNamed(ctx context.Context, arg CountLiveCamerasNamedParams) (int64, error) {
+	row := q.db.QueryRow(ctx, countLiveCamerasNamed, arg.ServerID, arg.RemoteName)
+	var count int64
+	err := row.Scan(&count)
+	return count, err
 }
 
 const countTenantSites = `-- name: CountTenantSites :one
@@ -436,6 +468,26 @@ func (q *Queries) GetCameraGroup(ctx context.Context, id uuid.UUID) (CameraGroup
 		&i.DeletedBy,
 		&i.Filter,
 		&i.Version,
+	)
+	return i, err
+}
+
+const getCameraTombstone = `-- name: GetCameraTombstone :one
+SELECT camera_id, tenant_id, server_id, remote_name, retain_days, config_revision_id, deleted_by, deleted_at FROM camera_tombstones WHERE camera_id = $1
+`
+
+func (q *Queries) GetCameraTombstone(ctx context.Context, cameraID uuid.UUID) (CameraTombstone, error) {
+	row := q.db.QueryRow(ctx, getCameraTombstone, cameraID)
+	var i CameraTombstone
+	err := row.Scan(
+		&i.CameraID,
+		&i.TenantID,
+		&i.ServerID,
+		&i.RemoteName,
+		&i.RetainDays,
+		&i.ConfigRevisionID,
+		&i.DeletedBy,
+		&i.DeletedAt,
 	)
 	return i, err
 }
@@ -759,17 +811,18 @@ func (q *Queries) GetTenantBySlug(ctx context.Context, slug string) (Tenant, err
 }
 
 const insertCameraTombstone = `-- name: InsertCameraTombstone :exec
-INSERT INTO camera_tombstones (camera_id, tenant_id, server_id, remote_name, retain_days, deleted_by)
-VALUES ($1, $2, $3, $4, $5, $6)
+INSERT INTO camera_tombstones (camera_id, tenant_id, server_id, remote_name, retain_days, config_revision_id, deleted_by)
+VALUES ($1, $2, $3, $4, $5, $6, $7)
 `
 
 type InsertCameraTombstoneParams struct {
-	CameraID   uuid.UUID
-	TenantID   uuid.UUID
-	ServerID   uuid.UUID
-	RemoteName string
-	RetainDays *int32
-	DeletedBy  *uuid.UUID
+	CameraID         uuid.UUID
+	TenantID         uuid.UUID
+	ServerID         uuid.UUID
+	RemoteName       string
+	RetainDays       *int32
+	ConfigRevisionID *uuid.UUID
+	DeletedBy        *uuid.UUID
 }
 
 func (q *Queries) InsertCameraTombstone(ctx context.Context, arg InsertCameraTombstoneParams) error {
@@ -779,6 +832,7 @@ func (q *Queries) InsertCameraTombstone(ctx context.Context, arg InsertCameraTom
 		arg.ServerID,
 		arg.RemoteName,
 		arg.RetainDays,
+		arg.ConfigRevisionID,
 		arg.DeletedBy,
 	)
 	return err
@@ -1046,6 +1100,52 @@ func (q *Queries) ListCameras(ctx context.Context, arg ListCamerasParams) ([]Lis
 			&i.LiveCodec,
 			&i.HqCodec,
 			&i.GroupIds,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const listDeletedCameras = `-- name: ListDeletedCameras :many
+SELECT c.id, c.server_id, c.remote_name, c.display_name, c.deleted_at, t.retain_days,
+       (t.config_revision_id IS NOT NULL)::boolean AS has_frigate_config
+FROM cameras c JOIN camera_tombstones t ON t.camera_id = c.id
+WHERE c.server_id = $1 AND c.deleted_at IS NOT NULL
+ORDER BY c.deleted_at DESC
+`
+
+type ListDeletedCamerasRow struct {
+	ID               uuid.UUID
+	ServerID         uuid.UUID
+	RemoteName       string
+	DisplayName      string
+	DeletedAt        *time.Time
+	RetainDays       *int32
+	HasFrigateConfig bool
+}
+
+func (q *Queries) ListDeletedCameras(ctx context.Context, serverID uuid.UUID) ([]ListDeletedCamerasRow, error) {
+	rows, err := q.db.Query(ctx, listDeletedCameras, serverID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []ListDeletedCamerasRow{}
+	for rows.Next() {
+		var i ListDeletedCamerasRow
+		if err := rows.Scan(
+			&i.ID,
+			&i.ServerID,
+			&i.RemoteName,
+			&i.DisplayName,
+			&i.DeletedAt,
+			&i.RetainDays,
+			&i.HasFrigateConfig,
 		); err != nil {
 			return nil, err
 		}
