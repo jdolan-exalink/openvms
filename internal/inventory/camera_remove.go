@@ -2,6 +2,7 @@ package inventory
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"math"
 	"time"
@@ -134,7 +135,7 @@ func (s *Service) ReinstateCamera(ctx context.Context, actor authz.Actor, id uui
 		}
 		if tomb, err = q.GetCameraTombstone(ctx, id); err == nil {
 			haveTomb = true
-		} else if notFoundOr(err) != store.ErrNotFound {
+		} else if !errors.Is(notFoundOr(err), store.ErrNotFound) {
 			return err
 		}
 		if haveTomb && tomb.HadFrigateConfig && tomb.ConfigRevisionID == nil {
