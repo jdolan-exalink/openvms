@@ -265,6 +265,7 @@ type CameraTombstone struct {
 	DeletedAt        time.Time
 	ConfigRevisionID *uuid.UUID
 	HadFrigateConfig bool
+	PurgedAt         *time.Time
 }
 
 type CameraZone struct {

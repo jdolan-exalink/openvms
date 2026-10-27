@@ -473,7 +473,7 @@ func (q *Queries) GetCameraGroup(ctx context.Context, id uuid.UUID) (CameraGroup
 }
 
 const getCameraTombstone = `-- name: GetCameraTombstone :one
-SELECT camera_id, tenant_id, server_id, remote_name, retain_days, deleted_by, deleted_at, config_revision_id, had_frigate_config FROM camera_tombstones WHERE camera_id = $1
+SELECT camera_id, tenant_id, server_id, remote_name, retain_days, deleted_by, deleted_at, config_revision_id, had_frigate_config, purged_at FROM camera_tombstones WHERE camera_id = $1
 `
 
 func (q *Queries) GetCameraTombstone(ctx context.Context, cameraID uuid.UUID) (CameraTombstone, error) {
@@ -489,6 +489,7 @@ func (q *Queries) GetCameraTombstone(ctx context.Context, cameraID uuid.UUID) (C
 		&i.DeletedAt,
 		&i.ConfigRevisionID,
 		&i.HadFrigateConfig,
+		&i.PurgedAt,
 	)
 	return i, err
 }
@@ -902,6 +903,34 @@ func (q *Queries) ListAllActiveServers(ctx context.Context) ([]FrigateServer, er
 	return items, nil
 }
 
+const listCameraBlobKeys = `-- name: ListCameraBlobKeys :many
+SELECT k::text FROM (
+    SELECT e.thumb_key AS k FROM events e WHERE e.camera_id = $1
+    UNION ALL SELECT e.preview_key FROM events e WHERE e.camera_id = $1
+    UNION ALL SELECT j.output_key FROM clip_watermark_jobs j WHERE j.camera_id = $1
+) keys WHERE k <> ''
+`
+
+func (q *Queries) ListCameraBlobKeys(ctx context.Context, cameraID uuid.UUID) ([]string, error) {
+	rows, err := q.db.Query(ctx, listCameraBlobKeys, cameraID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []string{}
+	for rows.Next() {
+		var k string
+		if err := rows.Scan(&k); err != nil {
+			return nil, err
+		}
+		items = append(items, k)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const listCameraFolders = `-- name: ListCameraFolders :many
 SELECT f.id, f.tenant_id, f.server_id, f.name, f.sort_order, f.created_at, f.updated_at, s.site_id
 FROM camera_folders f
@@ -1168,6 +1197,44 @@ func (q *Queries) ListDeletedCameras(ctx context.Context, serverID uuid.UUID) ([
 			return nil, err
 		}
 		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const listDueCameraPurges = `-- name: ListDueCameraPurges :many
+
+SELECT camera_id FROM camera_tombstones
+WHERE purged_at IS NULL AND retain_days IS NOT NULL
+  AND deleted_at + make_interval(days => retain_days) <= $1::timestamptz
+ORDER BY deleted_at
+LIMIT $2
+`
+
+type ListDueCameraPurgesParams struct {
+	Now   time.Time
+	Batch int32
+}
+
+// History purge of deleted cameras, once the recording window they had when deleted has passed.
+// Order matters: alarms reference events and clip jobs reference plate reads without cascading.
+// Exports and export jobs (evidence people made) and the server-wide face sightings and object
+// snapshots are kept.
+func (q *Queries) ListDueCameraPurges(ctx context.Context, arg ListDueCameraPurgesParams) ([]uuid.UUID, error) {
+	rows, err := q.db.Query(ctx, listDueCameraPurges, arg.Now, arg.Batch)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []uuid.UUID{}
+	for rows.Next() {
+		var camera_id uuid.UUID
+		if err := rows.Scan(&camera_id); err != nil {
+			return nil, err
+		}
+		items = append(items, camera_id)
 	}
 	if err := rows.Err(); err != nil {
 		return nil, err
@@ -1463,6 +1530,46 @@ func (q *Queries) ListTenants(ctx context.Context, id *uuid.UUID) ([]Tenant, err
 	return items, nil
 }
 
+const lockCameraTombstoneForPurge = `-- name: LockCameraTombstoneForPurge :one
+SELECT camera_id, tenant_id, server_id, remote_name, retain_days, deleted_by, deleted_at, config_revision_id, had_frigate_config, purged_at FROM camera_tombstones
+WHERE camera_id = $1 AND purged_at IS NULL AND retain_days IS NOT NULL
+  AND deleted_at + make_interval(days => retain_days) <= $2::timestamptz
+FOR UPDATE SKIP LOCKED
+`
+
+type LockCameraTombstoneForPurgeParams struct {
+	CameraID uuid.UUID
+	Now      time.Time
+}
+
+// Locks the tombstone for the purge; a concurrent restore (which deletes it) or purge makes this return nothing.
+func (q *Queries) LockCameraTombstoneForPurge(ctx context.Context, arg LockCameraTombstoneForPurgeParams) (CameraTombstone, error) {
+	row := q.db.QueryRow(ctx, lockCameraTombstoneForPurge, arg.CameraID, arg.Now)
+	var i CameraTombstone
+	err := row.Scan(
+		&i.CameraID,
+		&i.TenantID,
+		&i.ServerID,
+		&i.RemoteName,
+		&i.RetainDays,
+		&i.DeletedBy,
+		&i.DeletedAt,
+		&i.ConfigRevisionID,
+		&i.HadFrigateConfig,
+		&i.PurgedAt,
+	)
+	return i, err
+}
+
+const markCameraTombstonePurged = `-- name: MarkCameraTombstonePurged :exec
+UPDATE camera_tombstones SET purged_at = now() WHERE camera_id = $1
+`
+
+func (q *Queries) MarkCameraTombstonePurged(ctx context.Context, cameraID uuid.UUID) error {
+	_, err := q.db.Exec(ctx, markCameraTombstonePurged, cameraID)
+	return err
+}
+
 const markMissingCameras = `-- name: MarkMissingCameras :execrows
 UPDATE cameras SET missing_since = coalesce(missing_since, now()), status = 'offline', updated_at = now()
 WHERE server_id = $1 AND deleted_at IS NULL AND NOT (remote_name = ANY($2::text[]))
@@ -1493,6 +1600,90 @@ type MoveServerCamerasParams struct {
 func (q *Queries) MoveServerCameras(ctx context.Context, arg MoveServerCamerasParams) error {
 	_, err := q.db.Exec(ctx, moveServerCameras, arg.SiteID, arg.ServerID)
 	return err
+}
+
+const purgeCameraAlarms = `-- name: PurgeCameraAlarms :execrows
+DELETE FROM alarms WHERE camera_id = $1
+`
+
+func (q *Queries) PurgeCameraAlarms(ctx context.Context, cameraID uuid.UUID) (int64, error) {
+	result, err := q.db.Exec(ctx, purgeCameraAlarms, cameraID)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected(), nil
+}
+
+const purgeCameraClipJobs = `-- name: PurgeCameraClipJobs :execrows
+DELETE FROM clip_watermark_jobs WHERE camera_id = $1
+`
+
+func (q *Queries) PurgeCameraClipJobs(ctx context.Context, cameraID uuid.UUID) (int64, error) {
+	result, err := q.db.Exec(ctx, purgeCameraClipJobs, cameraID)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected(), nil
+}
+
+const purgeCameraEvents = `-- name: PurgeCameraEvents :execrows
+DELETE FROM events WHERE camera_id = $1
+`
+
+func (q *Queries) PurgeCameraEvents(ctx context.Context, cameraID uuid.UUID) (int64, error) {
+	result, err := q.db.Exec(ctx, purgeCameraEvents, cameraID)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected(), nil
+}
+
+const purgeCameraLprReads = `-- name: PurgeCameraLprReads :execrows
+DELETE FROM lpr_reads WHERE camera_id = $1
+`
+
+func (q *Queries) PurgeCameraLprReads(ctx context.Context, cameraID uuid.UUID) (int64, error) {
+	result, err := q.db.Exec(ctx, purgeCameraLprReads, cameraID)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected(), nil
+}
+
+const purgeCameraNotifications = `-- name: PurgeCameraNotifications :execrows
+DELETE FROM notifications WHERE camera_id = $1
+`
+
+func (q *Queries) PurgeCameraNotifications(ctx context.Context, cameraID *uuid.UUID) (int64, error) {
+	result, err := q.db.Exec(ctx, purgeCameraNotifications, cameraID)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected(), nil
+}
+
+const purgeCameraObjectTracks = `-- name: PurgeCameraObjectTracks :execrows
+DELETE FROM object_tracks WHERE camera_id = $1
+`
+
+func (q *Queries) PurgeCameraObjectTracks(ctx context.Context, cameraID uuid.UUID) (int64, error) {
+	result, err := q.db.Exec(ctx, purgeCameraObjectTracks, cameraID)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected(), nil
+}
+
+const purgeCameraRuleFirings = `-- name: PurgeCameraRuleFirings :execrows
+DELETE FROM rule_firings WHERE resource_id = $1
+`
+
+func (q *Queries) PurgeCameraRuleFirings(ctx context.Context, cameraID uuid.UUID) (int64, error) {
+	result, err := q.db.Exec(ctx, purgeCameraRuleFirings, cameraID)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected(), nil
 }
 
 const purgeServer = `-- name: PurgeServer :execrows

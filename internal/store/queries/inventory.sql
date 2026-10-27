@@ -491,3 +491,54 @@ WHERE jsonb_typeof(v.layout->'cells') = 'array'
   AND EXISTS (
       SELECT 1 FROM jsonb_array_elements(v.layout->'cells') AS c(cell)
       WHERE cell->>'camera_id' = @camera_id::text);
+
+-- History purge of deleted cameras, once the recording window they had when deleted has passed.
+-- Order matters: alarms reference events and clip jobs reference plate reads without cascading.
+-- Exports and export jobs (evidence people made) and the server-wide face sightings and object
+-- snapshots are kept.
+
+-- name: ListDueCameraPurges :many
+SELECT camera_id FROM camera_tombstones
+WHERE purged_at IS NULL AND retain_days IS NOT NULL
+  AND deleted_at + make_interval(days => retain_days) <= @now::timestamptz
+ORDER BY deleted_at
+LIMIT @batch;
+
+-- Locks the tombstone for the purge; a concurrent restore (which deletes it) or purge makes this return nothing.
+-- name: LockCameraTombstoneForPurge :one
+SELECT * FROM camera_tombstones
+WHERE camera_id = @camera_id AND purged_at IS NULL AND retain_days IS NOT NULL
+  AND deleted_at + make_interval(days => retain_days) <= @now::timestamptz
+FOR UPDATE SKIP LOCKED;
+
+-- name: ListCameraBlobKeys :many
+SELECT k::text FROM (
+    SELECT e.thumb_key AS k FROM events e WHERE e.camera_id = @camera_id
+    UNION ALL SELECT e.preview_key FROM events e WHERE e.camera_id = @camera_id
+    UNION ALL SELECT j.output_key FROM clip_watermark_jobs j WHERE j.camera_id = @camera_id
+) keys WHERE k <> '';
+
+-- name: PurgeCameraClipJobs :execrows
+DELETE FROM clip_watermark_jobs WHERE camera_id = @camera_id;
+
+-- name: PurgeCameraAlarms :execrows
+DELETE FROM alarms WHERE camera_id = @camera_id;
+
+-- name: PurgeCameraLprReads :execrows
+DELETE FROM lpr_reads WHERE camera_id = @camera_id;
+
+-- name: PurgeCameraEvents :execrows
+DELETE FROM events WHERE camera_id = @camera_id;
+
+-- name: PurgeCameraObjectTracks :execrows
+DELETE FROM object_tracks WHERE camera_id = @camera_id;
+
+-- name: PurgeCameraNotifications :execrows
+DELETE FROM notifications WHERE camera_id = @camera_id;
+
+-- name: PurgeCameraRuleFirings :execrows
+DELETE FROM rule_firings WHERE resource_id = @camera_id;
+
+-- name: MarkCameraTombstonePurged :exec
+UPDATE camera_tombstones SET purged_at = now() WHERE camera_id = @camera_id;
+
