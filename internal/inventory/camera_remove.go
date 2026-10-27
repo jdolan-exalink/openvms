@@ -52,7 +52,11 @@ func (s *Service) RemoveCamera(ctx context.Context, actor authz.Actor, id uuid.U
 	}
 	var retain *int32
 	var revID *uuid.UUID
-	if block, exists := cameras[cam.RemoteName]; exists {
+	if block, exists := cameras[cam.RemoteName]; !exists {
+		// Absent from the config: either it never was there, or an earlier attempt removed it and
+		// failed before deleting the camera here. Recover what that attempt saved.
+		retain, revID = s.previousRemoval(ctx, actor, cam)
+	} else {
 		retain = recordingRetainDays(parsed, block)
 		delete(cameras, cam.RemoteName)
 		next, err := yaml.Marshal(parsed)
@@ -67,6 +71,36 @@ func (s *Service) RemoveCamera(ctx context.Context, actor authz.Actor, id uuid.U
 		revID = &res.RevisionID
 	}
 	return s.DeleteCamera(ctx, actor, id, retain, revID)
+}
+
+// previousRemoval finds the Frigate config revision that already took the camera out of Frigate, and
+// the recording window it had, when an earlier RemoveCamera saved the config and failed afterwards.
+// It returns nils when there is none.
+func (s *Service) previousRemoval(ctx context.Context, actor authz.Actor, cam db.GetCameraRow) (*int32, *uuid.UUID) {
+	var retain *int32
+	var revID *uuid.UUID
+	_ = s.tx(ctx, actor, func(q *db.Queries, _ *access.Checker) error {
+		id, err := q.LastCameraRemovalRevision(ctx, cam.ID.String())
+		if err != nil {
+			return nil
+		}
+		rev, err := q.GetFrigateConfigRevision(ctx, db.GetFrigateConfigRevisionParams{ID: id, ServerID: cam.ServerID})
+		if err != nil {
+			return nil
+		}
+		parsed, cameras, err := parseCamerasConfig(rev.BeforeYaml)
+		if err != nil {
+			return nil
+		}
+		block, ok := cameras[cam.RemoteName]
+		if !ok {
+			return nil
+		}
+		revID = &id
+		retain = recordingRetainDays(parsed, block)
+		return nil
+	})
+	return retain, revID
 }
 
 // ReinstateCamera restores a deleted camera in OpenVMS and puts its block back into Frigate's
@@ -102,6 +136,9 @@ func (s *Service) ReinstateCamera(ctx context.Context, actor authz.Actor, id uui
 			haveTomb = true
 		} else if notFoundOr(err) != store.ErrNotFound {
 			return err
+		}
+		if haveTomb && tomb.HadFrigateConfig && tomb.ConfigRevisionID == nil {
+			return invalid("the Frigate configuration of camera %q is no longer stored, so it cannot be restored", cam.RemoteName)
 		}
 		if haveTomb && tomb.ConfigRevisionID != nil {
 			rev, err = q.GetFrigateConfigRevision(ctx, db.GetFrigateConfigRevisionParams{ID: *tomb.ConfigRevisionID, ServerID: cam.ServerID})

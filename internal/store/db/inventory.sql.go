@@ -473,7 +473,7 @@ func (q *Queries) GetCameraGroup(ctx context.Context, id uuid.UUID) (CameraGroup
 }
 
 const getCameraTombstone = `-- name: GetCameraTombstone :one
-SELECT camera_id, tenant_id, server_id, remote_name, retain_days, config_revision_id, deleted_by, deleted_at FROM camera_tombstones WHERE camera_id = $1
+SELECT camera_id, tenant_id, server_id, remote_name, retain_days, deleted_by, deleted_at, config_revision_id, had_frigate_config FROM camera_tombstones WHERE camera_id = $1
 `
 
 func (q *Queries) GetCameraTombstone(ctx context.Context, cameraID uuid.UUID) (CameraTombstone, error) {
@@ -485,9 +485,10 @@ func (q *Queries) GetCameraTombstone(ctx context.Context, cameraID uuid.UUID) (C
 		&i.ServerID,
 		&i.RemoteName,
 		&i.RetainDays,
-		&i.ConfigRevisionID,
 		&i.DeletedBy,
 		&i.DeletedAt,
+		&i.ConfigRevisionID,
+		&i.HadFrigateConfig,
 	)
 	return i, err
 }
@@ -811,8 +812,8 @@ func (q *Queries) GetTenantBySlug(ctx context.Context, slug string) (Tenant, err
 }
 
 const insertCameraTombstone = `-- name: InsertCameraTombstone :exec
-INSERT INTO camera_tombstones (camera_id, tenant_id, server_id, remote_name, retain_days, config_revision_id, deleted_by)
-VALUES ($1, $2, $3, $4, $5, $6, $7)
+INSERT INTO camera_tombstones (camera_id, tenant_id, server_id, remote_name, retain_days, config_revision_id, had_frigate_config, deleted_by)
+VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
 `
 
 type InsertCameraTombstoneParams struct {
@@ -822,6 +823,7 @@ type InsertCameraTombstoneParams struct {
 	RemoteName       string
 	RetainDays       *int32
 	ConfigRevisionID *uuid.UUID
+	HadFrigateConfig bool
 	DeletedBy        *uuid.UUID
 }
 
@@ -833,9 +835,25 @@ func (q *Queries) InsertCameraTombstone(ctx context.Context, arg InsertCameraTom
 		arg.RemoteName,
 		arg.RetainDays,
 		arg.ConfigRevisionID,
+		arg.HadFrigateConfig,
 		arg.DeletedBy,
 	)
 	return err
+}
+
+const lastCameraRemovalRevision = `-- name: LastCameraRemovalRevision :one
+SELECT (details->>'revision_id')::uuid AS revision_id FROM audit_log
+WHERE action = 'FRIGATE_CONFIG_RAW_SAVED' AND details->>'reason' = 'camera_removed' AND details->>'camera_id' = $1::text
+ORDER BY id DESC LIMIT 1
+`
+
+// The Frigate config revision that took a camera out of Frigate, from the audit entry RemoveCamera
+// writes with it. A retry after a partial failure uses it to recover what the first attempt saved.
+func (q *Queries) LastCameraRemovalRevision(ctx context.Context, cameraID string) (uuid.UUID, error) {
+	row := q.db.QueryRow(ctx, lastCameraRemovalRevision, cameraID)
+	var revision_id uuid.UUID
+	err := row.Scan(&revision_id)
+	return revision_id, err
 }
 
 const listAllActiveServers = `-- name: ListAllActiveServers :many

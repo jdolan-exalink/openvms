@@ -452,8 +452,15 @@ UPDATE cameras SET deleted_at = NULL, deleted_by = NULL, missing_since = NULL, u
 WHERE id = @id AND deleted_at IS NOT NULL;
 
 -- name: InsertCameraTombstone :exec
-INSERT INTO camera_tombstones (camera_id, tenant_id, server_id, remote_name, retain_days, config_revision_id, deleted_by)
-VALUES (@camera_id, @tenant_id, @server_id, @remote_name, sqlc.narg('retain_days'), sqlc.narg('config_revision_id'), @deleted_by);
+INSERT INTO camera_tombstones (camera_id, tenant_id, server_id, remote_name, retain_days, config_revision_id, had_frigate_config, deleted_by)
+VALUES (@camera_id, @tenant_id, @server_id, @remote_name, sqlc.narg('retain_days'), sqlc.narg('config_revision_id'), @had_frigate_config, @deleted_by);
+
+-- The Frigate config revision that took a camera out of Frigate, from the audit entry RemoveCamera
+-- writes with it. A retry after a partial failure uses it to recover what the first attempt saved.
+-- name: LastCameraRemovalRevision :one
+SELECT (details->>'revision_id')::uuid AS revision_id FROM audit_log
+WHERE action = 'FRIGATE_CONFIG_RAW_SAVED' AND details->>'reason' = 'camera_removed' AND details->>'camera_id' = @camera_id::text
+ORDER BY id DESC LIMIT 1;
 
 -- name: GetCameraTombstone :one
 SELECT * FROM camera_tombstones WHERE camera_id = @camera_id;

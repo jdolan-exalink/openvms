@@ -710,7 +710,7 @@ func (s *Service) DeleteCamera(ctx context.Context, actor authz.Actor, id uuid.U
 		}
 		if err := q.InsertCameraTombstone(ctx, db.InsertCameraTombstoneParams{
 			CameraID: cam.ID, TenantID: cam.TenantID, ServerID: cam.ServerID, RemoteName: cam.RemoteName,
-			RetainDays: retainDays, ConfigRevisionID: configRevisionID, DeletedBy: &actor.UserID,
+			RetainDays: retainDays, ConfigRevisionID: configRevisionID, HadFrigateConfig: configRevisionID != nil, DeletedBy: &actor.UserID,
 		}); err != nil {
 			return store.Classify(err)
 		}

@@ -8,6 +8,7 @@ import (
 	"testing"
 
 	"github.com/google/uuid"
+	"github.com/jackc/pgx/v5"
 	"gopkg.in/yaml.v3"
 
 	"github.com/jdolan-exalink/openvms/internal/access"
@@ -245,5 +246,80 @@ func TestAddCameraToFrigateRefusesADeletedCamerasName(t *testing.T) {
 	}
 	if got := len(mock.SaveCalls()); got != saves {
 		t.Fatalf("a refused add saved Frigate's config (%d saves, want %d)", got, saves)
+	}
+}
+
+// A removal that saved Frigate's config and then failed before deleting the camera here is retried:
+// the retry must keep what the first attempt saved, not record a camera that cannot be restored.
+func TestRemoveCameraRetryAfterAPartialFailureKeepsTheRestoreData(t *testing.T) {
+	env := demofix.Setup(t)
+	ctx := context.Background()
+	cam := env.Cameras["frigate-h01/plaza"]
+	if err := env.Svc.RemoveCamera(ctx, env.Admin, cam.ID); err != nil {
+		t.Fatal(err)
+	}
+	// Undo only the OpenVMS side, as if the delete transaction had failed after Frigate was saved.
+	err := env.Store.TxRaw(ctx, store.AllTenants, func(tx pgx.Tx) error {
+		if _, err := tx.Exec(ctx, `DELETE FROM camera_tombstones WHERE camera_id = $1`, cam.ID); err != nil {
+			return err
+		}
+		_, err := tx.Exec(ctx, `UPDATE cameras SET deleted_at = NULL, deleted_by = NULL WHERE id = $1`, cam.ID)
+		return err
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if err := env.Svc.RemoveCamera(ctx, env.Admin, cam.ID); err != nil {
+		t.Fatal(err)
+	}
+	st := deletedStateOf(t, env, cam.ID)
+	if st.tombstones != 1 || st.retainDays == nil || *st.retainDays != 7 {
+		t.Fatalf("tombstone after the retry = %+v, want the 7 recording days the first attempt saw", st)
+	}
+	deleted, err := env.Svc.ListDeletedCameras(ctx, env.Admin, cam.ServerID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(deleted) != 1 || !deleted[0].HasFrigateConfig {
+		t.Fatalf("deleted cameras = %+v, want the Frigate block still available to restore", deleted)
+	}
+	if _, err := env.Svc.ReinstateCamera(ctx, env.Admin, cam.ID); err != nil {
+		t.Fatalf("restore after the retried removal = %v, want it to put the camera back", err)
+	}
+	if _, back := frigateCamera(t, env.Mocks["frigate-h01"].Server.ConfigYAML(), cam.RemoteName); !back {
+		t.Fatal("the camera is not back in Frigate's config after the restore")
+	}
+}
+
+// If the kept Frigate revision is ever removed, restoring refuses instead of bringing the camera
+// back in OpenVMS only, where it would not record.
+func TestReinstateCameraRefusesWhenItsKeptFrigateBlockWasLost(t *testing.T) {
+	env := demofix.Setup(t)
+	ctx := context.Background()
+	cam := env.Cameras["frigate-h01/plaza"]
+	mock := env.Mocks["frigate-h01"].Server
+	if err := env.Svc.RemoveCamera(ctx, env.Admin, cam.ID); err != nil {
+		t.Fatal(err)
+	}
+	err := env.Store.TxRaw(ctx, store.AllTenants, func(tx pgx.Tx) error {
+		_, err := tx.Exec(ctx, `DELETE FROM frigate_config_revisions WHERE id = (SELECT config_revision_id FROM camera_tombstones WHERE camera_id = $1)`, cam.ID)
+		return err
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	saves := len(mock.SaveCalls())
+
+	_, err = env.Svc.ReinstateCamera(ctx, env.Admin, cam.ID)
+	var ve *inventory.ValidationError
+	if !errors.As(err, &ve) {
+		t.Fatalf("reinstate with the kept block lost = %v, want a validation error", err)
+	}
+	if st := deletedStateOf(t, env, cam.ID); !st.deletedAt || st.tombstones != 1 {
+		t.Fatalf("a refused restore changed the camera: %+v", st)
+	}
+	if got := len(mock.SaveCalls()); got != saves {
+		t.Fatalf("a refused restore saved Frigate's config (%d saves, want %d)", got, saves)
 	}
 }

@@ -261,9 +261,10 @@ type CameraTombstone struct {
 	ServerID         uuid.UUID
 	RemoteName       string
 	RetainDays       *int32
-	ConfigRevisionID *uuid.UUID
 	DeletedBy        *uuid.UUID
 	DeletedAt        time.Time
+	ConfigRevisionID *uuid.UUID
+	HadFrigateConfig bool
 }
 
 type CameraZone struct {
