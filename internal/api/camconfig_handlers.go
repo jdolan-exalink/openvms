@@ -143,6 +143,39 @@ func (h *Handlers) ReviewCameraConfig(ctx context.Context, r gen.ReviewCameraCon
 	return gen.ReviewCameraConfig200JSONResponse(out), nil
 }
 
+// guardAnalyticsModules rejects a patch that switches an analytics module the camera cannot
+// change (not available with its engine, or configured on the camera itself): it is a 400 with
+// the reason, never a silent no-op.
+func (h *Handlers) guardAnalyticsModules(ctx context.Context, a authz.Actor, id uuid.UUID, p camconfig.Patch) error {
+	if p.Analytics == nil || len(p.Analytics.Modules) == 0 {
+		return nil
+	}
+	var src camConfigSource = h.Inv
+	if h.camConfig != nil {
+		src = h.camConfig
+	}
+	ce, err := src.OpenCameraEngine(ctx, a, id)
+	if err != nil {
+		return err
+	}
+	var ad camconfig.FrigateAdapter
+	if ce.Adapter != nil {
+		ad.Engine = ce.Adapter
+	}
+	current, err := ad.Read(ctx, cameraInventory(ce))
+	if err != nil {
+		return err
+	}
+	if err := camconfig.CheckModules(current, p); err != nil {
+		var ve *camconfig.ValidationError
+		if errors.As(err, &ve) {
+			return &inventory.ValidationError{Msg: ve.Msg}
+		}
+		return err
+	}
+	return nil
+}
+
 // ApplyCameraConfig records, applies and verifies a change of the normalized configuration.
 func (h *Handlers) ApplyCameraConfig(ctx context.Context, r gen.ApplyCameraConfigRequestObject) (gen.ApplyCameraConfigResponseObject, error) {
 	a, err := actor(ctx)
@@ -157,6 +190,9 @@ func (h *Handlers) ApplyCameraConfig(ctx context.Context, r gen.ApplyCameraConfi
 		return nil, err
 	}
 	if patch, err = h.resolveCatalogSelection(ctx, a, r.CameraId, patch); err != nil {
+		return nil, err
+	}
+	if err = h.guardAnalyticsModules(ctx, a, r.CameraId, patch); err != nil {
 		return nil, err
 	}
 	in := inventory.ConfigApplyInput{Patch: patch, ExpectedRevision: r.Body.ExpectedRevision}

@@ -127,6 +127,7 @@ func (s *Server) stateLocked() map[string]any {
 		"mqtt":    map[string]any{"enabled": true, "topic_prefix": s.TopicPrefix},
 		"version": s.Version,
 		"go2rtc":  map[string]any{"streams": map[string]any{}},
+		"model":   s.modelSection(),
 	}
 	if s.FaceRecognition {
 		root["face_recognition"] = map[string]any{"enabled": true, "model_size": "small"}
@@ -347,4 +348,17 @@ func (s *Server) setConfig(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 	writeJSON(w, map[string]any{"success": true, "message": "Config successfully updated, restart to apply"})
+}
+
+// modelSection is the detector model block of /api/config: Frigate's default model reports
+// an empty labelmap and no labelmap_path.
+func (s *Server) modelSection() map[string]any {
+	m := map[string]any{"labelmap": map[string]string{}, "labelmap_path": nil}
+	if s.ModelLabelmap != nil {
+		m["labelmap"] = s.ModelLabelmap
+	}
+	if s.ModelLabelmapPath != "" {
+		m["labelmap_path"] = s.ModelLabelmapPath
+	}
+	return m
 }

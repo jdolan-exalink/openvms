@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { buildCameraTabs, CAMERA_WEB, FISHEYE, GENERAL, HISTORY, isFisheyeTagged, ONVIF_INFO, PROVISION, PTZ_CONTROL, tabOfSection } from "./cameraTabs";
+import { ANALYTICS_MODULES, analyticsTabVisible, buildCameraTabs, CAMERA_WEB, FISHEYE, GENERAL, HISTORY, isFisheyeTagged, ONVIF_INFO, PROVISION, PTZ_CONTROL, tabOfSection } from "./cameraTabs";
 
 const base = { sections: [], ptz: false, fisheye: false, analytics: false, provision: false, cameraWeb: false };
 const ids = (input: Partial<Parameters<typeof buildCameraTabs>[0]>) => buildCameraTabs({ ...base, ...input }).map((t) => t.id);
@@ -26,8 +26,17 @@ describe("buildCameraTabs", () => {
     expect(of("video")).toEqual(["ffmpeg", "live"]);
     expect(of("record")).toEqual(["record", "snapshots"]);
     expect(of("detect")).toEqual(["detect", "objects", "motion"]);
-    expect(of("analytics")).toEqual([PROVISION, "lpr", "face_recognition"]);
+    expect(of("analytics")).toEqual([ANALYTICS_MODULES, PROVISION, "lpr", "face_recognition"]);
     expect(of("zones")).toEqual(["zones", "review"]);
+  });
+
+  it("shows Analíticas by the modules list: only with an available module (or Provision / ONVIF analytics)", () => {
+    const none = { modules: [{ available: false }, { available: false }], provision: false, advertised: false, lpr: false };
+    expect(analyticsTabVisible(none)).toBe(false);
+    expect(analyticsTabVisible({ ...none, modules: undefined })).toBe(false);
+    expect(analyticsTabVisible({ ...none, modules: [{ available: false }, { available: true }] })).toBe(true);
+    expect(analyticsTabVisible({ ...none, provision: true })).toBe(true);
+    expect(analyticsTabVisible({ ...none, advertised: true })).toBe(true);
   });
 
   it("gates the camera web view and keeps the ONVIF information in Integraciones", () => {

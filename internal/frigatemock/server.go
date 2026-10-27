@@ -42,6 +42,11 @@ type Server struct {
 	// A stream without an entry has no producer, like an idle go2rtc stream.
 	Go2RTCCodecs map[string]string
 
+	// ModelLabelmap is the inline model.labelmap (index -> label) /api/config reports; nil is
+	// Frigate's default (empty). ModelLabelmapPath simulates a custom labelmap file on the host.
+	ModelLabelmap     map[string]string
+	ModelLabelmapPath string
+
 	// FaceRecognition turns face recognition on: GET /api/config reports face_recognition.enabled
 	// (globally and per camera) and the /api/faces library routes work; when false they answer
 	// Frigate's 400 "Face recognition is not enabled.".

@@ -78,7 +78,7 @@ type Handlers struct {
 	camVideo videoLinkFunc
 
 	// catalogLabels reads the model labels a server's engine supports for the object catalog;
-	// nil means they are unknown (the engine adapter does not report them yet).
+	// nil uses Inv, which reads them from the server's Frigate model.
 	catalogLabels catalogLabelSource
 
 	// lprTest replaces the LPR link test's lookups in tests; nil uses the services above.
