@@ -14,6 +14,8 @@ Deliver capability-driven ONVIF agent/API management, safe Frigate sync and audi
 
 ## Goal and boundaries
 
+- **Scope decision (2026-10-27, owner):** only ONVIF-05 (camera delete with tombstones and recording disposition) is prioritized. ONVIF-08, 12, 13, 14, 15, 16 and 18 are deferred until a camera needs them; they stay unchecked and need real-device acceptance when picked up. Remaining partial units (02, 04, 06, 07, 09, 10, 11, 17) are not scheduled.
+
 - **Outcome:** capability-driven ONVIF discovery/configuration and safe Frigate lifecycle across media, imaging, time/network, PTZ/audio and events.
 - **Scope:** agent/API/UI with fakes; SSH/physical operations need separate destination, operation and credential authorization.
 - **Safety:** stable IDs/tombstones; encrypted write-only secrets; bounded audited/read-back mutations; preserve recordings, confirm discard, no factory reset.
