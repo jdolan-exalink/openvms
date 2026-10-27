@@ -90,13 +90,16 @@ type Streams struct {
 
 // Stream describes one video stream. URL never carries credentials or query strings.
 type Stream struct {
-	Name   string   `json:"name,omitempty"`
-	URL    string   `json:"url,omitempty"`
-	Codec  string   `json:"codec,omitempty"`
-	Width  int      `json:"width,omitempty"`
-	Height int      `json:"height,omitempty"`
-	FPS    float64  `json:"fps,omitempty"`
-	Roles  []string `json:"roles"`
+	Name   string  `json:"name,omitempty"`
+	URL    string  `json:"url,omitempty"`
+	Codec  string  `json:"codec,omitempty"`
+	Width  int     `json:"width,omitempty"`
+	Height int     `json:"height,omitempty"`
+	FPS    float64 `json:"fps,omitempty"`
+	// BitrateKbps and GOP come from the camera (ONVIF) when it could be read.
+	BitrateKbps int      `json:"bitrate_kbps,omitempty"`
+	GOP         int      `json:"gop,omitempty"`
+	Roles       []string `json:"roles"`
 }
 
 // Recording is the recording policy; Enabled is nil when unknown.
@@ -108,6 +111,13 @@ type Recording struct {
 type Detection struct {
 	Enabled *bool    `json:"enabled,omitempty"`
 	Objects []string `json:"objects"`
+	// Selection and Categories are the catalog view of Objects: object ids and the ids of
+	// categories fully selected. Raw are tracked labels the catalog does not know.
+	Selection  []string `json:"selection"`
+	Categories []string `json:"categories"`
+	Raw        []string `json:"raw"`
+	// AvailableLabels are the labels the engine's model supports; empty means unknown.
+	AvailableLabels []string `json:"available_labels,omitempty"`
 }
 
 // Analytics are the optional analytics running on the camera; nil means unknown.

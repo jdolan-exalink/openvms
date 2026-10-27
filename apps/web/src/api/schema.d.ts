@@ -1063,6 +1063,30 @@ export interface paths {
         patch: operations["patchCameraFrigateConfig"];
         trace?: never;
     };
+    "/api/v1/camera-config/object-catalog": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Get the normalized object catalog
+         * @description Any authenticated actor may read it. Returns the ordered OpenVMS categories and objects
+         *     (Spanish labels) instead of an engine's raw label list. `supported` is true or false when
+         *     the model labels of `server_id` are readable and null (unknown) otherwise; an object the
+         *     engine has no label for is always false. Raw labels the catalog does not know are never
+         *     listed here: they stay visible as `detection.raw` of the camera model.
+         */
+        get: operations["getObjectCatalog"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/cameras/{cameraId}/normalized-config": {
         parameters: {
             query?: never;
@@ -1139,6 +1163,40 @@ export interface paths {
          *     values, origin and result.
          */
         post: operations["applyCameraConfig"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/cameras/{cameraId}/video-options": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                cameraId: string;
+            };
+            cookie?: never;
+        };
+        /**
+         * Video settings the camera really supports, per stream
+         * @description Asks the camera itself (ONVIF) for the current video settings and the values it supports
+         *     for the primary and detection streams, so clients offer only combinations the device can
+         *     do. It uses the camera's ONVIF credentials, so it needs cameras.view on the camera plus
+         *     servers.manage and servers.config.secrets on its server (the permissions of the ONVIF
+         *     probe); credentials and device addresses are never returned. When the camera cannot be
+         *     asked the answer is still 200 with `available: false` and a reason code: `no_onvif`
+         *     (no ONVIF endpoint), `no_credentials` (none stored), `unreachable` (the camera did not
+         *     answer) or `unsupported` (it does not expose the settings, or the stream's ONVIF profile
+         *     could not be identified). `apply_via` tells, per field, whether a change goes to the
+         *     camera (`onvif`), to Frigate's detect section (`frigate`) or cannot be made (`none`).
+         *     Applying changes goes through the normalized-config review and apply endpoints with
+         *     `streams.primary` / `streams.detection`; a change that restarts the stream says so in
+         *     the review's impact before anything is saved.
+         */
+        get: operations["getCameraVideoOptions"];
+        put?: never;
+        post?: never;
         delete?: never;
         options?: never;
         head?: never;
@@ -4841,7 +4899,16 @@ export interface components {
             };
             detection: {
                 enabled?: boolean;
+                /** @description Raw engine labels being tracked */
                 objects: string[];
+                /** @description Catalog object ids collapsed from the tracked labels */
+                selection?: string[];
+                /** @description Catalog categories whose every engine-supported object is selected */
+                categories?: string[];
+                /** @description Tracked labels the catalog does not know */
+                raw?: string[];
+                /** @description Labels the engine model supports; omitted when unknown */
+                available_labels?: string[];
             };
             analytics: {
                 lpr?: boolean;
@@ -4865,7 +4932,11 @@ export interface components {
             overrides: {
                 default_live_quality?: string;
             };
-            /** @description Where each part of the model came from and whether it could be read. */
+            /**
+             * @description Where each part of the model came from and whether it could be read. The `onvif` source
+             *     (present when the caller may use the camera's ONVIF credentials) carries a video reason
+             *     code in `detail` when the camera's own video settings could not be read.
+             */
             sources: {
                 name: string;
                 /** @enum {string} */
@@ -4874,6 +4945,62 @@ export interface components {
             }[];
             warnings: string[];
         };
+        /** @enum {string} */
+        CameraVideoReason: "no_onvif" | "no_credentials" | "unreachable" | "unsupported";
+        CameraVideoOptions: {
+            /** Format: uuid */
+            camera_id: string;
+            /** @description True when at least one stream could be read. */
+            available: boolean;
+            reason?: components["schemas"]["CameraVideoReason"];
+            streams: components["schemas"]["CameraStreamVideoOptions"][];
+        };
+        CameraStreamVideoOptions: {
+            /** @enum {string} */
+            role: "primary" | "detection";
+            profile_token?: string;
+            profile_name?: string;
+            available: boolean;
+            reason?: components["schemas"]["CameraVideoReason"];
+            /** @description Values the stream uses now; an item the camera did not report is omitted. */
+            current?: {
+                /** @example h264 */
+                codec?: string;
+                width?: number;
+                height?: number;
+                fps?: number;
+                bitrate_kbps?: number;
+                bitrate_mode?: string;
+                gop?: number;
+            };
+            codecs: {
+                /** @example h264 */
+                codec: string;
+                resolutions: {
+                    width: number;
+                    height: number;
+                }[];
+                /** @description Discrete FPS values when the camera lists them. */
+                frame_rates: number[];
+                fps?: components["schemas"]["CameraVideoRange"];
+                bitrate_kbps?: components["schemas"]["CameraVideoRange"];
+                gop?: components["schemas"]["CameraVideoRange"];
+                bitrate_modes: string[];
+            }[];
+            apply_via: {
+                resolution: components["schemas"]["CameraVideoApplyVia"];
+                fps: components["schemas"]["CameraVideoApplyVia"];
+                codec: components["schemas"]["CameraVideoApplyVia"];
+                bitrate_kbps: components["schemas"]["CameraVideoApplyVia"];
+                gop: components["schemas"]["CameraVideoApplyVia"];
+            };
+        };
+        CameraVideoRange: {
+            min: number;
+            max: number;
+        };
+        /** @enum {string} */
+        CameraVideoApplyVia: "onvif" | "frigate" | "none";
         /**
          * @description Where a configuration change comes from. Defaults to ui.
          * @enum {string}
@@ -4882,8 +5009,16 @@ export interface components {
         /**
          * @description Sparse change to the normalized model; omitted fields stay as they are. The fields that can
          *     be changed today are `detection.enabled` (boolean), `detection.objects` (raw engine object
-         *     labels until the object catalog lands), `recording.enabled` (boolean) and `analytics.lpr`
-         *     (boolean). The schema is deliberately open so the server can reject every other field,
+         *     labels), `detection.selection` (catalog object or category ids from
+         *     `/api/v1/camera-config/object-catalog`, expanded to the engine labels its model supports;
+         *     sending it together with `detection.objects` is a 400, and ids the model cannot honor are
+         *     listed in the review `unsupported` and rejected on apply), `recording.enabled` (boolean),
+         *     `analytics.lpr` (boolean) and `streams.primary` / `streams.detection`, each a sparse object
+         *     with `resolution` ({width, height}), `fps`, `codec` (h264, h265, mjpeg, mpeg4),
+         *     `bitrate_kbps` and `gop`. Stream fields are written to the camera over ONVIF; the detection
+         *     stream's `resolution` and `fps` go to Frigate's detect section when it has no ONVIF profile
+         *     of its own (see getCameraVideoOptions `apply_via`). The schema is deliberately open so the
+         *     server can reject every other field,
          *     nested ones included, with 400 instead of dropping it silently.
          * @example {
          *       "detection": {
@@ -4904,6 +5039,24 @@ export interface components {
         CameraConfigPatch: {
             [key: string]: unknown;
         };
+        ObjectCatalog: {
+            engine: string;
+            categories: {
+                /** @example vehicle */
+                id: string;
+                /** @example Vehículos */
+                label: string;
+                objects: {
+                    /** @example vehicle.truck */
+                    id: string;
+                    /** @example Camión */
+                    label: string;
+                    requires_model: boolean;
+                    /** @description null means unknown */
+                    supported: boolean | null;
+                }[];
+            }[];
+        };
         CameraConfigReview: {
             changes: {
                 /** @example detection.enabled */
@@ -4916,7 +5069,7 @@ export interface components {
             }[];
             impact: {
                 /** @enum {string} */
-                code: "engine_reload" | "engine_restart" | "recording_interruption";
+                code: "engine_reload" | "engine_restart" | "recording_interruption" | "stream_restart";
                 /** @example Frigate recargará configuración; */
                 message: string;
             }[];
@@ -4956,6 +5109,10 @@ export interface components {
             width?: number;
             height?: number;
             fps?: number;
+            /** @description Read from the camera (ONVIF) when reachable. */
+            bitrate_kbps?: number;
+            /** @description Read from the camera (ONVIF) when reachable. */
+            gop?: number;
             roles: string[];
         };
         CameraFrigateConfig: {
@@ -8797,6 +8954,31 @@ export interface operations {
             502: components["responses"]["FrigateUnreachable"];
         };
     };
+    getObjectCatalog: {
+        parameters: {
+            query?: {
+                engine?: "frigate";
+                server_id?: string;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The catalog */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ObjectCatalog"];
+                };
+            };
+            400: components["responses"]["BadRequest"];
+            401: components["responses"]["Unauthorized"];
+        };
+    };
     getCameraConfig: {
         parameters: {
             query?: never;
@@ -8886,6 +9068,31 @@ export interface operations {
             403: components["responses"]["Forbidden"];
             404: components["responses"]["NotFound"];
             409: components["responses"]["Conflict"];
+        };
+    };
+    getCameraVideoOptions: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                cameraId: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Supported video values per stream */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["CameraVideoOptions"];
+                };
+            };
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
         };
     };
     checkCameraOnvif: {

@@ -51,18 +51,24 @@ func invalid(format string, args ...any) error {
 //	detection.objects   -> objects.track (raw engine labels until the object catalog lands)
 //	recording.enabled   -> record.enabled
 //	analytics.lpr       -> lpr.enabled
+//	streams.primary|detection -> ONVIF encoder, or Frigate detect.width/height/fps (see VideoPatch)
 //
-// Anything else (streams, zones, PTZ, recording mode...) is rejected by ParsePatch.
+// Anything else (zones, PTZ, recording mode...) is rejected by ParsePatch.
 type Patch struct {
 	Detection *DetectionPatch `json:"detection,omitempty"`
 	Recording *RecordingPatch `json:"recording,omitempty"`
 	Analytics *AnalyticsPatch `json:"analytics,omitempty"`
+	// Streams changes the primary and detection video settings (see patch_video.go).
+	Streams *StreamsPatch `json:"streams,omitempty"`
 }
 
 // DetectionPatch changes the detection policy.
 type DetectionPatch struct {
 	Enabled *bool     `json:"enabled,omitempty"`
 	Objects *[]string `json:"objects,omitempty"`
+	// Selection is a list of catalog object or category ids. It is resolved to engine labels
+	// (ResolveSelection) before it is applied; it excludes Objects.
+	Selection *[]string `json:"selection,omitempty"`
 }
 
 // RecordingPatch changes the recording policy.
@@ -100,6 +106,9 @@ func (p Patch) Validate() error {
 	if p.Empty() {
 		return invalid("patch is empty")
 	}
+	if err := p.Streams.validate(); err != nil {
+		return err
+	}
 	if p.Detection != nil && p.Detection.Objects != nil {
 		for _, o := range *p.Detection.Objects {
 			if !objectLabel.MatchString(o) {
@@ -107,21 +116,26 @@ func (p Patch) Validate() error {
 			}
 		}
 	}
-	return nil
+	return validateSelection(p.Detection)
 }
 
 // Empty reports whether the patch changes nothing.
 func (p Patch) Empty() bool {
-	return (p.Detection == nil || (p.Detection.Enabled == nil && p.Detection.Objects == nil)) &&
+	return (p.Detection == nil || (p.Detection.Enabled == nil && p.Detection.Objects == nil && p.Detection.Selection == nil)) &&
 		(p.Recording == nil || p.Recording.Enabled == nil) &&
-		(p.Analytics == nil || p.Analytics.LPR == nil)
+		(p.Analytics == nil || p.Analytics.LPR == nil) &&
+		streamsEmpty(p.Streams)
 }
 
 // Normalized drops empty branches and duplicate object labels, keeping order.
 func (p Patch) Normalized() Patch {
 	var out Patch
-	if d := p.Detection; d != nil && (d.Enabled != nil || d.Objects != nil) {
+	if d := p.Detection; d != nil && (d.Enabled != nil || d.Objects != nil || d.Selection != nil) {
 		out.Detection = &DetectionPatch{Enabled: d.Enabled}
+		if d.Selection != nil {
+			sel := slices.Compact(slices.Sorted(slices.Values(*d.Selection)))
+			out.Detection.Selection = &sel
+		}
 		if d.Objects != nil {
 			objs := make([]string, 0, len(*d.Objects))
 			for _, o := range *d.Objects {
@@ -138,6 +152,7 @@ func (p Patch) Normalized() Patch {
 	if a := p.Analytics; a != nil && a.LPR != nil {
 		out.Analytics = &AnalyticsPatch{LPR: a.LPR}
 	}
+	out.Streams = p.Streams.normalized()
 	return out
 }
 
@@ -166,6 +181,7 @@ func Merge(base, over Patch) Patch {
 		}
 		out.Analytics.LPR = o.Analytics.LPR
 	}
+	out.Streams = mergeStreams(out.Streams, o.Streams)
 	return out
 }
 
@@ -195,6 +211,7 @@ const (
 	ImpactEngineReload          = "engine_reload"
 	ImpactEngineRestart         = "engine_restart"
 	ImpactRecordingInterruption = "recording_interruption"
+	ImpactStreamRestart         = "stream_restart"
 )
 
 // Messages shown in the review's "Impacto".
@@ -213,12 +230,13 @@ type SectionWriter interface {
 
 // Plan implements Adapter. It is pure: it compares the patch with the current model and
 // lists changes and impact; fields the current model already has are not listed.
-func (FrigateAdapter) Plan(_ context.Context, current Camera, patch Patch) (Review, error) {
+func (a FrigateAdapter) Plan(ctx context.Context, current Camera, patch Patch) (Review, error) {
 	if err := patch.Validate(); err != nil {
 		return Review{}, err
 	}
-	p := patch.Normalized()
-	rev := Review{Changes: []Change{}, Impact: []ImpactItem{}, Unsupported: []string{}}
+	viaSelection := patch.Detection != nil && patch.Detection.Selection != nil
+	p, unsupported := ResolveSelection(patch.Normalized(), current.Detection.AvailableLabels)
+	rev := Review{Changes: []Change{}, Impact: []ImpactItem{}, Unsupported: append([]string{}, unsupported...)}
 	var sections []string
 	add := func(section string, c Change) {
 		rev.Changes = append(rev.Changes, c)
@@ -241,6 +259,11 @@ func (FrigateAdapter) Plan(_ context.Context, current Camera, patch Patch) (Revi
 		if o := p.Detection.Objects; o != nil && !sameSet(current.Detection.Objects, *o) {
 			add("objects", Change{Path: "detection.objects", Label: "objetos rastreados",
 				From: nonNil(current.Detection.Objects), To: *o})
+			if viaSelection {
+				for _, c := range selectionChanges(current.Detection.Objects, *o) {
+					add("objects", c)
+				}
+			}
 		}
 	}
 	if p.Recording != nil {
@@ -249,7 +272,14 @@ func (FrigateAdapter) Plan(_ context.Context, current Camera, patch Patch) (Revi
 	if p.Analytics != nil {
 		boolChange("lpr", "analytics.lpr", "lectura de matrículas (LPR)", current.Analytics.LPR, p.Analytics.LPR)
 	}
+	vp := a.planVideo(ctx, current, p.Streams)
+	rev.Changes = append(rev.Changes, vp.changes...)
+	rev.Unsupported = append(rev.Unsupported, vp.unsupported...)
+	if vp.detect {
+		sections = append(sections, "detect")
+	}
 	slices.Sort(sections)
+	sections = slices.Compact(sections)
 	reload, restart := false, false
 	for _, s := range sections {
 		if frigate.LiveSection(s) {
@@ -267,18 +297,37 @@ func (FrigateAdapter) Plan(_ context.Context, current Camera, patch Patch) (Revi
 	if slices.Contains(sections, "record") {
 		rev.Impact = append(rev.Impact, ImpactItem{Code: ImpactRecordingInterruption, Message: msgRecording})
 	}
+	rev.Impact = append(rev.Impact, vp.impact...)
 	return rev, nil
 }
 
 // Apply implements Adapter: it translates the patch to Frigate sections and hands them to
 // the writer. Nothing is written when the patch does not validate.
 func (a FrigateAdapter) Apply(ctx context.Context, patch Patch) error {
-	if a.Writer == nil {
-		return errors.New("camconfig: the engine cannot be written")
-	}
 	sections, err := FrigateSections(patch)
 	if err != nil {
 		return err
+	}
+	p := patch.Normalized()
+	// Camera video first: if the device refuses, nothing else was written.
+	if err := a.applyVideo(ctx, p.Streams); err != nil {
+		return err
+	}
+	if d := a.detectSection(p.Streams); len(d) > 0 {
+		cur, _ := sections["detect"].(map[string]any)
+		if cur == nil {
+			cur = map[string]any{}
+		}
+		for k, v := range d {
+			cur[k] = v
+		}
+		sections["detect"] = cur
+	}
+	if len(sections) == 0 {
+		return nil
+	}
+	if a.Writer == nil {
+		return errors.New("camconfig: the engine cannot be written")
 	}
 	return a.Writer.PatchSections(ctx, sections)
 }
@@ -289,6 +338,9 @@ func FrigateSections(patch Patch) (map[string]any, error) {
 		return nil, err
 	}
 	p := patch.Normalized()
+	if p.Detection != nil && p.Detection.Selection != nil {
+		return nil, invalid("detection.selection must be resolved to engine labels first")
+	}
 	out := map[string]any{}
 	if p.Detection != nil {
 		if p.Detection.Enabled != nil {

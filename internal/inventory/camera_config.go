@@ -118,9 +118,33 @@ func (s *Service) configAdapter(ctx context.Context, actor authz.Actor, t config
 	return ad
 }
 
+// VideoLinker resolves how a camera's own video (ONVIF) is reached for the actor: the API
+// supplies it because it owns the credential lookup and its permission check. An error (such as
+// access.ErrForbidden) refuses the request; an unreachable camera is a link with a Reason.
+type VideoLinker func(ctx context.Context, cam db.GetCameraRow) (camconfig.VideoLink, error)
+
+// linkVideo connects the adapter to the camera's video when the patch changes it.
+func linkVideo(ctx context.Context, ad *camconfig.FrigateAdapter, t configTarget, patch camconfig.Patch, link VideoLinker) error {
+	if link == nil || !patch.HasVideo() {
+		return nil
+	}
+	l, err := link(ctx, t.cam)
+	if err != nil {
+		return err
+	}
+	ad.Video = &l
+	return nil
+}
+
 // ReviewCameraConfig describes what a patch would change and affect. It has no side effects:
 // nothing is written to the engine or the database.
 func (s *Service) ReviewCameraConfig(ctx context.Context, actor authz.Actor, id uuid.UUID, patch camconfig.Patch) (camconfig.Review, error) {
+	return s.ReviewCameraConfigWith(ctx, actor, id, patch, nil)
+}
+
+// ReviewCameraConfigWith is ReviewCameraConfig with access to the camera's video, needed to
+// review stream changes. Reading the device is the only thing it does besides the Frigate read.
+func (s *Service) ReviewCameraConfigWith(ctx context.Context, actor authz.Actor, id uuid.UUID, patch camconfig.Patch, link VideoLinker) (camconfig.Review, error) {
 	if err := patch.Validate(); err != nil {
 		return camconfig.Review{}, invalid("%s", err.Error())
 	}
@@ -134,6 +158,9 @@ func (s *Service) ReviewCameraConfig(ctx context.Context, actor authz.Actor, id 
 		return camconfig.Review{}, err
 	}
 	ad := s.configAdapter(ctx, actor, t)
+	if err := linkVideo(ctx, &ad, t, patch, link); err != nil {
+		return camconfig.Review{}, err
+	}
 	current, err := ad.Read(ctx, CameraConfigInventory(t.cam, t.srv.Name))
 	if err != nil {
 		return camconfig.Review{}, err
@@ -146,6 +173,14 @@ func (s *Service) ReviewCameraConfig(ctx context.Context, actor authz.Actor, id 
 // crash never leaves a change that looks synced; the final state and the audit row are written
 // together once the outcome is known.
 func (s *Service) ApplyCameraConfig(ctx context.Context, actor authz.Actor, id uuid.UUID, in ConfigApplyInput) (ConfigApplyResult, error) {
+	return s.ApplyCameraConfigWith(ctx, actor, id, in, nil)
+}
+
+// ApplyCameraConfigWith is ApplyCameraConfig with access to the camera's video, needed to apply
+// stream changes. A change of the video of a camera that cannot be reached is refused before
+// anything is recorded; one the device then rejects ends as a sync_state error like any other
+// failed apply.
+func (s *Service) ApplyCameraConfigWith(ctx context.Context, actor authz.Actor, id uuid.UUID, in ConfigApplyInput, link VideoLinker) (ConfigApplyResult, error) {
 	if err := in.Patch.Validate(); err != nil {
 		return ConfigApplyResult{}, invalid("%s", err.Error())
 	}
@@ -157,6 +192,26 @@ func (s *Service) ApplyCameraConfig(ctx context.Context, actor authz.Actor, id u
 		return ConfigApplyResult{}, invalid("unknown origin %q", origin)
 	}
 	patch := in.Patch.Normalized()
+
+	var video *camconfig.VideoLink
+	if patch.HasVideo() && link != nil {
+		var pre configTarget
+		if err := s.tx(ctx, actor, func(q *db.Queries, c *access.Checker) error {
+			var err error
+			pre, err = s.loadConfigTarget(ctx, id, q, c)
+			return err
+		}); err != nil {
+			return ConfigApplyResult{}, err
+		}
+		l, err := link(ctx, pre.cam)
+		if err != nil {
+			return ConfigApplyResult{}, err
+		}
+		if l.Device == nil {
+			return ConfigApplyResult{}, invalid("no se puede cambiar el video de la cámara: %s", camconfig.VideoReasonText(l.Reason))
+		}
+		video = &l
+	}
 
 	var t configTarget
 	var rec db.CameraConfigState
@@ -190,6 +245,7 @@ func (s *Service) ApplyCameraConfig(ctx context.Context, actor authz.Actor, id u
 	desired := StoredConfigState(&rec).Desired
 
 	ad := s.configAdapter(ctx, actor, t)
+	ad.Video = video
 	invRow := CameraConfigInventory(t.cam, t.srv.Name)
 	before, err := ad.Read(ctx, invRow)
 	if err != nil {
