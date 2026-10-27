@@ -344,6 +344,7 @@ func run() error {
 	case <-ctx.Done():
 	}
 	log.Info("shutting down")
+	handlers.StopPTZTours()
 	grpcCtrl.GracefulStop()
 	grpcAgent.GracefulStop()
 	sctx, cancel := context.WithTimeout(context.Background(), cfg.ShutdownTimeout)
