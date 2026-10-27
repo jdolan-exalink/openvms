@@ -45,6 +45,7 @@ jobs:
         with:
           go-version-file: go.mod
       - run: bash tools/agent_version_test.sh
+      - run: bash deploy/maintenance/web_apk_refresh_test.sh
       # Always against main, also for stacked PRs: the rule is about what was released, not about the PR base.
       - run: tools/agent_version.sh check origin/main
 
