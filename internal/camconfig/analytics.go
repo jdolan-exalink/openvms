@@ -1,9 +1,12 @@
 package camconfig
 
 import (
+	"context"
 	"slices"
 	"strconv"
 	"strings"
+
+	"github.com/jdolan-exalink/openvms/internal/frigate"
 )
 
 // Analytics module ids. Analytics are handled as modules: each one is shown as a card that can
@@ -23,6 +26,7 @@ const (
 	ModuleEngineFrigate   = "frigate"
 	ModuleEngineProvision = "provision"
 	ModuleEngineNative    = "native"
+	ModuleEngineOpenVMS   = "openvms"
 	ModuleEngineNone      = "none"
 )
 
@@ -30,7 +34,20 @@ const (
 const (
 	ReasonNotAvailable    = "No disponible con este motor"
 	ReasonConfiguredOnCam = "Se configura en la cámara"
+
+	// Specific reasons: each says what is missing instead of the generic text.
+	ReasonFaceDetectionImplicit = "Frigate detecta rostros solo mientras el reconocimiento facial está activo; no tiene un interruptor de detección aparte"
+	ReasonSimilarSearch         = "Frigate ofrece la búsqueda semántica para todo el servidor, no por cámara, y OpenVMS no calcula similitud de vehículos"
 )
+
+// localModules are the modules OpenVMS runs itself; the others are switched in Frigate.
+var localModules = map[string]bool{ModuleVehicleClassification: true, ModuleVehicleColor: true, ModuleClothingColor: true}
+
+// faceGlobals is the optional part of an engine that reports Frigate's server-wide
+// face_recognition configuration (thresholds and model are not per camera in Frigate).
+type faceGlobals interface {
+	FaceRecognitionSettings(ctx context.Context) (frigate.FaceRecognitionSettings, error)
+}
 
 // moduleOrder is the order of the cards and the label of each module.
 var moduleOrder = []struct{ id, label string }{
@@ -77,6 +94,8 @@ type AnalyticsModule struct {
 type ModuleSettings struct {
 	// MinArea is the smallest object area (pixels) the engine analyses.
 	MinArea *int `json:"min_area,omitempty"`
+	// Enhancement is Frigate's per-camera LPR image enhancement level (0 to 10).
+	Enhancement *int `json:"enhancement,omitempty"`
 }
 
 // ModuleDetail is one read-only line of a module's engine-specific summary.
@@ -96,8 +115,14 @@ func (a Analytics) Module(id string) (AnalyticsModule, bool) {
 }
 
 // deriveModules builds Analytics.Modules from the evidence the Frigate adapter has: the
-// inventory (tags, LPR flag) and the engine's camera document (nil when unreadable).
+// inventory (tags, LPR flag, OpenVMS-side switches) and the engine's camera document (nil when
+// unreadable). face holds Frigate's server-wide face settings when they could be read.
 func deriveModules(cam *Camera, in Inventory, doc map[string]any) {
+	deriveModulesWith(cam, in, doc, nil)
+}
+
+// deriveModulesWith is deriveModules with Frigate's server-wide face settings, when known.
+func deriveModulesWith(cam *Camera, in Inventory, doc map[string]any, face *frigate.FaceRecognitionSettings) {
 	lprTag := in.LPR || hasAnyTag(in.Tags, "lpr", "lpr_frigate", "lpr_provision")
 	provision := hasAnyTag(in.Tags, "lpr_provision") || (lprTag && hasAnyTag(in.Tags, "provision", "provision_isr"))
 	lprDoc, _ := doc["lpr"].(map[string]any)
@@ -119,7 +144,8 @@ func deriveModules(cam *Camera, in Inventory, doc map[string]any) {
 				m.Available, m.Engine, m.Reason = true, ModuleEngineFrigate, ""
 				m.Enabled = isTrue(cam.Analytics.LPR)
 				m.Writable = doc != nil
-				frigateSettings(&m, lprDoc, "expire_time", "enhancement")
+				frigateSettings(&m, lprDoc, "expire_time")
+				m.Advanced = append(m.Advanced, ModuleDetail{Label: "Resultados", Value: "OpenVMS guarda cada lectura en el evento y permite buscar matrículas"})
 			}
 		case ModuleFaceRecognition:
 			if faceDoc != nil {
@@ -127,11 +153,69 @@ func deriveModules(cam *Camera, in Inventory, doc map[string]any) {
 				m.Enabled = isTrue(boolPtr(doc, "face_recognition", "enabled"))
 				m.Writable = true
 				frigateSettings(&m, faceDoc)
+				m.Advanced = append(m.Advanced, faceGlobalDetails(face)...)
+				m.Advanced = append(m.Advanced, ModuleDetail{Label: "Base de rostros", Value: "Las listas de vigilancia son del tenant y se aplican en las reglas de alarma; no hay una lista por cámara"})
 			}
+		case ModuleFaceDetection:
+			// Frigate runs the face detector only as the first step of recognition: there is no
+			// "detect without recognizing" mode, so the module mirrors recognition and is read-only.
+			if faceDoc != nil {
+				m.Available, m.Engine, m.Reason = true, ModuleEngineFrigate, ReasonFaceDetectionImplicit
+				m.Enabled = isTrue(boolPtr(doc, "face_recognition", "enabled"))
+				m.Advanced = append(m.Advanced, ModuleDetail{Label: "Motor", Value: "Frigate"})
+				if face != nil {
+					m.Advanced = append(m.Advanced, ModuleDetail{Label: "Umbral de detección (servidor)", Value: strconv.FormatFloat(face.DetectionThreshold, 'f', -1, 64)})
+				}
+			}
+		case ModuleVehicleClassification, ModuleVehicleColor, ModuleClothingColor:
+			localModule(&m, in.Local)
+		case ModuleSimilarSearch:
+			m.Reason = ReasonSimilarSearch
 		}
 		mods = append(mods, m)
 	}
 	cam.Analytics.Modules = mods
+}
+
+// localSummary says how each OpenVMS-side module works, for the read-only detail.
+var localSummary = map[string][2]string{
+	ModuleVehicleClassification: {"Tipo de vehículo (sedán, SUV, camioneta, furgón...)", "Clasificador de carrocería del worker de OpenVMS sobre la captura del evento; sin el modelo instalado se conserva la etiqueta de Frigate"},
+	ModuleVehicleColor:          {"Color de vehículo", "Color calculado por OpenVMS desde la captura del evento de vehículo"},
+	ModuleClothingColor:         {"Color de ropa", "Colores de prenda superior e inferior calculados por OpenVMS desde la captura del evento de persona"},
+}
+
+// localModule fills a module OpenVMS runs itself from the switches in the inventory.
+func localModule(m *AnalyticsModule, local *LocalAnalytics) {
+	if local == nil {
+		return
+	}
+	on, known := local.Enabled[m.ID]
+	if !known {
+		return
+	}
+	sum := localSummary[m.ID]
+	m.Available, m.Enabled, m.Writable, m.Engine, m.Reason = true, on, true, ModuleEngineOpenVMS, ""
+	m.Advanced = append(m.Advanced,
+		ModuleDetail{Label: "Motor", Value: "OpenVMS"},
+		ModuleDetail{Label: "Cómo funciona", Value: sum[1]},
+		ModuleDetail{Label: "Alcance", Value: "Eventos nuevos de esta cámara"})
+	if why := local.Locked[m.ID]; why != "" {
+		m.Writable, m.Reason = false, why
+	}
+}
+
+// faceGlobalDetails lists Frigate's server-wide face settings: thresholds and model are not
+// per camera, so they are read-only here.
+func faceGlobalDetails(f *frigate.FaceRecognitionSettings) []ModuleDetail {
+	if f == nil {
+		return nil
+	}
+	num := func(v float64) string { return strconv.FormatFloat(v, 'f', -1, 64) }
+	return []ModuleDetail{
+		{Label: "Modelo (servidor)", Value: f.ModelSize},
+		{Label: "Umbral de detección (servidor)", Value: num(f.DetectionThreshold)},
+		{Label: "Umbral de reconocimiento (servidor)", Value: num(f.RecognitionThreshold)},
+	}
 }
 
 // frigateSettings reads the settings and the read-only summary of a Frigate-backed module.
@@ -140,6 +224,12 @@ func frigateSettings(m *AnalyticsModule, section map[string]any, advanced ...str
 	if f, ok := section["min_area"].(float64); ok {
 		v := int(f)
 		m.Settings.MinArea = &v
+	}
+	if m.ID == ModuleLPR {
+		if f, ok := section["enhancement"].(float64); ok {
+			v := int(f)
+			m.Settings.Enhancement = &v
+		}
 	}
 	for _, k := range advanced {
 		if v, ok := section[k]; ok && v != nil {
@@ -179,13 +269,19 @@ func diffModules(want *AnalyticsPatch, eff Analytics) []Drift {
 				out = append(out, Drift{Path: "analytics.modules." + id + ".enabled", Desired: *mp.Enabled, Effective: got})
 			}
 		}
-		if mp.Settings != nil && mp.Settings.MinArea != nil {
-			var got any
-			if ok && cur.Settings.MinArea != nil {
-				got = *cur.Settings.MinArea
+		for _, key := range settingKeys {
+			want := mp.Settings.value(key)
+			if want == nil {
+				continue
 			}
-			if got != *mp.Settings.MinArea {
-				out = append(out, Drift{Path: "analytics.modules." + id + ".settings.min_area", Desired: *mp.Settings.MinArea, Effective: got})
+			var got any
+			if ok {
+				if v := cur.Settings.value(key); v != nil {
+					got = *v
+				}
+			}
+			if got != *want {
+				out = append(out, Drift{Path: "analytics.modules." + id + ".settings." + key, Desired: *want, Effective: got})
 			}
 		}
 	}

@@ -6869,13 +6869,14 @@ components:
         available: { type: boolean }
         enabled: { type: boolean }
         writable: { type: boolean, description: OpenVMS can switch the module through its engine }
-        engine: { type: string, enum: [frigate, provision, native, none] }
+        engine: { type: string, enum: [frigate, provision, native, openvms, none] }
         reason: { type: string, description: Why the module cannot be switched on from here, example No disponible con este motor }
         settings:
           type: object
           description: Only fields with a real backing in the engine
           properties:
             min_area: { type: integer, description: Smallest object area, in pixels, the engine analyses }
+            enhancement: { type: integer, minimum: 0, maximum: 10, description: Frigate per-camera LPR image enhancement level (lpr only) }
         advanced:
           type: array
           description: Read-only summary of the engine-specific parameters
@@ -6895,8 +6896,10 @@ components:
         sending it together with `detection.objects` is a 400, and ids the model cannot honor are
         listed in the review `unsupported` and rejected on apply), `recording.enabled` (boolean),
         `analytics.lpr` (boolean), `analytics.modules.<id>.enabled` (boolean; `lpr` is the same
-        switch as `analytics.lpr`) and `analytics.modules.<id>.settings.min_area` (lpr and
-        face_recognition), where an unknown module id is a 400 and so is a module that is not
+        switch as `analytics.lpr`), `analytics.modules.<id>.settings.min_area` (lpr and
+        face_recognition) and `analytics.modules.<id>.settings.enhancement` (lpr, 0 to 10; the
+        OpenVMS-side modules vehicle_classification, vehicle_color and clothing_color take only
+        `enabled`), where an unknown module id is a 400 and so is a module that is not
         available or not configurable for the camera (for example Provision LPR), and
         `streams.primary` / `streams.detection`, each a sparse object
         with `resolution` ({width, height}), `fps`, `codec` (h264, h265, mjpeg, mpeg4),

@@ -143,7 +143,11 @@ func (s *Service) loadConfigTarget(ctx context.Context, id uuid.UUID, q *db.Quer
 // configAdapter builds the Frigate adapter of a camera; an unreachable server yields an
 // adapter without engine, which reads as "unverifiable" and fails writes.
 func (s *Service) configAdapter(ctx context.Context, actor authz.Actor, t configTarget) camconfig.FrigateAdapter {
-	ad := camconfig.FrigateAdapter{Writer: sectionWriter{s: s, actor: actor, cameraID: t.cam.ID}}
+	ad := camconfig.FrigateAdapter{
+		Writer:     sectionWriter{s: s, actor: actor, cameraID: t.cam.ID},
+		Local:      localWriter{s: s, actor: actor, cam: t.cam},
+		LocalState: s.LocalAnalyticsSource(actor, t.cam),
+	}
 	if a, err := s.frigateAdapter(ctx, t.srv); err == nil && a != nil {
 		ad.Engine = a
 	} else if err != nil {

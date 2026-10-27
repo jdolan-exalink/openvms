@@ -363,3 +363,49 @@ func TestPatchSectionsMapToTheirPermissions(t *testing.T) {
 		t.Fatalf("sections = %v", got)
 	}
 }
+
+func TestOpenVMSModulePatchNeedsTheAnalyticsSection(t *testing.T) {
+	p, err := parsePatch(map[string]any{"analytics": map[string]any{"modules": map[string]any{
+		"vehicle_color": map[string]any{"enabled": false}, "lpr": map[string]any{"settings": map[string]any{"enhancement": 3}},
+	}}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := strings.Join(p.Sections(), ","); got != "analytics" {
+		t.Fatalf("sections = %s, want only analytics (cameras.config.analytics)", got)
+	}
+	var ve *inventory.ValidationError
+	if _, err := parsePatch(map[string]any{"analytics": map[string]any{"modules": map[string]any{"face_recognition": map[string]any{"settings": map[string]any{"threshold": 0.9}}}}}); !errors.As(err, &ve) {
+		t.Fatalf("a setting Frigate does not have per camera must be a 400, got %v", err)
+	}
+}
+
+func TestGetCameraConfigReportsOpenVMSModules(t *testing.T) {
+	ce := camConfigFixture(fakeFrigate{doc: map[string]any{"lpr": map[string]any{"enabled": true, "enhancement": 2.0}, "face_recognition": map[string]any{"enabled": true}}})
+	_, raw := getCamConfig(t, fakeCamConfigSource{ce: ce})
+	var out struct {
+		Analytics struct {
+			Modules []struct {
+				ID, Engine, Reason string
+				Available          bool
+				Settings           map[string]any
+			}
+		}
+	}
+	if err := json.Unmarshal(raw, &out); err != nil {
+		t.Fatal(err)
+	}
+	seen := map[string]bool{}
+	for _, m := range out.Analytics.Modules {
+		seen[m.ID] = m.Available
+		if !m.Available && m.Reason == "" {
+			t.Fatalf("%s unavailable without reason", m.ID)
+		}
+		if m.ID == "lpr" && m.Settings["enhancement"] != 2.0 {
+			t.Fatalf("lpr settings = %v", m.Settings)
+		}
+	}
+	if !seen["face_detection"] || !seen["lpr"] || seen["similar_search"] {
+		t.Fatalf("availability = %v", seen)
+	}
+}
