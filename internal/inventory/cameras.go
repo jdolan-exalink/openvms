@@ -685,3 +685,79 @@ func (s *Service) UpdateCameraFrigateConfig(ctx context.Context, actor authz.Act
 		Zones:          after.Zones,
 	}, nil
 }
+
+// DeleteCamera removes a camera from OpenVMS without touching its history. The row is kept
+// (soft delete) so events, alarms and exports stay attached, and a tombstone stops the Frigate sync
+// from adding the same remote_name again. retainDays is the camera's recording window, kept for the
+// purge of its history; nil means unknown. configRevisionID is the Frigate config revision that took the
+// camera out of Frigate, kept so a restore can put its block back. It needs servers.manage on the
+// camera's server. This only changes OpenVMS; RemoveCamera also removes the camera from Frigate.
+func (s *Service) DeleteCamera(ctx context.Context, actor authz.Actor, id uuid.UUID, retainDays *int32, configRevisionID *uuid.UUID) error {
+	return s.tx(ctx, actor, func(q *db.Queries, c *access.Checker) error {
+		cam, err := q.GetCamera(ctx, id)
+		if err != nil {
+			return notFoundOr(err)
+		}
+		if err := c.Require(authz.ServersManage, access.Server(cam.TenantID, cam.SiteID, cam.ServerID)); err != nil {
+			return err
+		}
+		n, err := q.SoftDeleteCamera(ctx, db.SoftDeleteCameraParams{ID: id, DeletedBy: &actor.UserID})
+		if err != nil {
+			return err
+		}
+		if n == 0 {
+			return store.ErrNotFound
+		}
+		if err := q.InsertCameraTombstone(ctx, db.InsertCameraTombstoneParams{
+			CameraID: cam.ID, TenantID: cam.TenantID, ServerID: cam.ServerID, RemoteName: cam.RemoteName,
+			RetainDays: retainDays, ConfigRevisionID: configRevisionID, HadFrigateConfig: configRevisionID != nil, DeletedBy: &actor.UserID,
+		}); err != nil {
+			return store.Classify(err)
+		}
+		if _, err := q.ClearCameraViewCells(ctx, id.String()); err != nil {
+			return err
+		}
+		if err := q.RematerializeDynamicGroups(ctx, db.RematerializeDynamicGroupsParams{TenantID: cam.TenantID}); err != nil {
+			return err
+		}
+		return audit(ctx, q, actor, &cam.TenantID, ActionCameraRemoved, "camera", id, map[string]any{
+			"remote_name": cam.RemoteName, "display_name": cam.DisplayName, "server_id": cam.ServerID, "retain_days": retainDays,
+			"config_revision_id": configRevisionID,
+		})
+	})
+}
+
+// RestoreCamera brings a deleted camera back as the same row, so the history it already has joins
+// the recordings that come next. It lifts the tombstone, and is refused with store.ErrConflict when a
+// live camera already has the same remote_name on that server.
+func (s *Service) RestoreCamera(ctx context.Context, actor authz.Actor, id uuid.UUID) (db.GetCameraRow, error) {
+	err := s.tx(ctx, actor, func(q *db.Queries, c *access.Checker) error {
+		cam, err := q.GetDeletedCamera(ctx, id)
+		if err != nil {
+			return notFoundOr(err)
+		}
+		if err := c.Require(authz.ServersManage, access.Server(cam.TenantID, cam.SiteID, cam.ServerID)); err != nil {
+			return err
+		}
+		n, err := q.RestoreCamera(ctx, id)
+		if err != nil {
+			return store.Classify(err)
+		}
+		if n == 0 {
+			return store.ErrNotFound
+		}
+		if _, err := q.DeleteCameraTombstone(ctx, id); err != nil {
+			return err
+		}
+		if err := q.RematerializeDynamicGroups(ctx, db.RematerializeDynamicGroupsParams{TenantID: cam.TenantID}); err != nil {
+			return err
+		}
+		return audit(ctx, q, actor, &cam.TenantID, ActionCameraRestored, "camera", id, map[string]any{
+			"remote_name": cam.RemoteName, "display_name": cam.DisplayName, "server_id": cam.ServerID,
+		})
+	})
+	if err != nil {
+		return db.GetCameraRow{}, err
+	}
+	return s.GetCamera(ctx, actor, id)
+}

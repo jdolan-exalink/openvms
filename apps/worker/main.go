@@ -129,7 +129,10 @@ func run() error {
 		dispatcher.Run(ctx)
 	}()
 	inv := inventory.New(st, sealer, log)
+	inv.Blobs = objects
 	adapters := inventory.NewAdapters(inv)
+	// Deleted cameras keep their history until their recording window passes; this removes it then.
+	go (&inventory.CameraHistoryPurger{Svc: inv, Interval: inventory.DefaultCameraPurgeInterval, Log: log}).Run(ctx)
 	go runCameraZoneSync(ctx, inv, log)
 	go runFaceSync(ctx, &faces.Syncer{Store: st, Blobs: objects, Adapters: adapters, Log: log},
 		&faces.Service{Store: st, Blobs: objects, Log: log}, log)

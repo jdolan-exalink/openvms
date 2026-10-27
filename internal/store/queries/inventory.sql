@@ -132,8 +132,11 @@ WHERE id = @id;
 UPDATE cameras SET site_id = @site_id, updated_at = now() WHERE server_id = @server_id;
 
 -- name: UpsertCamera :one
+-- A tombstoned (server_id, remote_name) is skipped: the statement returns no row, so a camera that
+-- was deleted here is not brought back by the sync while Frigate still lists it.
 INSERT INTO cameras (tenant_id, site_id, server_id, remote_name, display_name, enabled, zones, lpr, live_stream, hq_stream, live_codec, hq_codec)
-VALUES (@tenant_id, @site_id, @server_id, @remote_name, @display_name, @enabled, @zones, @lpr, @live_stream, @hq_stream, @live_codec, @hq_codec)
+SELECT @tenant_id::uuid, @site_id::uuid, @server_id::uuid, @remote_name::text, @display_name::text, @enabled::boolean, @zones::text[], @lpr::boolean, @live_stream::text, @hq_stream::text, @live_codec::text, @hq_codec::text
+WHERE NOT EXISTS (SELECT 1 FROM camera_tombstones t WHERE t.server_id = @server_id::uuid AND t.remote_name = @remote_name::text)
 ON CONFLICT (server_id, remote_name) WHERE deleted_at IS NULL DO UPDATE SET
     zones = excluded.zones,
     lpr = excluded.lpr,
@@ -435,3 +438,108 @@ WHERE id = @id AND deleted_at IS NULL;
 -- Tenants in any state, soft-deleted included: the first-start bootstrap must not
 -- resurrect a tenant an operator removed.
 SELECT count(*) FROM tenants;
+
+-- A deleted camera keeps its row (events, alarms and exports stay attached); it only stops being live.
+-- name: SoftDeleteCamera :execrows
+UPDATE cameras SET deleted_at = now(), deleted_by = @deleted_by, updated_at = now()
+WHERE id = @id AND deleted_at IS NULL;
+
+-- name: GetDeletedCamera :one
+SELECT * FROM cameras WHERE id = @id AND deleted_at IS NOT NULL;
+
+-- name: RestoreCamera :execrows
+UPDATE cameras SET deleted_at = NULL, deleted_by = NULL, missing_since = NULL, updated_at = now()
+WHERE id = @id AND deleted_at IS NOT NULL;
+
+-- name: InsertCameraTombstone :exec
+INSERT INTO camera_tombstones (camera_id, tenant_id, server_id, remote_name, retain_days, config_revision_id, had_frigate_config, deleted_by)
+VALUES (@camera_id, @tenant_id, @server_id, @remote_name, sqlc.narg('retain_days'), sqlc.narg('config_revision_id'), @had_frigate_config, @deleted_by);
+
+-- The Frigate config revision that took a camera out of Frigate, from the audit entry RemoveCamera
+-- writes with it. A retry after a partial failure uses it to recover what the first attempt saved.
+-- name: LastCameraRemovalRevision :one
+SELECT (details->>'revision_id')::uuid AS revision_id FROM audit_log
+WHERE action = 'FRIGATE_CONFIG_RAW_SAVED' AND details->>'reason' = 'camera_removed' AND details->>'camera_id' = @camera_id::text
+ORDER BY id DESC LIMIT 1;
+
+-- name: GetCameraTombstone :one
+SELECT * FROM camera_tombstones WHERE camera_id = @camera_id;
+
+-- name: CountCameraTombstonesNamed :one
+SELECT count(*) FROM camera_tombstones WHERE server_id = @server_id AND remote_name = @remote_name;
+
+-- name: CountLiveCamerasNamed :one
+SELECT count(*) FROM cameras WHERE server_id = @server_id AND remote_name = @remote_name AND deleted_at IS NULL;
+
+-- name: ListDeletedCameras :many
+SELECT c.id, c.server_id, c.remote_name, c.display_name, c.deleted_at, t.retain_days,
+       (t.config_revision_id IS NOT NULL)::boolean AS has_frigate_config
+FROM cameras c JOIN camera_tombstones t ON t.camera_id = c.id
+WHERE c.server_id = @server_id AND c.deleted_at IS NOT NULL
+ORDER BY c.deleted_at DESC;
+
+-- name: DeleteCameraTombstone :execrows
+DELETE FROM camera_tombstones WHERE camera_id = @camera_id;
+
+-- Saved views keep their shape: the cell showing the deleted camera becomes empty.
+-- name: ClearCameraViewCells :execrows
+UPDATE views v SET layout = jsonb_set(v.layout, '{cells}', (
+    SELECT coalesce(jsonb_agg(CASE WHEN cell->>'camera_id' = @camera_id::text THEN 'null'::jsonb ELSE cell END ORDER BY ord), '[]'::jsonb)
+    FROM jsonb_array_elements(v.layout->'cells') WITH ORDINALITY AS t(cell, ord)
+)), updated_at = now()
+WHERE jsonb_typeof(v.layout->'cells') = 'array'
+  AND EXISTS (
+      SELECT 1 FROM jsonb_array_elements(v.layout->'cells') AS c(cell)
+      WHERE cell->>'camera_id' = @camera_id::text);
+
+-- History purge of deleted cameras, once the recording window they had when deleted has passed.
+-- Order matters: alarms reference events and clip jobs reference plate reads without cascading.
+-- Exports and export jobs (evidence people made) and the server-wide face sightings and object
+-- snapshots are kept.
+
+-- name: ListDueCameraPurges :many
+SELECT camera_id FROM camera_tombstones
+WHERE purged_at IS NULL AND retain_days IS NOT NULL
+  AND deleted_at + make_interval(days => retain_days) <= @now::timestamptz
+  AND camera_id <> ALL(@skip::uuid[])
+ORDER BY deleted_at
+LIMIT @batch;
+
+-- Locks the tombstone for the purge; a concurrent restore (which deletes it) or purge makes this return nothing.
+-- name: LockCameraTombstoneForPurge :one
+SELECT * FROM camera_tombstones
+WHERE camera_id = @camera_id AND purged_at IS NULL AND retain_days IS NOT NULL
+  AND deleted_at + make_interval(days => retain_days) <= @now::timestamptz
+FOR UPDATE SKIP LOCKED;
+
+-- name: ListCameraBlobKeys :many
+SELECT k::text FROM (
+    SELECT e.thumb_key AS k FROM events e WHERE e.camera_id = @camera_id
+    UNION ALL SELECT e.preview_key FROM events e WHERE e.camera_id = @camera_id
+    UNION ALL SELECT j.output_key FROM clip_watermark_jobs j WHERE j.camera_id = @camera_id
+) keys WHERE k <> '';
+
+-- name: PurgeCameraClipJobs :execrows
+DELETE FROM clip_watermark_jobs WHERE camera_id = @camera_id;
+
+-- name: PurgeCameraAlarms :execrows
+DELETE FROM alarms WHERE camera_id = @camera_id;
+
+-- name: PurgeCameraLprReads :execrows
+DELETE FROM lpr_reads WHERE camera_id = @camera_id;
+
+-- name: PurgeCameraEvents :execrows
+DELETE FROM events WHERE camera_id = @camera_id;
+
+-- name: PurgeCameraObjectTracks :execrows
+DELETE FROM object_tracks WHERE camera_id = @camera_id;
+
+-- name: PurgeCameraNotifications :execrows
+DELETE FROM notifications WHERE camera_id = @camera_id;
+
+-- name: PurgeCameraRuleFirings :execrows
+DELETE FROM rule_firings WHERE resource_id = @camera_id;
+
+-- name: MarkCameraTombstonePurged :exec
+UPDATE camera_tombstones SET purged_at = now() WHERE camera_id = @camera_id;
+

@@ -1,4 +1,4 @@
-import { useMutation } from "@tanstack/react-query";
+import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { MoreHorizontal } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
 import { api, unwrap } from "@/api/client";
@@ -66,6 +66,34 @@ export function RestartCameraDialog({ cameraId, onClose }: { cameraId: string; o
       pending={restart.isPending}
       error={restart.error}
       onConfirm={() => restart.mutate()}
+      onCancel={onClose}
+    />
+  );
+}
+
+export const DELETE_CAMERA_LABEL = "Eliminar cámara";
+
+/**
+ * Confirmation of a camera delete. The camera leaves OpenVMS and Frigate's config and stops recording;
+ * its events and recordings are not deleted now, and it can be restored from the cameras list.
+ */
+export function DeleteCameraDialog({ cameraId, name, onClose, onDeleted }: { cameraId: string; name: string; onClose: () => void; onDeleted: () => void }) {
+  const qc = useQueryClient();
+  const remove = useMutation({
+    mutationFn: async () => unwrap(await api.DELETE("/api/v1/cameras/{cameraId}", { params: { path: { cameraId } } })),
+    onSuccess: async () => {
+      await qc.invalidateQueries({ queryKey: ["cameras"] });
+      onDeleted();
+    },
+  });
+  return (
+    <ConfirmDialog
+      title={DELETE_CAMERA_LABEL}
+      message={`Se eliminará "${name}" de OpenVMS y de la configuración de Frigate, y dejará de grabar: no habrá grabaciones nuevas. Frigate se reiniciará, así que todas las cámaras de ese servidor dejarán de grabar unos instantes. OpenVMS no borra ahora sus eventos ni las grabaciones existentes: se conservan hasta que pasen sus días de grabación. Podés restaurarla desde la lista de cámaras del servidor.`}
+      confirmLabel="Eliminar"
+      pending={remove.isPending}
+      error={remove.error}
+      onConfirm={() => remove.mutate()}
       onCancel={onClose}
     />
   );

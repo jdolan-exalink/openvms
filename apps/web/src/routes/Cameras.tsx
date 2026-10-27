@@ -7,6 +7,7 @@ import { type CameraFilter, camerasQuery, classifyPolicyQuery, meQuery, serverAg
 import { api, unwrap, ApiError } from "@/api/client";
 import { BodyClassifySwitch } from "@/components/BodyClassifySwitch";
 import { BulkConfigureDialog } from "@/components/camera/bulk/BulkConfigureDialog";
+import { DeletedCameras } from "@/components/camera/DeletedCameras";
 import { can, canCamera } from "@/lib/perm";
 import { Icon } from "@/components/Icon";
 import { Button, Empty, ErrorNote, LinkButton, PageHeader, Select, StatusBadge, Summary, Table, TextInput, Th } from "@/components/ui";
@@ -657,6 +658,7 @@ export function Cameras() {
           ))}
         </Select>
       </div>
+      {filter.server_id && can(me.data, "servers.manage") && <DeletedCameras serverId={filter.server_id} />}
       <ErrorNote error={cameras.error} />
       {cameras.data && <Summary>{summarize(cameras.data)}</Summary>}
       {cameras.data?.length === 0 && <Empty>No hay cámaras que coincidan.</Empty>}

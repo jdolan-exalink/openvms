@@ -639,6 +639,19 @@ func (s *Service) AddCameraToFrigate(ctx context.Context, actor authz.Actor, ser
 	if err != nil {
 		return AddCameraToFrigateResult{}, err
 	}
+	// A deleted camera keeps its history under its name; adding a new one with that name would be
+	// skipped by the sync, so the operator is sent to restore it instead.
+	var tombstoned int64
+	if err := s.tx(ctx, actor, func(q *db.Queries, _ *access.Checker) error {
+		var err error
+		tombstoned, err = q.CountCameraTombstonesNamed(ctx, db.CountCameraTombstonesNamedParams{ServerID: serverID, RemoteName: in.Name})
+		return err
+	}); err != nil {
+		return AddCameraToFrigateResult{}, err
+	}
+	if tombstoned > 0 {
+		return AddCameraToFrigateResult{}, invalid("camera %q was deleted: restore it to keep its history instead of adding it again", in.Name)
+	}
 	a, err := s.frigateAdapter(ctx, srv)
 	if err != nil {
 		return AddCameraToFrigateResult{}, err

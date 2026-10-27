@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/google/uuid"
+	"github.com/jackc/pgx/v5"
 
 	"github.com/jdolan-exalink/openvms/internal/access"
 	"github.com/jdolan-exalink/openvms/internal/authz"
@@ -282,7 +283,7 @@ func (s *Service) CreateServer(ctx context.Context, actor authz.Actor, in Create
 		imported := 0
 		if in.ImportCameras {
 			for _, cam := range found.Cameras {
-				if _, err := upsertCamera(ctx, q, site.TenantID, site.ID, id, cam); err != nil {
+				if _, _, err := upsertCamera(ctx, q, site.TenantID, site.ID, id, cam); err != nil {
 					return err
 				}
 				imported++
@@ -298,22 +299,26 @@ func (s *Service) CreateServer(ctx context.Context, actor authz.Actor, in Create
 	return s.GetServer(ctx, actor, id)
 }
 
-func upsertCamera(ctx context.Context, q *db.Queries, tenantID, siteID, serverID uuid.UUID, cam frigate.Camera) (bool, error) {
+// upsertCamera reports whether the camera row was inserted, or skipped because it is tombstoned.
+func upsertCamera(ctx context.Context, q *db.Queries, tenantID, siteID, serverID uuid.UUID, cam frigate.Camera) (inserted, skipped bool, err error) {
 	if cam.Zones == nil {
 		// The synthesized birdseye camera has no zones; cameras.zones is NOT NULL.
 		cam.Zones = []string{}
 	}
-	inserted, err := q.UpsertCamera(ctx, db.UpsertCameraParams{
+	inserted, err = q.UpsertCamera(ctx, db.UpsertCameraParams{
 		TenantID: tenantID, SiteID: siteID, ServerID: serverID,
 		RemoteName: cam.Name, DisplayName: displayName(cam.Name), Enabled: cam.Enabled,
 		Zones: cam.Zones, Lpr: cam.LPR, LiveStream: cam.LiveStream, HqStream: cam.HQStream,
 		LiveCodec: cam.LiveCodec, HqCodec: cam.HQCodec,
 	})
+	if errors.Is(err, pgx.ErrNoRows) {
+		return false, true, nil
+	}
 	if err != nil || !inserted {
-		return inserted, err
+		return inserted, false, err
 	}
 	// A new camera may match dynamic camera groups.
-	return true, q.RematerializeDynamicGroups(ctx, db.RematerializeDynamicGroupsParams{TenantID: tenantID})
+	return true, false, q.RematerializeDynamicGroups(ctx, db.RematerializeDynamicGroupsParams{TenantID: tenantID})
 }
 
 // displayName turns "acceso_norte" into "Acceso norte" as a starting label,
@@ -586,6 +591,8 @@ type SyncResult struct {
 	Added   int
 	Updated int
 	Missing int
+	// Skipped counts cameras Frigate still lists that were deleted here and are tombstoned.
+	Skipped int
 }
 
 // SyncServer rediscovers version, capabilities and cameras. Cameras that disappeared
@@ -622,9 +629,13 @@ func (s *Service) SyncServer(ctx context.Context, actor authz.Actor, id uuid.UUI
 		}
 		present := make([]string, 0, len(found.Cameras))
 		for _, cam := range found.Cameras {
-			inserted, err := upsertCamera(ctx, q, srv.TenantID, srv.SiteID, id, cam)
+			inserted, skipped, err := upsertCamera(ctx, q, srv.TenantID, srv.SiteID, id, cam)
 			if err != nil {
 				return err
+			}
+			if skipped {
+				res.Skipped++
+				continue
 			}
 			if inserted {
 				res.Added++
@@ -639,7 +650,7 @@ func (s *Service) SyncServer(ctx context.Context, actor authz.Actor, id uuid.UUI
 		}
 		res.Missing = int(missing)
 		return audit(ctx, q, actor, &srv.TenantID, ActionServerSynced, "server", id, map[string]any{
-			"frigate_version": found.Version, "added": res.Added, "missing": res.Missing,
+			"frigate_version": found.Version, "added": res.Added, "missing": res.Missing, "skipped": res.Skipped,
 		})
 	})
 	if err != nil {

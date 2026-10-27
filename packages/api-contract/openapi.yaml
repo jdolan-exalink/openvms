@@ -629,6 +629,29 @@ paths:
         "401": { $ref: "#/components/responses/Unauthorized" }
         "403": { $ref: "#/components/responses/Forbidden" }
         "404": { $ref: "#/components/responses/NotFound" }
+  /api/v1/servers/{serverId}/deleted-cameras:
+    parameters:
+      - { name: serverId, in: path, required: true, schema: { type: string, format: uuid } }
+    get:
+      tags: [servers]
+      operationId: listDeletedCameras
+      summary: List the server's deleted cameras that can still be restored
+      description: Requires servers.manage on the server.
+      responses:
+        "200":
+          description: Deleted cameras, newest first
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [items]
+                properties:
+                  items:
+                    type: array
+                    items: { $ref: "#/components/schemas/DeletedCamera" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { $ref: "#/components/responses/NotFound" }
   /api/v1/servers/{serverId}/sync:
     parameters:
       - { name: serverId, in: path, required: true, schema: { type: string, format: uuid } }
@@ -1209,6 +1232,52 @@ paths:
         "401": { $ref: "#/components/responses/Unauthorized" }
         "403": { $ref: "#/components/responses/Forbidden" }
         "404": { $ref: "#/components/responses/NotFound" }
+    delete:
+      tags: [cameras]
+      operationId: deleteCamera
+      summary: Delete a camera from OpenVMS and from Frigate, keeping its history
+      description: >-
+        Removes the camera's block from the server's Frigate config.yml (Frigate restarts, so every
+        camera on that server stops recording for a moment and this camera stops recording for good),
+        then soft-deletes it in OpenVMS and leaves a tombstone so the Frigate sync does not bring it
+        back. Recordings and events are kept, in Frigate and in OpenVMS, until their recording days
+        pass. Frigate is changed first: if it cannot be changed (400 when it rejects the config, 502
+        when it is unreachable) nothing changes in OpenVMS. A camera that is already absent from the
+        Frigate config is still deleted. Requires servers.manage on the camera's server; the caller
+        needs neither servers.config nor servers.config.secrets and never receives config content.
+        Never touches the physical device.
+      responses:
+        "204": { description: Deleted }
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { $ref: "#/components/responses/NotFound" }
+        "502": { $ref: "#/components/responses/FrigateUnreachable" }
+  /api/v1/cameras/{cameraId}/restore:
+    parameters:
+      - { name: cameraId, in: path, required: true, schema: { type: string, format: uuid } }
+    post:
+      tags: [cameras]
+      operationId: restoreCamera
+      summary: Restore a deleted camera with its history
+      description: >-
+        Puts the camera's block back into the server's Frigate config.yml (Frigate restarts), lifts the
+        tombstone and returns the same camera row, so the history it already has joins the recordings
+        that come next. 409 when a live camera already has the same name on that server; nothing is
+        changed in Frigate in that case. 400 when the camera's Frigate block was not kept. Requires
+        servers.manage on the camera's server.
+      responses:
+        "200":
+          description: Restored
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Camera" }
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { $ref: "#/components/responses/NotFound" }
+        "409": { $ref: "#/components/responses/Conflict" }
+        "502": { $ref: "#/components/responses/FrigateUnreachable" }
   /api/v1/cameras/{cameraId}/config:
     parameters:
       - { name: cameraId, in: path, required: true, schema: { type: string, format: uuid } }
@@ -6609,6 +6678,22 @@ components:
         architecture: { type: string, maxLength: 32 }
         version: { type: string, maxLength: 256, description: "Go binary release label; omitted when development or unavailable." }
         commit: { type: string, maxLength: 256, description: "Go VCS revision embedded in these exact binary bytes, when available." }
+    DeletedCamera:
+      type: object
+      required: [id, server_id, remote_name, display_name, deleted_at, retain_days, has_frigate_config]
+      properties:
+        id: { type: string, format: uuid }
+        server_id: { type: string, format: uuid }
+        remote_name: { type: string }
+        display_name: { type: string }
+        deleted_at: { type: string, format: date-time }
+        retain_days:
+          type: integer
+          nullable: true
+          description: The camera's recording window when it was deleted; null when its config did not state one.
+        has_frigate_config:
+          type: boolean
+          description: True when the camera's Frigate block was kept, so restoring can put it back.
     Camera:
       type: object
       required: [id, tenant_id, site_id, server_id, remote_name, display_name, enabled, zones, lpr, status, group_ids, folder_id, sort_order, default_live_quality, description, location, tags, created_at, updated_at]
