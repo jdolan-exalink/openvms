@@ -46,4 +46,4 @@ The local OpenVMS admin is getting locked before a successful login. The identit
 - Work-unit commit: `4630e64` (`feat(auth): make login lockout configurable`).
 
 ## Next step
-Parent orchestrator performs the native review; deployment activation remains a separate operator action.
+Native review remains pending: the local review tool requested the exact `gentle-ai.review-intended-untracked-selection/v1` payload to exclude the pre-existing untracked `data/`, but the installed tool/docs do not expose its schema. Do not guess or inspect `data/`; resume review only when the exact provider schema is available. Deployment activation remains a separate operator action.

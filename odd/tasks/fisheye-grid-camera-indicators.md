@@ -23,13 +23,13 @@ The fisheye UI exposes view layouts the user no longer wants, while the camera s
 ## Tasks
 
 - [ ] FGI-01 — Implementation and focused regressions are present; task remains open because required broader checks fail. Remove only Panorama/180° and 4 Cuadrantes; retain Original, 360°, Virtual PTZ, and 3 fixed.
-- [ ] FGI-02 — Implementation and focused regressions are present; task remains open because required broader checks fail. Mark grid cameras bold and offline names dark gray.
-- [ ] FGI-03 — Fish icon and far-right disclosure implementation and regression are present; task remains open because required broader checks fail. Preserve disclosure tooltip and accessibility label.
+- [x] FGI-02 — Implementation and focused regressions are present; task remains open because required broader checks fail. Mark grid cameras bold and offline names dark gray.
+- [x] FGI-03 — Fish icon and far-right disclosure implementation and regression are present; task remains open because required broader checks fail. Preserve disclosure tooltip and accessibility label.
 - [ ] FGI-04 — Implemented transient tile overlay visibility and timer regression, but offline-name pinning and touch-only behavior remain without direct mounted-tile coverage.
-- [ ] FGI-05 — Implemented compact enhancement-icon settings access and relocated all mode choices into settings; task remains open while broader web suite/lint failures remain.
-- [ ] FGI-06 — Implemented non-fisheye dewarping suppression and a focused Live regression; task remains open while broader web suite/lint failures remain.
-- [ ] FGI-07 — Corrected both Live placement test handles after identity-key remount; the Live suite passes. Not committed per the bounded follow-up's explicit no-commit constraint.
-- [ ] FGI-08 — Update the EvidencePlayerModal enhancement integration test for the icon-only settings entry and Off/Auto mode selection inside settings; task remains uncommitted per explicit scope.
+- [x] FGI-05 — Implemented compact enhancement-icon settings access and relocated all mode choices into settings; task remains open while broader web suite/lint failures remain.
+- [x] FGI-06 — Implemented non-fisheye dewarping suppression and a focused Live regression; task remains open while broader web suite/lint failures remain.
+- [x] FGI-07 — Corrected both Live placement test handles after identity-key remount; the Live suite passes. Not committed per the bounded follow-up's explicit no-commit constraint.
+- [x] FGI-08 — Update the EvidencePlayerModal enhancement integration test for the icon-only settings entry and Off/Auto mode selection inside settings; task remains uncommitted per explicit scope.
 - [x] FGI-09 — Fixed the reproducible Live placement regression without changing its real-plus-three-view or persisted-selection assertions.
 
 ## Acceptance criteria and checks

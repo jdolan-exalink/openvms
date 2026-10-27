@@ -27,13 +27,13 @@ Assumptions (not asked by the user; confirm or drop):
 - [x] T2 (S2, A2) Persist the list of degraded reasons and show it in the server summary. Route: inline.
 - [x] T3 (S3) Show only the LAN and CCTV interfaces using the agent's `role`. Route: inline.
 - [x] T4a (S4, A1) "Actualizar agente" updates through the agent's own HTTP update (`updateServerAgent`), the SSH update dialog is gone. Route: delegated writer (context backstop), parent spot check.
-- [ ] T4b (S4) Row actions reduced to update agent, uninstall agent, edit server (backup arrives with T5); install, connect agent, restart, sync, configure Frigate and delete move into the edit-server panel (user chose option 1). Route: inline.
+- [x] T4b (S4) Row actions reduced to update agent, uninstall agent, edit server (backup arrives with T5); install, connect agent, restart, sync, configure Frigate and delete move into the edit-server panel (user chose option 1). Route: inline.
 - [x] T5 (S4) Backup of agent and Frigate configuration. Route: inline. Needs scope decision.
 - [x] T6 (S5) Edit server as one detail panel. Route: inline.
-- [ ] T6 (S5) Edit server as one detail panel. Route: inline.
+- [x] T6 (S5) Edit server as one detail panel. Route: inline.
 - [x] T4b (S4) Row actions reduced to update agent, uninstall agent, edit server (backup arrives with T5); install, connect agent, restart, sync, configure Frigate and delete move into the edit-server panel (user chose option 1). Route: inline.
-- [ ] T5 (S6, A4) Agent stores the original Frigate config on the host and OpenVMS asks for it at registration/connection. Route: inline.
-- [ ] T6 (S7, A5, A6) Uninstall dialog asks keep or restore the original configuration; restoring pushes it to Frigate; the backup can be left on the host. Route: inline.
+- [x] T5 (S6, A4) Agent stores the original Frigate config on the host and OpenVMS asks for it at registration/connection. Route: inline.
+- [x] T6 (S7, A5, A6) Uninstall dialog asks keep or restore the original configuration; restoring pushes it to Frigate; the backup can be left on the host. Route: inline.
 - [x] T7 (S5) Edit server as one detail panel. Route: inline.
 - [ ] T8 (S8) New agent version (0.5.0), release, and a field test checklist: update, delete, server recovery and the new modes on real hosts. Route: inline.
 - [ ] T9 (S9, A7) Camera editor as a popup per camera, with an embedded view of the camera web page for settings ONVIF cannot change. Route: spike first, then inline.
