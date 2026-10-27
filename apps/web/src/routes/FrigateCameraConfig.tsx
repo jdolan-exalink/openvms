@@ -30,7 +30,7 @@ import { IntegrationsTab } from "@/components/camera/integrations/IntegrationsTa
 import { CameraTabs } from "@/components/camera/CameraTabs";
 import { VideoTab } from "@/components/camera/video/VideoTab";
 import { CameraWebView } from "@/components/camera/CameraWebView";
-import { MoreActions, RESTART_CAMERA_LABEL, RestartCameraDialog } from "@/components/camera/MoreActions";
+import { DELETE_CAMERA_LABEL, DeleteCameraDialog, MoreActions, RESTART_CAMERA_LABEL, RestartCameraDialog } from "@/components/camera/MoreActions";
 import { PendingChangesBar } from "@/components/camera/PendingChangesBar";
 import { capabilityList, deviceRows, NONE, statusChips, videoRows } from "@/components/camera/summary";
 import { LprTestCard } from "@/components/provision/LprTestCard";
@@ -43,7 +43,7 @@ import { isProvisionCamera, ProvisionLprSection } from "@/components/provision/P
 import { Icon } from "@/components/Icon";
 import { useT } from "@/i18n";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { useParams } from "@tanstack/react-router";
+import { useNavigate, useParams } from "@tanstack/react-router";
 import { type FormEvent, useMemo, useState } from "react";
 import { api, type Schemas, unwrap } from "@/api/client";
 import { cameraFrigateDocQuery, cameraQuery, cameraZonesQuery, camerasQuery, classifyPolicyQuery, frigateSchemaQuery, meQuery, serversQuery } from "@/api/queries";
@@ -160,7 +160,11 @@ function FrigateCameraConfigScreen({ cameraId }: { cameraId: string }) {
   const canOpenCameraWeb = canCamera(me.data, "cameras.web.access");
   const canRestart = can(me.data, "servers.restart");
   const canRestartCamera = canCamera(me.data, "cameras.restart");
+  // Deleting edits the server's Frigate config on the caller's behalf: the API asks for servers.manage only.
+  const canDeleteCamera = can(me.data, "servers.manage");
   const [restartingCamera, setRestartingCamera] = useState(false);
+  const [deletingCamera, setDeletingCamera] = useState(false);
+  const navigate = useNavigate();
   const secretsVisible = !!doc.data?.secrets_visible;
   const needsRestart = serverId ? (restartPending[serverId] ?? loadRestart(serverId)) : false;
   const setNeedsRestart = (on: boolean) => {
@@ -461,9 +465,13 @@ function FrigateCameraConfigScreen({ cameraId }: { cameraId: string }) {
                 { id: "onvif", label: "Capacidades ONVIF", onSelect: () => setActive(ONVIF_INFO) },
                 { id: "history", label: "Historial de cambios", onSelect: () => setActive(HISTORY) },
                 ...(canRestartCamera ? [{ id: "restart", label: RESTART_CAMERA_LABEL, onSelect: () => setRestartingCamera(true) }] : []),
+                ...(canDeleteCamera ? [{ id: "delete", label: DELETE_CAMERA_LABEL, onSelect: () => setDeletingCamera(true) }] : []),
               ]}
             />
             {restartingCamera && <RestartCameraDialog cameraId={cameraId} onClose={() => setRestartingCamera(false)} />}
+            {deletingCamera && (
+              <DeleteCameraDialog cameraId={cameraId} name={doc.data.camera_name} onClose={() => setDeletingCamera(false)} onDeleted={() => void navigate({ to: "/cameras" })} />
+            )}
           </>
         }
       />
