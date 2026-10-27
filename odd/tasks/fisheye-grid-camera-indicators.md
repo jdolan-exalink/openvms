@@ -2,7 +2,7 @@
 
 ## Objective
 
-Reduce live-camera UI clutter while retaining the requested fisheye choices and surfacing camera state. Remove only Panorama/180° and 4 Cuadrantes, retain Original, 360°, Virtual PTZ, and 3 fixed views; make sidebar and per-tile controls/names reflect camera placement, hover, and offline status.
+Reduce live-camera UI clutter while retaining the requested fisheye choices and surfacing camera state. Remove only the single-view Panorama/180° and 4 Cuadrantes; retain Original, 360°, 2×180° (added later in b061416 and kept by owner decision), Virtual PTZ, and 3 fixed views; make sidebar and per-tile controls/names reflect camera placement, hover, and offline status.
 
 ## Problem and rationale
 
@@ -22,7 +22,7 @@ The fisheye UI exposes view layouts the user no longer wants, while the camera s
 
 ## Tasks
 
-- [ ] FGI-01 — Implementation and focused regressions are present; task remains open because required broader checks fail. Remove only Panorama/180° and 4 Cuadrantes; retain Original, 360°, Virtual PTZ, and 3 fixed.
+- [x] FGI-01 — Remove only the single-view Panorama/180° and 4 Cuadrantes; retain Original, 360°, 2×180° (owner decision: keep the mode added in b061416), Virtual PTZ, and 3 fixed. Stale "4 Cuadrantes" empty-state hint removed.
 - [x] FGI-02 — Implementation and focused regressions are present; task remains open because required broader checks fail. Mark grid cameras bold and offline names dark gray.
 - [x] FGI-03 — Fish icon and far-right disclosure implementation and regression are present; task remains open because required broader checks fail. Preserve disclosure tooltip and accessibility label.
 - [x] FGI-04 — Transient tile overlay visibility (3 s), offline-name pinning and touch-only reveal are covered by mounted-tile tests in `apps/web/src/routes/Live.test.tsx` ("Live tile overlay"); each was checked to fail when its behavior is removed.
@@ -34,7 +34,7 @@ The fisheye UI exposes view layouts the user no longer wants, while the camera s
 
 ## Acceptance criteria and checks
 
-- Neither Panorama/180° nor 4 Cuadrantes is offered by fisheye settings or viewer UI; Original, 360°, Virtual PTZ, and 3 fixed remain offered.
+- Neither the single-view Panorama/180° nor 4 Cuadrantes is offered by fisheye settings or viewer UI; Original, 360°, 2×180°, Virtual PTZ, and 3 fixed remain offered.
 - Camera names in the live sidebar are bold exactly when represented in the current grid, including virtual-view tiles; offline names use a dark-gray text token/class.
 - Fisheye cameras use a fish icon in the camera icon position; the virtual-view disclosure is the far-right control and retains its tooltip, aria-label, and expanded state.
 - In a multi-camera grid only the hovered/focused tile exposes controls; inactive controls and connected-camera names hide after 3 seconds. Offline camera names remain visible; touch reveal is limited to the tapped tile and times out.
