@@ -27,6 +27,9 @@ type ConfigApplyInput struct {
 	ExpectedRevision int64
 	// Origin says where the change comes from (camconfig.Origin*); empty means the UI.
 	Origin string
+	// RollbackOf is the audit id of the change this apply undoes; 0 for an ordinary change. It
+	// is recorded in the audit detail so the history can tell a rollback from an edit.
+	RollbackOf int64
 }
 
 // ConfigApplyResult is the outcome of one apply.
@@ -314,13 +317,20 @@ func (s *Service) ApplyCameraConfigWith(ctx context.Context, actor authz.Actor, 
 		if err != nil {
 			return err
 		}
-		return audit(ctx, q, actor, &t.cam.TenantID, ActionCameraConfigChanged, "camera", t.cam.ID, map[string]any{
+		details := map[string]any{
 			"camera_id": t.cam.ID, "camera_name": t.cam.RemoteName, "server_id": t.srv.ID,
 			"origin": origin, "result": out.Result, "error": out.LastError, "sync_state": out.SyncState,
 			"expected_revision": in.ExpectedRevision, "desired_revision": rec.DesiredRevision,
 			"previous_values": changeValues(review.Changes, true), "new_values": changeValues(review.Changes, false),
 			"patch": patch,
-		})
+		}
+		if in.RollbackOf != 0 {
+			details["rollback_of"] = in.RollbackOf
+		}
+		if out.Plain.Message != "" {
+			details["error_plain"] = out.Plain
+		}
+		return audit(ctx, q, actor, &t.cam.TenantID, ActionCameraConfigChanged, "camera", t.cam.ID, details)
 	})
 	if err != nil {
 		return ConfigApplyResult{}, fmt.Errorf("camera config: recording the outcome: %w", err)

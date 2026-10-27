@@ -13,8 +13,12 @@ import {
   TriangleAlert,
 } from "lucide-react";
 import { CameraEnabledSwitch, CameraTypeSelect } from "@/components/camera/CameraTopControls";
+import { AdvancedTab } from "@/components/camera/advanced/AdvancedTab";
+import { RollbackOffer } from "@/components/camera/advanced/rollback";
+import { EditYamlLink, YamlEntryProvider } from "@/components/camera/advanced/YamlEntry";
 import { DetectionTab } from "@/components/camera/detection/DetectionTab";
 import { CameraChangeProvider, useCameraChange } from "@/components/camera/CameraChangeProvider";
+import { ProfileCard } from "@/components/camera/profile/ProfileCard";
 import { CameraHeader } from "@/components/camera/CameraHeader";
 import { SyncStatusPanel } from "@/components/camera/SyncStatusPanel";
 import { CameraPreview } from "@/components/camera/CameraPreview";
@@ -59,8 +63,9 @@ import {
 import { pickerLabels } from "@/lib/labelEmoji";
 import { loadRestart, saveRestart } from "@/lib/frigateRestart";
 import { can, canCamera } from "@/lib/perm";
+import { plainErrorOf } from "@/lib/plainError";
 import {
-  ANALYTICS_MODULES, analyticsTabVisible, buildCameraTabs, CAMERA_WEB, type CameraTabId, FISHEYE, GENERAL, HISTORY, INTEGRATIONS_STATUS, isFisheyeTagged, ONVIF_INFO, PROVISION, PTZ_CONTROL, tabOfSection,
+  ADVANCED_PANELS, ANALYTICS_MODULES, analyticsTabVisible, buildCameraTabs, CAMERA_WEB, type CameraTabId, FISHEYE, GENERAL, HISTORY, INTEGRATIONS_STATUS, isFisheyeTagged, ONVIF_INFO, PROVISION, PTZ_CONTROL, tabOfSection,
 } from "@/lib/cameraTabs";
 import { persistedToEditorValue, planManagedZoneChanges, splitFrigateZones, zoneSyncStates, type ZoneChangePlan } from "@/lib/cameraZones";
 
@@ -85,6 +90,7 @@ const SECTION_TITLES: Record<string, string> = {
   [PTZ_CONTROL]: "Control PTZ",
   [FISHEYE]: "Fisheye / 360°",
   [HISTORY]: "Historial",
+  [ADVANCED_PANELS]: "Paneles por motor",
 };
 const sectionTitle = (s: string) => SECTION_TITLES[s] ?? sectionLabel(s);
 
@@ -131,6 +137,7 @@ function FrigateCameraConfigScreen({ cameraId }: { cameraId: string }) {
   const [bulkResults, setBulkResults] = useState<Array<{ id: string; name: string; error?: string }>>([]);
   const [results, setResults] = useState<SectionResult[]>([]);
   const [zoneEditor, setZoneEditor] = useState(false);
+  const [yamlRequest, setYamlRequest] = useState<{ section: string }>();
   const canManageCameras = can(me.data, "cameras.manage");
   // Persisted zones are the source of truth for OpenVMS-owned zones; without the permission (or the
   // list) the editor falls back to editing the Frigate config directly.
@@ -338,6 +345,7 @@ function FrigateCameraConfigScreen({ cameraId }: { cameraId: string }) {
   const canManageCamera = can(me.data, "cameras.manage");
   const canPtz = canCamera(me.data, "cameras.config.ptz");
   const canEditVideo = canCamera(me.data, "cameras.config.video");
+  const canYaml = canCamera(me.data, "cameras.config.yaml");
   const provision = !!cam && (isProvisionCamera(cam) || !!cam.tags?.includes("provision"));
   const general: GeneralFrigate = { root, camProps, config, doc: doc.data, ctx, valueOf, setSection };
   const knowsLpr = knowsSection(general, "lpr");
@@ -403,8 +411,11 @@ function FrigateCameraConfigScreen({ cameraId }: { cameraId: string }) {
   const openBulk = () => { setBulkTargets([cameraId]); setBulkResults([]); bulkApply.reset(); setBulkReviewing(true); };
   const discard = () => { setEdits({}); apply.reset(); change.discard(); };
   const canSave = !readOnly && dirty.length > 0 && errorCount === 0;
+  // Contextual entry points ("Editar YAML de detección") land in Avanzado with the section preselected.
+  const openYaml = (sec: string) => { setYamlRequest({ section: sec }); setActive(ADVANCED_PANELS); };
 
   return (
+    <YamlEntryProvider openYaml={canYaml ? openYaml : undefined}>
     <div className="mx-auto flex max-w-7xl flex-col gap-5">
       {needsRestart && (
         <RestartBanner serverId={doc.data.server_id} canRestart={canRestart} onDone={() => setNeedsRestart(false)} />
@@ -444,7 +455,7 @@ function FrigateCameraConfigScreen({ cameraId }: { cameraId: string }) {
       />
 
       {change.config.data && (
-        <SyncStatusPanel state={change.config.data.state} busy={change.apply.isPending} applyError={change.apply.error?.message} onUseDesired={(patch) => change.apply.mutate(patch)} />
+        <SyncStatusPanel state={change.config.data.state} busy={change.apply.isPending} applyError={change.apply.error?.message} plainError={plainErrorOf(change.apply.data)} offer={canCamera(me.data, "cameras.config.edit") ? <RollbackOffer cameraId={cameraId} /> : undefined} onUseDesired={(patch) => change.apply.mutate(patch)} />
       )}
 
       <div className="flex flex-col gap-3 lg:flex-row lg:items-stretch">
@@ -474,6 +485,8 @@ function FrigateCameraConfigScreen({ cameraId }: { cameraId: string }) {
         aria-label={section === CAMERA_WEB ? "Acceso web a la cámara" : sectionTitle(section)}
         className="flex min-w-0 flex-1 flex-col gap-5 rounded-m3-2xl bg-surface-1 p-5 border border-outline-variant/60 shadow-sm"
       >
+        {tab.id === "record" && <EditYamlLink section="record" label="Editar YAML de grabación" />}
+        {tab.id === "analytics" && (section === "lpr" || section === "face_recognition") && <EditYamlLink section={section} label={section === "lpr" ? "Editar YAML de LPR" : "Editar YAML de reconocimiento facial"} />}
         {tab.id === "analytics" && cameraType === "lpr_frigate" && section !== PROVISION && section !== ANALYTICS_MODULES && <LprTestCard cameraId={cameraId} engine="frigate" />}
         {tab.id === "video" ? (
           <VideoTab
@@ -539,6 +552,15 @@ function FrigateCameraConfigScreen({ cameraId }: { cameraId: string }) {
           <PtzTab cameraId={cameraId} canManage={canPtz} />
         ) : section === ONVIF_INFO || section === PTZ_CONTROL ? (
           <CameraOnvifPanel cameraId={cameraId} camera={cam} canManage={canManageCamera} onApplyToFrigate={onApplyToFrigate} />
+        ) : section === ADVANCED_PANELS ? (
+          <AdvancedTab
+            cameraId={cameraId}
+            engine={provision ? "provision" : "frigate"}
+            yamlRequest={yamlRequest}
+            canAdvanced={canCamera(me.data, "cameras.config.advanced")}
+            canYaml={canYaml}
+            canRollback={canCamera(me.data, "cameras.config.edit")}
+          />
         ) : section === HISTORY ? (
           <FrigateHistory
             serverId={doc.data.server_id}
@@ -646,6 +668,7 @@ function FrigateCameraConfigScreen({ cameraId }: { cameraId: string }) {
         </Modal>
       )}
     </div>
+    </YamlEntryProvider>
   );
 }
 
@@ -706,6 +729,8 @@ function CameraGeneral({
         canManage={canManage}
         onStageLpr={stage("lpr") ? (next) => frigate.setSection("lpr", setIn(frigate.valueOf("lpr"), ["enabled"], next)) : undefined}
       />
+
+      <ProfileCard cameraId={cameraId} />
 
       <FrigateGeneralFields f={frigate} />
 

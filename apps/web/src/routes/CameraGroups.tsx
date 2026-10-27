@@ -8,7 +8,8 @@ import { ConfirmDialog } from "@/components/ConfirmDialog";
 import { Modal } from "@/components/Modal";
 import { Icon } from "@/components/Icon";
 import { Button, Checkbox, Empty, ErrorNote, Field, LinkButton, PageHeader, Select, Summary, Table, TextInput, Th } from "@/components/ui";
-import { can } from "@/lib/perm";
+import { BulkConfigureDialog } from "@/components/camera/bulk/BulkConfigureDialog";
+import { can, canCamera } from "@/lib/perm";
 
 /** Camera groups allow grouping cameras for permissions and view layouts. */
 export function CameraGroups() {
@@ -19,6 +20,7 @@ export function CameraGroups() {
   const cameras = useQuery(camerasQuery({}));
   const [editing, setEditing] = useState<Schemas["CameraGroup"] | "new" | null>(null);
   const [q, setQ] = useState("");
+  const [configuring, setConfiguring] = useState<Schemas["CameraGroup"] | null>(null);
   const manage = can(me.data, "cameras.manage");
 
   const needle = q.trim().toLowerCase();
@@ -39,6 +41,7 @@ export function CameraGroups() {
           ) : null
         }
       />
+      {configuring && <BulkConfigureDialog target={{ groupId: configuring.id }} targetLabel={configuring.name} onClose={() => setConfiguring(null)} />}
       {editing && (
         <CameraGroupForm
           group={editing === "new" ? undefined : editing}
@@ -90,6 +93,11 @@ export function CameraGroups() {
                     <LinkButton size="sm" to="/permissions" search={{ subject: `camera_group:${g.id}` }} className="mr-2">
                       <Icon icon={KeyRound} size="xs" /> Permisos
                     </LinkButton>
+                  )}
+                  {canCamera(me.data, "cameras.config.edit") && g.member_count_total > 0 && (
+                    <Button size="sm" className="mr-2" aria-label={`Configurar cámaras de ${g.name}`} onClick={() => setConfiguring(g)}>
+                      Configurar cámaras
+                    </Button>
                   )}
                   {manage && (
                     <Button size="sm" aria-label={`Editar ${g.name}`} onClick={() => setEditing(g)}>

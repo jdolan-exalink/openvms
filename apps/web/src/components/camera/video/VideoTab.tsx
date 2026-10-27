@@ -1,6 +1,7 @@
 import { useQuery } from "@tanstack/react-query";
 import type { ReactNode } from "react";
 import { cameraVideoOptionsQuery } from "@/api/queries";
+import { EditYamlLink } from "@/components/camera/advanced/YamlEntry";
 import { Button } from "@/components/ui";
 import { useCameraChange } from "../CameraChangeProvider";
 import { AudioSection } from "./AudioSection";
@@ -53,6 +54,7 @@ export function VideoTab({ cameraId, legacy, readOnlyReason }: { cameraId: strin
           key={r.role}
           title={r.title}
           purpose={r.purpose}
+          provenance={["resolution", "fps", "codec", "bitrate_kbps", "gop"].map((f) => `streams.${r.role}.${f}`)}
           summary={streamSummary({ ...r.modelStream, codec: r.current.codec, width: r.current.resolution?.width, height: r.current.resolution?.height, fps: r.current.fps })}
         >
           <fieldset disabled={!!readOnlyReason} className="contents">
@@ -87,7 +89,10 @@ export function VideoTab({ cameraId, legacy, readOnlyReason }: { cameraId: strin
       {legacy && (
         <details className="rounded-m3-lg border border-outline-variant/50 bg-surface-2 p-3">
           <summary className="cursor-pointer text-sm font-semibold">Avanzado de video (Frigate)</summary>
-          <div className="mt-4 flex flex-col gap-5">{legacy}</div>
+          <div className="mt-4 flex flex-col gap-5">
+            <EditYamlLink section="ffmpeg" label="Editar YAML de video" />
+            {legacy}
+          </div>
         </details>
       )}
     </div>

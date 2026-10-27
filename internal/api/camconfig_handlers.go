@@ -218,11 +218,8 @@ func (h *Handlers) ApplyCameraConfig(ctx context.Context, r gen.ApplyCameraConfi
 	if err != nil {
 		return nil, err
 	}
-	out := gen.CameraConfigApplyResult{Result: gen.CameraConfigApplyResultResult(res.Outcome.Result)}
-	if out.State, err = toGen[gen.CameraConfigState](res.State); err != nil {
-		return nil, err
-	}
-	if out.Review, err = toGen[gen.CameraConfigReview](res.Review); err != nil {
+	out, err := applyResultGen(res)
+	if err != nil {
 		return nil, err
 	}
 	return gen.ApplyCameraConfig200JSONResponse(out), nil

@@ -44,6 +44,13 @@ describe("SyncStatusPanel", () => {
     render(<SyncStatusPanel state={{ ...base, sync_state: "error", last_error: "ffmpeg boom" }} onUseDesired={vi.fn()} />);
     expect(screen.queryByText("ffmpeg boom")).not.toBeVisible();
   });
+
+  it("shows the plain message, keeps the technical text collapsed and renders the rollback offer", () => {
+    render(<SyncStatusPanel state={{ ...base, sync_state: "error", last_error: "ffmpeg exited with code 1" }} plainError={{ message: "No se pudo iniciar el stream de grabación.", technical: "ffmpeg exited with code 1" }} offer={<button type="button">Restaurar configuración anterior</button>} onUseDesired={vi.fn()} />);
+    expect(screen.getByText("No se pudo iniciar el stream de grabación.")).toBeInTheDocument();
+    expect(screen.getByText("ffmpeg exited with code 1")).not.toBeVisible();
+    expect(screen.getByRole("button", { name: "Restaurar configuración anterior" })).toBeInTheDocument();
+  });
 });
 
 describe("patch helpers", () => {

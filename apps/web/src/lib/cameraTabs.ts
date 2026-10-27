@@ -15,6 +15,8 @@ export const ONVIF_INFO = "__onvif_info";
 export const INTEGRATIONS_STATUS = "__integrations_status";
 export const PTZ_CONTROL = "__ptz_control";
 /** Analytics modules (switch + detail per analytic); the raw Frigate/Provision panels stay after it as "Avanzado". */
+/** Per-backend technical panels (Frigate YAML, ONVIF, Provision) and the change history; first section of Avanzado. */
+export const ADVANCED_PANELS = "__advanced";
 export const ANALYTICS_MODULES = "__analytics_modules";
 
 export type CameraTabId =
@@ -62,7 +64,7 @@ export function buildCameraTabs(input: CameraTabsInput): CameraTab[] {
   tabs.push({
     id: "advanced",
     label: "Avanzado",
-    sections: [...input.sections.filter((s) => !owned.has(s)), ...(input.fisheye ? [] : [FISHEYE]), HISTORY],
+    sections: [ADVANCED_PANELS, ...input.sections.filter((s) => !owned.has(s)), ...(input.fisheye ? [] : [FISHEYE]), HISTORY],
   });
   return tabs;
 }

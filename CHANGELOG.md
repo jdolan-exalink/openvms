@@ -12,6 +12,12 @@ The version of OpenVMS lives in `VERSION` and the version of the edge agent in
 
 ### Added
 
+- Camera advanced tab (backend): contextual YAML of one Frigate section (`GET /cameras/{id}/frigate-yaml`,
+  `.../validate`, `.../apply`: syntax with line and column, schema check, diff, parameters OpenVMS manages;
+  untouched masked secrets never overwrite the real ones; a confirmed edit of managed parameters leaves the
+  camera in drift), change history and "Restaurar configuración anterior"
+  (`/cameras/{id}/normalized-config/history|rollback`), read-only per-backend panels (`/cameras/{id}/advanced`)
+  and a plain-language `plain_error` next to `last_error` in apply results. See docs/camera-config-advanced.md.
 - Camera configuration profiles and bulk apply (backend): tenant profiles are named sparse patches a
   camera may follow (migration 00077); the normalized config now reports per-field provenance
   (engine, profile, override); `/api/v1/camera-config/profiles`, `/cameras/{id}/profile/review|apply`

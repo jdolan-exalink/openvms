@@ -28,9 +28,9 @@ function PatchProbe() {
   return <pre data-testid="patch">{JSON.stringify(useCameraChange().patch)}</pre>;
 }
 
-function mount(model: Record<string, unknown> = {}, props: Partial<React.ComponentProps<typeof DetectionTab>> = {}) {
+function mount(model: Record<string, unknown> = {}, props: Partial<React.ComponentProps<typeof DetectionTab>> = {}, top: Record<string, unknown> = {}) {
   vi.stubGlobal("fetch", vi.fn(stubApi({
-    "/api/v1/cameras/c1/normalized-config": () => json({ detection: { enabled: true, objects: [], selection: ["person"], ...model }, state: { desired_revision: 1, applied_revision: 1, sync_state: "synced", last_error: "", drift: [] } }),
+    "/api/v1/cameras/c1/normalized-config": () => json({ detection: { enabled: true, objects: [], selection: ["person"], ...model }, ...top, state: { desired_revision: 1, applied_revision: 1, sync_state: "synced", last_error: "", drift: [] } }),
     "/api/v1/camera-config/object-catalog": () => json(catalog),
   })));
   const onMotion = vi.fn(), onObjects = vi.fn(), onOpenZones = vi.fn();
@@ -48,6 +48,12 @@ function mount(model: Record<string, unknown> = {}, props: Partial<React.Compone
 const patch = () => JSON.parse(screen.getByTestId("patch").textContent ?? "{}");
 
 describe("DetectionTab", () => {
+  it("shows where detection values come from", async () => {
+    mount({}, {}, { provenance: { "detection.enabled": { source: "profile", profile_name: "Exterior" }, "detection.objects": { source: "override" } } });
+    expect(await screen.findByText("Definido por perfil")).toBeInTheDocument();
+    expect(screen.getByText("Modificado localmente")).toBeInTheDocument();
+  });
+
   it("toggles a whole category with the model-unsupported objects left out", async () => {
     mount();
     fireEvent.click(await screen.findByLabelText("Activar todos los vehículos"));

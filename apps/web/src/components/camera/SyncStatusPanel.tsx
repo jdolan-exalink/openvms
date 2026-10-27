@@ -1,13 +1,14 @@
-import { useState } from "react";
+import { type ReactNode, useState } from "react";
 import type { Schemas } from "@/api/client";
 import { Button } from "@/components/ui";
+import type { PlainError } from "@/lib/plainError";
 import { patchFromDrift } from "@/lib/useCameraConfigChange";
 import { SyncStatusBadge } from "./SyncStatusBadge";
 
 const fmt = (v: unknown): string => (v === undefined || v === null ? "—" : typeof v === "boolean" ? (v ? "ON" : "OFF") : typeof v === "object" ? JSON.stringify(v) : String(v));
 
 /** Shown for any non-synced state; on drift it offers the three ways out. */
-export function SyncStatusPanel({ state, busy = false, applyError, onUseDesired }: { state: Schemas["CameraConfigState"]; busy?: boolean; applyError?: string; onUseDesired: (patch: Record<string, unknown>) => void }) {
+export function SyncStatusPanel({ state, busy = false, applyError, plainError, offer, onUseDesired }: { state: Schemas["CameraConfigState"]; busy?: boolean; applyError?: string; plainError?: PlainError | null; offer?: ReactNode; onUseDesired: (patch: Record<string, unknown>) => void }) {
   const [showDiff, setShowDiff] = useState(false);
   if (state.sync_state === "synced") return null;
   return (
@@ -15,13 +16,14 @@ export function SyncStatusPanel({ state, busy = false, applyError, onUseDesired 
       <div className="flex items-center gap-2"><SyncStatusBadge state={state.sync_state} /></div>
       {state.sync_state === "error" && (
         <>
-          <p className="text-bad">No se pudo aplicar la configuración en el motor.</p>
-          {state.last_error && (
+          <p className="text-bad">{plainError?.message ?? "No se pudo aplicar la configuración en el motor."}</p>
+          {(plainError?.technical || state.last_error) && (
             <details>
               <summary className="cursor-pointer text-xs">Ver información técnica</summary>
-              <pre className="whitespace-pre-wrap break-words text-xs">{state.last_error}</pre>
+              <pre className="whitespace-pre-wrap break-words text-xs">{plainError?.technical || state.last_error}</pre>
             </details>
           )}
+          {offer}
         </>
       )}
       {state.sync_state === "drift" && (

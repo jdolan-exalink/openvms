@@ -1407,6 +1407,193 @@ paths:
         "403": { $ref: "#/components/responses/Forbidden" }
         "404": { $ref: "#/components/responses/NotFound" }
         "409": { $ref: "#/components/responses/Conflict" }
+  /api/v1/cameras/{cameraId}/frigate-yaml:
+    parameters:
+      - { name: cameraId, in: path, required: true, schema: { type: string, format: uuid } }
+    get:
+      tags: [cameras]
+      operationId: getCameraFrigateYaml
+      summary: Get the YAML of one section of the camera's Frigate configuration
+      description: |
+        Advanced → "Editar YAML de detección". Requires the permission to edit YAML
+        (cameras.config.yaml; the legacy pair servers.config + servers.config.secrets keeps
+        working). `section` is a top-level camera section (detect, objects, record, snapshots,
+        motion, zones, ffmpeg, ...). Credentials are masked exactly like the
+        frigate-config document unless the actor holds servers.config.secrets (`secrets_visible`);
+        a masked placeholder left untouched in the YAML never overwrites the real value when it
+        is saved. `managed_paths` are the parts of the section that OpenVMS manages through the
+        camera's desired state (profile overlaid with overrides), relative to the section, so
+        the UI can warn before editing them. `revision` is the camera's desired-state revision to
+        send back as `expected_revision`.
+      parameters:
+        - { name: section, in: query, required: true, schema: { type: string } }
+      responses:
+        "200":
+          description: The section as YAML
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/CameraYamlSection" }
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { $ref: "#/components/responses/NotFound" }
+  /api/v1/cameras/{cameraId}/frigate-yaml/validate:
+    parameters:
+      - { name: cameraId, in: path, required: true, schema: { type: string, format: uuid } }
+    post:
+      tags: [cameras]
+      operationId: validateCameraFrigateYaml
+      summary: Validate an edited section YAML without saving it
+      description: |
+        Same permission as reading the YAML. Returns syntax errors (line and column), schema
+        errors (checked against the Frigate camera schema the schema editor uses), the diff
+        against the current section (leaf values, credentials removed) and the managed
+        parameters the edit would change (`managed_conflicts`). It has no side effects.
+        Keys removed from the YAML are not deleted from Frigate (a warning says so).
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [section, yaml]
+              properties:
+                section: { type: string }
+                yaml: { type: string }
+      responses:
+        "200":
+          description: Validation result (an invalid edit is still 200 with valid=false)
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/CameraYamlValidation" }
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { $ref: "#/components/responses/NotFound" }
+  /api/v1/cameras/{cameraId}/frigate-yaml/apply:
+    parameters:
+      - { name: cameraId, in: path, required: true, schema: { type: string, format: uuid } }
+    post:
+      tags: [cameras]
+      operationId: applyCameraFrigateYaml
+      summary: Save an edited section YAML
+      description: |
+        Same permission as reading the YAML, plus what the Frigate camera PATCH needs. The edit
+        goes through the existing sectioned PATCH (revisions, rollback copy and audit of that
+        path apply). Answers 400 when the YAML has syntax or schema errors, 409 when
+        `expected_revision` is stale (`revision_conflict`) or when the edit changes parameters
+        managed by OpenVMS and `confirm_managed_conflicts` is not true (`managed_conflict`);
+        nothing is written in those cases. Only changed values are sent: untouched masked
+        placeholders and unchanged credentials are never written. A confirmed edit of managed
+        parameters leaves the camera in `drift` (diferencia detectada) instead of being
+        overwritten silently. Audited as CAMERA_CONFIG_CHANGED with origin `yaml`.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [section, yaml, expected_revision]
+              properties:
+                section: { type: string }
+                yaml: { type: string }
+                expected_revision: { type: integer, format: int64, minimum: 0 }
+                confirm_managed_conflicts: { type: boolean, default: false }
+      responses:
+        "200":
+          description: The edit was saved
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/CameraYamlApplyResult" }
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { $ref: "#/components/responses/NotFound" }
+        "409": { $ref: "#/components/responses/Conflict" }
+  /api/v1/cameras/{cameraId}/normalized-config/history:
+    parameters:
+      - { name: cameraId, in: path, required: true, schema: { type: string, format: uuid } }
+    get:
+      tags: [cameras]
+      operationId: listCameraConfigHistory
+      summary: List the recent configuration changes of a camera
+      description: |
+        Requires servers.config on the camera's server (like the review). Newest first, from the
+        audit trail (CAMERA_CONFIG_CHANGED): who, when, origin, result and the paths with old and
+        new values (credentials removed). `rollbackable` says whether the old values can be
+        restored through the rollback endpoint; `rollback_reason` says why not.
+      parameters:
+        - { name: limit, in: query, required: false, schema: { type: integer, minimum: 1, maximum: 100, default: 20 } }
+      responses:
+        "200":
+          description: Changes
+          content:
+            application/json:
+              schema:
+                type: array
+                items: { $ref: "#/components/schemas/CameraConfigHistoryEntry" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { $ref: "#/components/responses/NotFound" }
+  /api/v1/cameras/{cameraId}/normalized-config/rollback:
+    parameters:
+      - { name: cameraId, in: path, required: true, schema: { type: string, format: uuid } }
+    post:
+      tags: [cameras]
+      operationId: rollbackCameraConfig
+      summary: Restore the configuration a change replaced
+      description: |
+        "Restaurar configuración anterior". Builds the inverse patch from the old values of a
+        recorded change (`audit_id`, default the latest change that can be undone) and applies
+        it through the normal review/apply pipeline with origin `ui`; the audit row of the
+        rollback names the change it undid (`rollback_of`). It needs the same permissions as an
+        apply for every section it touches. Answers 400 (nothing written) when the old values
+        are not available or cannot be restored with the patch type (video, changes made with
+        YAML), and 409 on a stale `expected_revision`.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [expected_revision]
+              properties:
+                audit_id: { type: integer, format: int64, minimum: 1 }
+                expected_revision: { type: integer, format: int64, minimum: 0 }
+      responses:
+        "200":
+          description: Outcome of the rollback
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/CameraConfigRollbackResult" }
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { $ref: "#/components/responses/NotFound" }
+        "409": { $ref: "#/components/responses/Conflict" }
+  /api/v1/cameras/{cameraId}/advanced:
+    parameters:
+      - { name: cameraId, in: path, required: true, schema: { type: string, format: uuid } }
+    get:
+      tags: [cameras]
+      operationId: getCameraAdvanced
+      summary: Read-only technical information of the camera by backend
+      description: |
+        Requires cameras.config.advanced (legacy servers.config keeps working) and cameras.view.
+        Frigate: sections of the generated configuration and which ones OpenVMS manages.
+        ONVIF: media profiles with stream URIs reduced to scheme, host and path, capabilities
+        and reported parameters, from the stored probe (no call to the camera). Provision: the
+        ISR link and its technical data, from existing evidence and the agent's status (read
+        only). Raw engine or ffmpeg errors never appear here; see `plain_error` in apply results.
+      responses:
+        "200":
+          description: Technical information
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/CameraAdvanced" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { $ref: "#/components/responses/NotFound" }
   /api/v1/camera-config/profiles:
     get:
       tags: [cameras]
@@ -6800,6 +6987,198 @@ components:
         result: { type: string, enum: [ok, error, unverified] }
         state: { $ref: "#/components/schemas/CameraConfigState" }
         review: { $ref: "#/components/schemas/CameraConfigReview" }
+        plain_error:
+          description: |
+            The apply's failure in plain words with the technical text apart. Additive: `state.last_error`
+            keeps the sanitized raw text. Absent when the apply did not fail.
+          allOf:
+            - { $ref: "#/components/schemas/CameraPlainError" }
+    CameraPlainError:
+      type: object
+      description: |
+        A failure in plain words (`message`, shown by default) with the sanitized technical text
+        (`technical`, shown under "Ver información técnica"). Credentials, query strings and
+        key=value secrets are removed from `technical`.
+      required: [message, technical]
+      properties:
+        message: { type: string, example: "No se pudo iniciar el stream de grabación." }
+        technical: { type: string, example: ffmpeg exited with code 1 }
+    CameraYamlManagedPath:
+      type: object
+      description: A part of the engine configuration that OpenVMS manages (path relative to the section).
+      required: [patch_path, engine_path, value]
+      properties:
+        patch_path: { type: string, example: detection.enabled }
+        engine_path: { type: string, example: enabled }
+        value: { nullable: true, description: The value OpenVMS wants }
+    CameraYamlSection:
+      type: object
+      required: [camera_id, section, yaml, exists, secrets_visible, managed_paths, revision]
+      properties:
+        camera_id: { type: string, format: uuid }
+        section: { type: string }
+        yaml: { type: string }
+        exists: { type: boolean, description: false when the camera has no such section yet }
+        secrets_visible: { type: boolean }
+        managed_paths:
+          type: array
+          items: { $ref: "#/components/schemas/CameraYamlManagedPath" }
+        revision: { type: integer, format: int64 }
+    CameraYamlSyntaxIssue:
+      type: object
+      required: [line, column, message]
+      properties:
+        line: { type: integer }
+        column: { type: integer }
+        message: { type: string }
+    CameraYamlSchemaIssue:
+      type: object
+      required: [path, message]
+      properties:
+        path: { type: string, description: Dotted path from the section }
+        message: { type: string }
+    CameraYamlChange:
+      type: object
+      required: [path, kind]
+      properties:
+        path: { type: string }
+        kind: { type: string, enum: [added, removed, changed] }
+        from: { nullable: true }
+        to: { nullable: true }
+    CameraYamlConflict:
+      type: object
+      required: [patch_path, engine_path]
+      properties:
+        patch_path: { type: string }
+        engine_path: { type: string }
+        desired: { nullable: true }
+        new: { nullable: true }
+    CameraYamlValidation:
+      type: object
+      required: [section, valid, schema_checked, syntax, schema, changes, managed_conflicts, warnings, revision]
+      properties:
+        section: { type: string }
+        valid: { type: boolean }
+        schema_checked: { type: boolean }
+        syntax:
+          type: array
+          items: { $ref: "#/components/schemas/CameraYamlSyntaxIssue" }
+        schema:
+          type: array
+          items: { $ref: "#/components/schemas/CameraYamlSchemaIssue" }
+        changes:
+          type: array
+          items: { $ref: "#/components/schemas/CameraYamlChange" }
+        managed_conflicts:
+          type: array
+          items: { $ref: "#/components/schemas/CameraYamlConflict" }
+        warnings:
+          type: array
+          items: { type: string }
+        revision: { type: integer, format: int64 }
+    CameraYamlApplyResult:
+      type: object
+      required: [validation, frigate, marked_drift, revision, sync_state]
+      properties:
+        validation: { $ref: "#/components/schemas/CameraYamlValidation" }
+        frigate: { $ref: "#/components/schemas/FrigatePatchResult" }
+        marked_drift: { type: boolean, description: true when managed parameters were changed and the camera was left in drift }
+        revision: { type: integer, format: int64, description: The camera's desired-state revision after the edit }
+        sync_state: { type: string, description: Stored sync state when it was just marked; empty otherwise }
+    CameraConfigHistoryChange:
+      type: object
+      required: [path]
+      properties:
+        path: { type: string }
+        from: { nullable: true }
+        to: { nullable: true }
+    CameraConfigHistoryEntry:
+      type: object
+      required: [id, time, origin, result, changes, rollbackable]
+      properties:
+        id: { type: integer, format: int64, description: Audit id; pass it as audit_id to roll back }
+        time: { type: string, format: date-time }
+        user_id: { type: string, format: uuid, nullable: true }
+        user: { type: string }
+        origin: { $ref: "#/components/schemas/CameraConfigOrigin" }
+        result: { type: string, enum: [ok, error, unverified] }
+        section: { type: string, description: Set for YAML edits }
+        changes:
+          type: array
+          items: { $ref: "#/components/schemas/CameraConfigHistoryChange" }
+        error: { $ref: "#/components/schemas/CameraPlainError" }
+        rollback_of: { type: integer, format: int64, description: The change this one undid }
+        rolled_back_by: { type: integer, format: int64, description: The change that undid this one }
+        rollbackable: { type: boolean }
+        rollback_reason: { type: string }
+    CameraConfigRollbackResult:
+      type: object
+      required: [rolled_back, result]
+      properties:
+        rolled_back: { type: integer, format: int64, description: Audit id of the change that was undone }
+        result: { $ref: "#/components/schemas/CameraConfigApplyResult" }
+    CameraAdvancedProfile:
+      type: object
+      required: [token, name, encoding, width, height, fps, bitrate, stream_uri]
+      properties:
+        token: { type: string }
+        name: { type: string }
+        encoding: { type: string }
+        width: { type: integer }
+        height: { type: integer }
+        fps: { type: number }
+        bitrate: { type: integer }
+        stream_uri: { type: string, description: Scheme, host and path only }
+    CameraAdvanced:
+      type: object
+      required: [camera_id, frigate, onvif, provision]
+      properties:
+        camera_id: { type: string, format: uuid }
+        frigate:
+          type: object
+          required: [available, version, sections, managed_sections, desired_revision, applied_revision, sync_state]
+          properties:
+            available: { type: boolean }
+            reason: { type: string }
+            version: { type: string }
+            sections: { type: array, items: { type: string } }
+            managed_sections: { type: array, items: { type: string } }
+            desired_revision: { type: integer, format: int64 }
+            applied_revision: { type: integer, format: int64 }
+            sync_state: { type: string }
+        onvif:
+          type: object
+          required: [configured, endpoint, profiles, capabilities, services, reported]
+          properties:
+            configured: { type: boolean }
+            endpoint: { type: string, description: Scheme, host and path only }
+            version: { type: string }
+            profile: { type: string }
+            manufacturer: { type: string }
+            model: { type: string }
+            firmware: { type: string }
+            profiles: { type: array, items: { $ref: "#/components/schemas/CameraAdvancedProfile" } }
+            capabilities: { type: object, additionalProperties: { type: boolean } }
+            services: { type: array, items: { type: string } }
+            reported: { type: object, additionalProperties: true }
+        provision:
+          type: object
+          required: [evidence, tags, link]
+          properties:
+            evidence: { type: boolean }
+            tags: { type: array, items: { type: string } }
+            manufacturer: { type: string }
+            model: { type: string }
+            link:
+              type: object
+              description: The agent's view of the camera; reachable=false when it could not be asked.
+              required: [reachable, registered, online, event_count]
+              properties:
+                reachable: { type: boolean }
+                registered: { type: boolean }
+                online: { type: boolean }
+                event_count: { type: integer, format: int64 }
+                last_event_at: { type: string, format: date-time, nullable: true }
     CameraConfigProvenance:
       type: object
       required: [source]

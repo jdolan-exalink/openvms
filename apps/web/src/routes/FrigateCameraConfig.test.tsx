@@ -591,6 +591,29 @@ describe("FrigateCameraConfig", () => {
       expect(within(details).getByText("FFmpeg y streams")).toBeInTheDocument();
     });
 
+    it("opens the Avanzado YAML editor preselected from the Detección and Video entry points, only with cameras.config.yaml", async () => {
+      const grants = (perms: string[]) => () => json({ id: "u", tenant_id: "t", grants: perms.map((permission) => ({ permission, effect: "allow" })) });
+      const advanced = { camera_id: "c1", frigate: { available: true, version: "0.16", sections: ["detect", "ffmpeg"], managed_sections: [], desired_revision: 1, applied_revision: 1, sync_state: "synced" }, onvif: { configured: false, endpoint: "", profiles: [], capabilities: {}, services: [], reported: {} }, provision: { evidence: false, tags: [], link: { reachable: false, registered: false, online: false, event_count: 0 } } };
+      const extra = {
+        "/api/v1/cameras/c1/advanced": () => json(advanced),
+        "/api/v1/cameras/c1/normalized-config/history": () => json([]),
+        "/api/v1/cameras/c1/frigate-yaml": () => json({ camera_id: "c1", section: "detect", yaml: "enabled: true\n", exists: true, secrets_visible: true, managed_paths: [], revision: 1 }),
+      };
+      mountFull({}, { ...extra, "/api/v1/me": grants(["cameras.config.yaml", "cameras.config.advanced", "cameras.config.edit"]) });
+      await goTo("Detección");
+      fireEvent.click(await screen.findByText("Avanzado de detección (Frigate)"));
+      fireEvent.click(screen.getByRole("button", { name: "Editar YAML de detección" }));
+      expect(await screen.findByLabelText("Sección")).toHaveValue("detect");
+      expect(await screen.findByLabelText("YAML de detect")).toBeInTheDocument();
+    });
+
+    it("offers no YAML entry point without cameras.config.yaml", async () => {
+      mountFull({}, { "/api/v1/me": () => json({ id: "u", tenant_id: "t", grants: [{ permission: "cameras.config.edit", effect: "allow" }] }) });
+      await goTo("Detección");
+      await screen.findByText("Avanzado de detección (Frigate)");
+      expect(screen.queryByRole("button", { name: "Editar YAML de detección" })).toBeNull();
+    });
+
     it("locks the Frigate fields without the config permission", async () => {
       mountFull({ editable: false, config: { audio: { enabled: true } } });
       expect(await screen.findByRole("switch", { name: "Audio" })).toBeDisabled();
