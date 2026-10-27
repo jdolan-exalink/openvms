@@ -355,6 +355,8 @@ function FrigateCameraConfigScreen({ cameraId }: { cameraId: string }) {
   const canManageCamera = can(me.data, "cameras.manage");
   const canPtz = canCamera(me.data, "cameras.config.ptz");
   const canEditVideo = canCamera(me.data, "cameras.config.video");
+  // The ONVIF codec change carries the camera credentials: the API asks for servers.manage + servers.config.secrets.
+  const canChangeCodec = can(me.data, "servers.manage") && can(me.data, "servers.config.secrets");
   const canYaml = canCamera(me.data, "cameras.config.yaml");
   const provision = !!cam && (isProvisionCamera(cam) || !!cam.tags?.includes("provision"));
   const general: GeneralFrigate = { root, camProps, config, doc: doc.data, ctx, valueOf, setSection };
@@ -511,6 +513,7 @@ function FrigateCameraConfigScreen({ cameraId }: { cameraId: string }) {
           <VideoTab
             cameraId={cameraId}
             readOnlyReason={canEditVideo ? undefined : "Requiere el permiso cameras.config.video."}
+            codecReadOnlyReason={canChangeCodec ? undefined : "Requiere los permisos servers.manage y servers.config.secrets."}
             legacy={
               tab.sections.length > 0 &&
               tab.sections.map((s) => (

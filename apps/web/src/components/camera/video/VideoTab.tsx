@@ -6,6 +6,7 @@ import { Button } from "@/components/ui";
 import { useCameraChange } from "../CameraChangeProvider";
 import { AudioSection } from "./AudioSection";
 import { StreamCard } from "./StreamCard";
+import { VideoCodecCard } from "./VideoCodecCard";
 import { VideoParametersForm } from "./VideoParametersForm";
 import { currentValues, differsFromCurrent, RESTART_NOTICE, streamSummary, type Role, type StreamValues } from "./videoParams";
 
@@ -17,7 +18,7 @@ const ROLES: Array<{ role: Role; title: string; purpose: string }> = [
 const isRec = (v: unknown): v is Record<string, unknown> => typeof v === "object" && v !== null && !Array.isArray(v);
 
 /** Video tab: streams and their parameters in video terms; the Frigate sections stay under "Avanzado de video". */
-export function VideoTab({ cameraId, legacy, readOnlyReason }: { cameraId: string; legacy?: ReactNode; readOnlyReason?: string }) {
+export function VideoTab({ cameraId, legacy, readOnlyReason, codecReadOnlyReason }: { cameraId: string; legacy?: ReactNode; readOnlyReason?: string; codecReadOnlyReason?: string }) {
   const change = useCameraChange();
   const options = useQuery(cameraVideoOptionsQuery(cameraId));
   const model = change.config.data;
@@ -33,6 +34,7 @@ export function VideoTab({ cameraId, legacy, readOnlyReason }: { cameraId: strin
   const restart = rows.some((r) => differsFromCurrent(r.current, r.patch));
   const recording = model?.streams?.recording;
   const hasAudio = model?.capabilities?.includes("audio") ?? false;
+  const hasOnvif = model?.capabilities?.includes("onvif") ?? false;
 
   return (
     <div className="flex flex-col gap-5">
@@ -76,6 +78,8 @@ export function VideoTab({ cameraId, legacy, readOnlyReason }: { cameraId: strin
           summary={streamSummary(recording)}
         />
       )}
+
+      {hasOnvif && <VideoCodecCard cameraId={cameraId} readOnlyReason={codecReadOnlyReason} />}
 
       {restart && (
         <div role="status" className="flex flex-wrap items-center justify-between gap-3 rounded-m3-lg bg-warn/10 px-4 py-3 text-sm text-warn">
