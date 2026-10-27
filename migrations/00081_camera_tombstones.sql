@@ -2,9 +2,7 @@
 -- Deleting a camera is a soft delete (cameras.deleted_at); the partial unique index on live cameras
 -- no longer matches it, so without this table the next sync would insert the same remote_name again.
 -- retain_days is the recording window the camera had when it was deleted; the history purge of a
--- deleted camera reads it. config_revision_id points at the Frigate config revision made when the
--- camera was removed from Frigate; its before_yaml holds the camera's block, which restoring puts back.
--- The row goes away when the camera is restored, or with the camera itself.
+-- deleted camera reads it. The row goes away when the camera is restored, or with the camera itself.
 -- +goose Up
 CREATE TABLE camera_tombstones (
     camera_id uuid PRIMARY KEY,
@@ -12,7 +10,6 @@ CREATE TABLE camera_tombstones (
     server_id uuid NOT NULL,
     remote_name text NOT NULL,
     retain_days integer CHECK (retain_days IS NULL OR retain_days >= 0),
-    config_revision_id uuid REFERENCES frigate_config_revisions (id) ON DELETE SET NULL,
     deleted_by uuid,
     deleted_at timestamptz NOT NULL DEFAULT now(),
     CONSTRAINT camera_tombstones_camera_tenant_fk FOREIGN KEY (camera_id, tenant_id)
