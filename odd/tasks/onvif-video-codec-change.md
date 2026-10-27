@@ -33,4 +33,4 @@ first real change must be done on one camera, with the owner's explicit go-ahead
 - [x] 1. Media2 client + `PlanEncodingChange` (pure, fixture-tested).
 - [x] 2. Agent endpoint (options / set) with service discovery.
 - [x] 3. Provision service + API + OpenAPI.
-- [ ] 4. Camera settings UI.
+- [x] 4. Camera settings UI (`VideoCodecCard` in the Video tab; reads the camera options on demand, changes only to an encoding the camera listed, behind a confirmation). Not run against a real camera: the first real change needs the owner's explicit go-ahead.
