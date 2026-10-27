@@ -27,4 +27,11 @@ describe("CameraPreview", () => {
     expect(screen.getByLabelText("Restaurar")).toBeInTheDocument();
     expect(screen.getByLabelText("Capturar imagen")).toHaveAttribute("href", "/media/v1/cameras/c1/snapshot.jpg");
   });
+
+  it("draws contextual controls over the preview only when given", () => {
+    const { rerender } = render(<CameraPreview cameraId="c1" name="acceso" />);
+    expect(screen.queryByTestId("overlay")).not.toBeInTheDocument();
+    rerender(<CameraPreview cameraId="c1" name="acceso" overlay={<div data-testid="overlay" />} />);
+    expect(screen.getByTestId("overlay")).toBeInTheDocument();
+  });
 });

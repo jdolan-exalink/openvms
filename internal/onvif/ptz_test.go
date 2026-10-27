@@ -104,3 +104,67 @@ func TestPTZClientOperations(t *testing.T) {
 
 	_ = lastAction
 }
+
+func ptzOK(body string) *http.Response {
+	return &http.Response{StatusCode: http.StatusOK, Body: io.NopCloser(strings.NewReader(body)), Header: make(http.Header)}
+}
+
+func TestPTZClientPresetAndHomeOperations(t *testing.T) {
+	endpoint, err := ParseEndpoint("http://192.168.1.100/onvif/ptz_service")
+	if err != nil {
+		t.Fatal(err)
+	}
+	var bodies []string
+	transport := ptzRoundTripperFunc(func(r *http.Request) (*http.Response, error) {
+		raw, _ := io.ReadAll(r.Body)
+		body := string(raw)
+		bodies = append(bodies, body)
+		const env = `<s:Envelope xmlns:s="http://www.w3.org/2003/05/soap-envelope" xmlns:tptz="http://www.onvif.org/ver20/ptz/wsdl" xmlns:tt="http://www.onvif.org/ver10/schema"><s:Body>%s</s:Body></s:Envelope>`
+		switch {
+		case strings.Contains(body, "<tptz:SetPreset "):
+			return ptzOK(strings.Replace(env, "%s", `<tptz:SetPresetResponse><tptz:PresetToken>7</tptz:PresetToken></tptz:SetPresetResponse>`, 1)), nil
+		case strings.Contains(body, "<tptz:RemovePreset "):
+			return ptzOK(strings.Replace(env, "%s", `<tptz:RemovePresetResponse/>`, 1)), nil
+		case strings.Contains(body, "<tptz:GotoHomePosition "):
+			return ptzOK(strings.Replace(env, "%s", `<tptz:GotoHomePositionResponse/>`, 1)), nil
+		case strings.Contains(body, "<tptz:SetHomePosition "):
+			return ptzOK(strings.Replace(env, "%s", `<tptz:SetHomePositionResponse/>`, 1)), nil
+		case strings.Contains(body, "<tptz:GetNodes "):
+			return ptzOK(strings.Replace(env, "%s", `<tptz:GetNodesResponse><tptz:PTZNode token="node1" FixedHomePosition="false"><tt:Name>Main</tt:Name>
+<tt:SupportedPTZSpaces><tt:ContinuousPanTiltVelocitySpace/></tt:SupportedPTZSpaces>
+<tt:MaximumNumberOfPresets>64</tt:MaximumNumberOfPresets><tt:HomeSupported>true</tt:HomeSupported></tptz:PTZNode></tptz:GetNodesResponse>`, 1)), nil
+		}
+		return &http.Response{StatusCode: http.StatusBadRequest, Body: io.NopCloser(strings.NewReader(""))}, nil
+	})
+	ptz := NewPTZClient(NewClient(transport, Config{}), endpoint)
+	ctx := context.Background()
+
+	token, err := ptz.SetPreset(ctx, "P1", `Gate <&>`, "")
+	if err != nil || token != "7" {
+		t.Fatalf("SetPreset = %q, %v", token, err)
+	}
+	last := bodies[len(bodies)-1]
+	if !strings.Contains(last, "Gate &lt;&amp;&gt;") || strings.Contains(last, "PresetToken") {
+		t.Fatalf("create must escape the name and omit the token: %s", last)
+	}
+	if _, err := ptz.SetPreset(ctx, "P1", "Renamed", "7"); err != nil || !strings.Contains(bodies[len(bodies)-1], "<tptz:PresetToken>7</tptz:PresetToken>") {
+		t.Fatalf("rename must carry the token: %v %s", err, bodies[len(bodies)-1])
+	}
+	if err := ptz.RemovePreset(ctx, "P1", "7"); err != nil || !strings.Contains(bodies[len(bodies)-1], "RemovePreset") {
+		t.Fatalf("RemovePreset: %v", err)
+	}
+	if err := ptz.GotoHomePosition(ctx, "P1"); err != nil {
+		t.Fatalf("GotoHomePosition: %v", err)
+	}
+	if err := ptz.SetHomePosition(ctx, "P1"); err != nil {
+		t.Fatalf("SetHomePosition: %v", err)
+	}
+	nodes, err := ptz.GetNodes(ctx)
+	if err != nil || len(nodes) != 1 {
+		t.Fatalf("GetNodes = %+v, %v", nodes, err)
+	}
+	n := nodes[0]
+	if n.MaximumPresets != 64 || !n.HomeSupported || n.FixedHomePosition || !n.SupportsPanTilt || n.SupportsZoom {
+		t.Fatalf("unexpected node capabilities: %+v", n)
+	}
+}

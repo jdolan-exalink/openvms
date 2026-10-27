@@ -20,6 +20,7 @@ import { SyncStatusPanel } from "@/components/camera/SyncStatusPanel";
 import { CameraPreview } from "@/components/camera/CameraPreview";
 import { CameraSummaryCards } from "@/components/camera/CameraSummaryCards";
 import { AnalyticsTab } from "@/components/camera/analytics/AnalyticsTab";
+import { IntegrationsTab } from "@/components/camera/integrations/IntegrationsTab";
 import { CameraTabs } from "@/components/camera/CameraTabs";
 import { VideoTab } from "@/components/camera/video/VideoTab";
 import { CameraWebView } from "@/components/camera/CameraWebView";
@@ -28,7 +29,9 @@ import { PendingChangesBar } from "@/components/camera/PendingChangesBar";
 import { capabilityList, deviceRows, NONE, statusChips, videoRows } from "@/components/camera/summary";
 import { LprTestCard } from "@/components/provision/LprTestCard";
 import { FrigateGeneralFields, GENERAL_SECTIONS, knowsSection, sectionEnabled, type GeneralFrigate } from "@/components/camera/FrigateGeneralFields";
-import { FisheyeSection } from "@/components/fisheye/FisheyeSection";
+import { FisheyeTab } from "@/components/camera/fisheye/FisheyeTab";
+import { PtzOverlay } from "@/components/camera/ptz/PtzOverlay";
+import { PtzTab } from "@/components/camera/ptz/PtzTab";
 import { AdvertisedAnalytics } from "@/components/provision/AdvertisedAnalytics";
 import { isProvisionCamera, ProvisionLprSection } from "@/components/provision/ProvisionLprSection";
 import { Icon } from "@/components/Icon";
@@ -57,7 +60,7 @@ import { pickerLabels } from "@/lib/labelEmoji";
 import { loadRestart, saveRestart } from "@/lib/frigateRestart";
 import { can } from "@/lib/perm";
 import {
-  ANALYTICS_MODULES, analyticsTabVisible, buildCameraTabs, CAMERA_WEB, type CameraTabId, FISHEYE, GENERAL, HISTORY, isFisheyeTagged, ONVIF_INFO, PROVISION, PTZ_CONTROL, tabOfSection,
+  ANALYTICS_MODULES, analyticsTabVisible, buildCameraTabs, CAMERA_WEB, type CameraTabId, FISHEYE, GENERAL, HISTORY, INTEGRATIONS_STATUS, isFisheyeTagged, ONVIF_INFO, PROVISION, PTZ_CONTROL, tabOfSection,
 } from "@/lib/cameraTabs";
 import { persistedToEditorValue, planManagedZoneChanges, splitFrigateZones, zoneSyncStates, type ZoneChangePlan } from "@/lib/cameraZones";
 
@@ -76,6 +79,7 @@ const SECTION_TITLES: Record<string, string> = {
   [PROVISION]: "Avanzado · Provision LPR",
   lpr: "Avanzado · LPR",
   face_recognition: "Avanzado · Reconocimiento facial",
+  [INTEGRATIONS_STATUS]: "Estado",
   [CAMERA_WEB]: "Web de la cámara",
   [ONVIF_INFO]: "Capacidades ONVIF",
   [PTZ_CONTROL]: "Control PTZ",
@@ -442,7 +446,7 @@ function FrigateCameraConfigScreen({ cameraId }: { cameraId: string }) {
       )}
 
       <div className="flex flex-col gap-3 lg:flex-row lg:items-stretch">
-        <CameraPreview cameraId={cameraId} name={doc.data.camera_name} serverId={serverId} initialQuality={cam?.default_live_quality} />
+        <CameraPreview cameraId={cameraId} name={doc.data.camera_name} serverId={serverId} initialQuality={cam?.default_live_quality} overlay={tab.id === "ptz" && section === PTZ_CONTROL && canManageCamera ? <PtzOverlay cameraId={cameraId} /> : undefined} />
         <CameraSummaryCards
           origin={[
             { label: "Servidor", value: server?.name || NONE },
@@ -511,12 +515,7 @@ function FrigateCameraConfigScreen({ cameraId }: { cameraId: string }) {
         ) : section === GENERAL ? (
           <CameraGeneral cameraId={cameraId} canManage={canManageCamera} frigate={general} onApplyToFrigate={onApplyToFrigate} />
         ) : section === FISHEYE ? (
-          <FisheyeSection
-            cameraId={cameraId}
-            cameraName={doc.data.camera_name}
-            snapshotUrl={`/media/v1/cameras/${cameraId}/snapshot.jpg`}
-            canManage={!readOnly}
-          />
+          <FisheyeTab cameraId={cameraId} cameraName={doc.data.camera_name} canManage={!readOnly} />
         ) : section === ANALYTICS_MODULES ? (
           <AnalyticsTab cameraId={cameraId} modules={change.config.data?.analytics?.modules} patch={change.patch} setPatch={change.setPatch} readOnly={readOnly} />
         ) : section === PROVISION ? (
@@ -529,8 +528,12 @@ function FrigateCameraConfigScreen({ cameraId }: { cameraId: string }) {
               }}
             />
           )
+        ) : section === INTEGRATIONS_STATUS ? (
+          <IntegrationsTab integrations={change.config.data?.integrations} />
         ) : section === CAMERA_WEB ? (
           <CameraWebView cameraId={cameraId} />
+        ) : section === PTZ_CONTROL && tab.id === "ptz" ? (
+          <PtzTab cameraId={cameraId} canManage={canManageCamera} />
         ) : section === ONVIF_INFO || section === PTZ_CONTROL ? (
           <CameraOnvifPanel cameraId={cameraId} camera={cam} canManage={canManageCamera} onApplyToFrigate={onApplyToFrigate} />
         ) : section === HISTORY ? (

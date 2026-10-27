@@ -36,7 +36,7 @@ func TestDefaultIsValidAndOrderStable(t *testing.T) {
 	for _, o := range a.Categories[1].Objects {
 		veh = append(veh, o.ID)
 	}
-	wantV := []string{"vehicle.car", "vehicle.pickup", "vehicle.truck", "vehicle.bus", "vehicle.motorcycle", "vehicle.bicycle", "vehicle.other"}
+	wantV := []string{"vehicle.car", "vehicle.pickup", "vehicle.truck", "vehicle.bus", "vehicle.motorcycle", "vehicle.bicycle", "vehicle.other", "vehicle.generic"}
 	if !reflect.DeepEqual(veh, wantV) {
 		t.Fatalf("vehicle order = %v", veh)
 	}
@@ -167,8 +167,65 @@ func TestNoInventedPrecision(t *testing.T) {
 		t.Fatalf("labels=%v unsupported=%v", labels, unsup)
 	}
 	// An engine without a mapping reports every explicit object unsupported.
-	if l := c.ExpandToEngine("provision", []string{"vehicle"}); len(l) != 0 {
-		t.Fatalf("provision labels = %v", l)
+	if l := c.ExpandToEngine("lidar", []string{"vehicle"}); len(l) != 0 {
+		t.Fatalf("unmapped engine labels = %v", l)
+	}
+}
+
+// Provision only says "vehicle": the category maps to that one label and the finer objects
+// stay unsupported instead of being approximated.
+func TestProvisionVehicleHasNoSubtype(t *testing.T) {
+	c := Default()
+	if l := c.ExpandToEngine(EngineProvision, []string{"vehicle"}); !reflect.DeepEqual(l, []string{"vehicle"}) {
+		t.Fatalf("provision vehicles = %v", l)
+	}
+	labels, unsup := c.ExpandForModel(EngineProvision, []string{"vehicle.car", "vehicle.truck", "vehicle.generic"}, nil)
+	if !reflect.DeepEqual(labels, []string{"vehicle"}) || !reflect.DeepEqual(unsup, []string{"vehicle.car", "vehicle.truck"}) {
+		t.Fatalf("labels=%v unsupported=%v", labels, unsup)
+	}
+	sel := c.CollapseFromEngine(EngineProvision, []string{"vehicle", "license_plate"})
+	if !reflect.DeepEqual(sel.Objects, []string{"vehicle.generic", "other.license_plate"}) || !contains(sel.Categories, "vehicle") || len(sel.Raw) != 0 {
+		t.Fatalf("collapse = %+v", sel)
+	}
+	// The Frigate view of the same catalog is unchanged by the Provision object.
+	if l := c.ExpandToEngine(EngineFrigate, []string{"vehicle.generic"}); len(l) != 0 {
+		t.Fatalf("frigate labels for the generic vehicle = %v", l)
+	}
+}
+
+func TestProvisionLabelsBelongToOneObject(t *testing.T) {
+	c := Default()
+	seen := map[string]string{}
+	for _, cat := range c.Categories {
+		for _, o := range cat.Objects {
+			for _, l := range o.Engine[EngineProvision] {
+				if prev, dup := seen[l]; dup {
+					t.Fatalf("provision label %q in %s and %s", l, prev, o.ID)
+				}
+				seen[l] = o.ID
+			}
+		}
+	}
+	if len(seen) != 2 {
+		t.Fatalf("only the evidenced labels (vehicle, license_plate) may be mapped: %v", seen)
+	}
+}
+
+func TestProvisionRoundTripIdentity(t *testing.T) {
+	c := Default()
+	ids := supportedObjects(c, EngineProvision)
+	for mask := 0; mask < 1<<len(ids); mask++ {
+		var sel []string
+		for i, id := range ids {
+			if mask&(1<<i) != 0 {
+				sel = append(sel, id)
+			}
+		}
+		labels := c.ExpandToEngine(EngineProvision, sel)
+		back := c.CollapseFromEngine(EngineProvision, labels)
+		if !sameSet(back.Objects, sel) || len(back.Raw) != 0 {
+			t.Fatalf("round trip %v -> %v -> %+v", sel, labels, back)
+		}
 	}
 }
 

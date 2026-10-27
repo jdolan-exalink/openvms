@@ -547,3 +547,19 @@ export const faceConfigQuery = (filter: FaceConfigFilter = {}) =>
 export const faceImageUrl = (personId: string, imageId: string) => `/api/v1/faces/persons/${personId}/images/${imageId}`;
 export const faceTrainImageUrl = (serverId: string, file: string) => `/api/v1/faces/train/${serverId}/image?file=${encodeURIComponent(file)}`;
 export const faceReviewSightingImageUrl = (sightingId: string) => `/api/v1/faces/review-inbox/${sightingId}/image`;
+
+/** PTZ tours stored for a camera (a stored sequence of device presets). */
+export const cameraPtzToursQuery = (cameraId: string) =>
+  queryOptions({
+    queryKey: ["cameras", cameraId, "ptz-tours"],
+    queryFn: async () => unwrap(await api.GET("/api/v1/cameras/{cameraId}/ptz/tours", { params: { path: { cameraId } } })),
+  });
+
+/** Presets the camera reports over ONVIF PTZ. */
+export const cameraPtzPresetsQuery = (cameraId: string) =>
+  queryOptions({
+    queryKey: ["cameras", cameraId, "ptz-presets"],
+    queryFn: async () =>
+      unwrap(await api.POST("/api/v1/cameras/{cameraId}/onvif/ptz", { params: { path: { cameraId } }, body: { action: "get_presets" } })),
+    retry: false,
+  });

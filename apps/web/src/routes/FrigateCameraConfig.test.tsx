@@ -391,9 +391,23 @@ describe("FrigateCameraConfig", () => {
       expect(screen.getByRole("button", { name: "Abrir" })).toBeInTheDocument();
     });
 
+    it("opens Integraciones on the status of each backend", async () => {
+      const integrations = [
+        { name: "frigate", enabled: true, id: "frigate", label: "Frigate", status: "connected" },
+        { name: "onvif", enabled: true, id: "onvif", label: "ONVIF", status: "connected" },
+        { name: "provision_isr", enabled: false, id: "provision_isr", label: "Provision ISR", status: "not_configured" },
+      ];
+      mountFull({}, { "/api/v1/cameras/c1/normalized-config": () => json({ integrations, state: { desired_revision: 0, applied_revision: 0, sync_state: "synced", last_error: "", drift: [] } }) });
+      await goTo("Integraciones");
+      expect(await screen.findByTestId("integration-provision_isr")).toHaveTextContent("No configurado");
+      expect(screen.getByTestId("integration-frigate")).toHaveTextContent("Conectado");
+      expect(screen.getByRole("button", { name: /^Capacidades ONVIF/ })).toBeInTheDocument();
+    });
+
     it("hides the camera web view entry when the user cannot manage the camera", async () => {
       mountFull({}, { "/api/v1/me": () => json({ id: "u", tenant_id: "t", grants: [{ permission: "cameras.view", effect: "allow" }] }) });
       await goTo("Integraciones");
+      fireEvent.click(await screen.findByRole("button", { name: /^Capacidades ONVIF/ }));
       expect(await screen.findByRole("region", { name: "Capacidades ONVIF" })).toBeInTheDocument();
       expect(screen.queryByRole("region", { name: "Acceso web a la cámara" })).not.toBeInTheDocument();
       expect(screen.queryByRole("button", { name: /^Web de la cámara/ })).not.toBeInTheDocument();
@@ -759,6 +773,31 @@ describe("FrigateCameraConfig", () => {
       mountFull();
       await screen.findByRole("tab", { name: "General" });
       expect(screen.queryByTestId("sync-badge")).not.toBeInTheDocument();
+    });
+  });
+  describe("PTZ and Fisheye tabs", () => {
+    it("hides both tabs for a fixed camera", async () => {
+      mountFull({}, { "/api/v1/cameras/c1": () => cam({ onvif_capabilities: { has_ptz: false } }) });
+      await screen.findByRole("tab", { name: "General" });
+      expect(screen.queryByRole("tab", { name: /^PTZ/ })).not.toBeInTheDocument();
+      expect(screen.queryByRole("tab", { name: /^Fisheye/ })).not.toBeInTheDocument();
+    });
+
+    it("shows PTZ for a PTZ camera, with the pad and contextual preview controls only inside it", async () => {
+      mountFull({}, { "/api/v1/cameras/c1": () => cam({ onvif_capabilities: { has_ptz: true } }), "/api/v1/cameras/c1/onvif/ptz": () => json({ success: true, presets: [] }), "/api/v1/cameras/c1/ptz/tours": () => json({ tours: [] }) });
+      await screen.findByRole("tab", { name: "General" });
+      expect(screen.queryByRole("group", { name: "Controles PTZ de la vista previa" })).not.toBeInTheDocument();
+      await goTo("PTZ");
+      expect(await screen.findByRole("region", { name: "Movimiento" })).toBeInTheDocument();
+      expect(screen.getByRole("group", { name: "Controles PTZ de la vista previa" })).toBeInTheDocument();
+      await goTo("General");
+      expect(screen.queryByRole("group", { name: "Controles PTZ de la vista previa" })).not.toBeInTheDocument();
+    });
+
+    it("shows Fisheye only for a fisheye camera", async () => {
+      mountFull({}, { "/api/v1/cameras/c1": () => cam({ tags: ["fisheye"] }) });
+      await goTo("Fisheye");
+      expect(await screen.findByRole("region", { name: "Original y vista" })).toBeInTheDocument();
     });
   });
 });

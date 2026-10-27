@@ -1412,6 +1412,59 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/cameras/{cameraId}/ptz/tours": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                cameraId: string;
+            };
+            cookie?: never;
+        };
+        /**
+         * List the PTZ tours stored for a camera
+         * @description Requires cameras.view. Tours are a stored sequence of device presets; this API does not run them.
+         */
+        get: operations["listCameraPtzTours"];
+        put?: never;
+        /**
+         * Store a PTZ tour for a camera
+         * @description Requires cameras.manage. Names are unique per camera.
+         */
+        post: operations["createCameraPtzTour"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/cameras/{cameraId}/ptz/tours/{tourId}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                cameraId: string;
+                tourId: string;
+            };
+            cookie?: never;
+        };
+        get?: never;
+        /**
+         * Replace a stored PTZ tour
+         * @description Requires cameras.manage.
+         */
+        put: operations["updateCameraPtzTour"];
+        post?: never;
+        /**
+         * Delete a stored PTZ tour
+         * @description Requires cameras.manage.
+         */
+        delete: operations["deleteCameraPtzTour"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/cameras/{cameraId}/zones": {
         parameters: {
             query?: never;
@@ -4855,6 +4908,34 @@ export interface components {
             /** @description Last synchronization failure or conflict reason; absent unless failed or conflicted. */
             readonly sync_error?: string;
         };
+        CameraPtzTourStep: {
+            preset_token: string;
+            preset_name?: string;
+            dwell_seconds: number;
+            speed: number;
+        };
+        CameraPtzTourInput: {
+            name: string;
+            steps: components["schemas"]["CameraPtzTourStep"][];
+            /** @description 0 repeats until stopped. */
+            repeat_count?: number;
+        };
+        CameraPtzTour: {
+            /** Format: uuid */
+            id: string;
+            /** Format: uuid */
+            camera_id: string;
+            name: string;
+            steps: components["schemas"]["CameraPtzTourStep"][];
+            repeat_count: number;
+            /** Format: date-time */
+            created_at: string;
+            /** Format: date-time */
+            updated_at: string;
+        };
+        CameraPtzTourList: {
+            tours: components["schemas"]["CameraPtzTour"][];
+        };
         CameraZoneList: {
             zones: components["schemas"]["CameraZone"][];
         };
@@ -4909,6 +4990,8 @@ export interface components {
                 raw?: string[];
                 /** @description Labels the engine model supports; omitted when unknown */
                 available_labels?: string[];
+                /** @description Limits of what the engine reports (for example Provision does not tell vehicle types apart); omitted when none */
+                notes?: string[];
             };
             analytics: {
                 lpr?: boolean;
@@ -4927,9 +5010,19 @@ export interface components {
             fisheye: {
                 supported: boolean;
             };
+            /**
+             * @description Features wired to the camera and, with an `id`, the status of each backend integration
+             *     (frigate, onvif, provision_isr). Statuses come from evidence OpenVMS already has.
+             */
             integrations: {
                 name: string;
                 enabled: boolean;
+                /** @enum {string} */
+                id?: "frigate" | "onvif" | "provision_isr";
+                label?: string;
+                /** @enum {string} */
+                status?: "connected" | "not_configured" | "error" | "unknown";
+                detail?: string;
             }[];
             overrides: {
                 default_live_quality?: string;
@@ -9403,6 +9496,118 @@ export interface operations {
             403: components["responses"]["Forbidden"];
             404: components["responses"]["NotFound"];
             502: components["responses"]["FrigateUnreachable"];
+        };
+    };
+    listCameraPtzTours: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                cameraId: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description PTZ tours */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["CameraPtzTourList"];
+                };
+            };
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+        };
+    };
+    createCameraPtzTour: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                cameraId: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["CameraPtzTourInput"];
+            };
+        };
+        responses: {
+            /** @description Created tour */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["CameraPtzTour"];
+                };
+            };
+            400: components["responses"]["BadRequest"];
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+            409: components["responses"]["Conflict"];
+        };
+    };
+    updateCameraPtzTour: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                cameraId: string;
+                tourId: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["CameraPtzTourInput"];
+            };
+        };
+        responses: {
+            /** @description Updated tour */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["CameraPtzTour"];
+                };
+            };
+            400: components["responses"]["BadRequest"];
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+            409: components["responses"]["Conflict"];
+        };
+    };
+    deleteCameraPtzTour: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                cameraId: string;
+                tourId: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Tour deleted */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
         };
     };
     listCameraZones: {

@@ -118,6 +118,9 @@ type Detection struct {
 	Raw        []string `json:"raw"`
 	// AvailableLabels are the labels the engine's model supports; empty means unknown.
 	AvailableLabels []string `json:"available_labels,omitempty"`
+	// Notes explain limits of what the engine reports, for example that Provision does not
+	// tell vehicle types apart.
+	Notes []string `json:"notes,omitempty"`
 }
 
 // Analytics are the optional analytics running on the camera; nil means unknown.
@@ -147,9 +150,17 @@ type Fisheye struct {
 }
 
 // Integration is a feature of the platform wired to the camera.
+//
+// Name and Enabled are the original fields. ID, Label, Status and Detail describe a backend
+// integration (Frigate, ONVIF, Provision ISR) and are read-only evidence, see integrations.go.
 type Integration struct {
 	Name    string `json:"name"`
 	Enabled bool   `json:"enabled"`
+	ID      string `json:"id,omitempty"`
+	Label   string `json:"label,omitempty"`
+	// Status is one of the Integration* constants.
+	Status string `json:"status,omitempty"`
+	Detail string `json:"detail,omitempty"`
 }
 
 // Overrides are the OpenVMS-side settings that take precedence over engine values.

@@ -22,6 +22,17 @@ Ids are stable machine names (`person`, `vehicle.car`, `package.box`, `safety.he
 
 Frigate labels not meant for surveillance (COCO household items) live in `other.misc`; `license_plate` and `face` are `other.*` objects because they are analytics modules.
 
+## Provision mapping
+
+Provision ISR events carry a plate and, at most, a coarse vehicle class (`internal/agent/provisionlpr`: `plate`, `vehicle_type` free text, color, brand). Only that is mapped:
+
+| Provision label | Object |
+|---|---|
+| `vehicle` | `vehicle.generic` ("Vehículo (sin tipo)", last of the Vehículos category) |
+| `license_plate` | `other.license_plate` |
+
+Car, truck, bus and the rest have no Provision label: they stay unsupported for that engine, and the Frigate view of `vehicle.generic` is empty. Selecting "Vehículos" on a Provision camera therefore means "vehicle, type unknown". `TestProvisionLabelsBelongToOneObject` pins that nothing else gets mapped without evidence.
+
 ## Adding an engine mapping
 
 Add an entry to the object's `Engine` map in `default.go` (`"provision": {"vehicle"}`). A label may belong to only one object per engine; `New` rejects duplicates and `TestEveryLabelBelongsToOneObject` guards the default data. An engine that reports only a coarse class (Provision: `vehicle`) maps it to the coarsest object that is honest, and leaves finer objects unmapped.

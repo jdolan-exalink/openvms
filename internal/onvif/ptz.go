@@ -88,6 +88,94 @@ func (p *PTZClient) GotoPreset(ctx context.Context, profileToken, presetToken st
 	return err
 }
 
+// SetPreset saves the current position as a preset. An empty presetToken creates a new preset;
+// an existing token overwrites that preset (ONVIF has no rename: renaming is SetPreset with the
+// same token and a new name, which also overwrites the stored position). It returns the token.
+func (p *PTZClient) SetPreset(ctx context.Context, profileToken, name, presetToken string) (string, error) {
+	content := `<tptz:ProfileToken>` + escapeXML(profileToken) + `</tptz:ProfileToken>` +
+		`<tptz:PresetName>` + escapeXML(name) + `</tptz:PresetName>`
+	if presetToken != "" {
+		content += `<tptz:PresetToken>` + escapeXML(presetToken) + `</tptz:PresetToken>`
+	}
+	data, err := p.call(ctx, "SetPreset", content, Mutating)
+	if err != nil {
+		return "", err
+	}
+	var response struct {
+		PresetToken string `xml:"http://www.onvif.org/ver20/ptz/wsdl PresetToken"`
+	}
+	if err := decodePTZOperation(data, "SetPresetResponse", &response); err != nil {
+		return "", &CallError{Status: StatusFailed, Code: "invalid_ptz_preset"}
+	}
+	return response.PresetToken, nil
+}
+
+// RemovePreset deletes a preset.
+func (p *PTZClient) RemovePreset(ctx context.Context, profileToken, presetToken string) error {
+	content := `<tptz:ProfileToken>` + escapeXML(profileToken) + `</tptz:ProfileToken>` +
+		`<tptz:PresetToken>` + escapeXML(presetToken) + `</tptz:PresetToken>`
+	_, err := p.call(ctx, "RemovePreset", content, Mutating)
+	return err
+}
+
+// GotoHomePosition moves the camera to its home position.
+func (p *PTZClient) GotoHomePosition(ctx context.Context, profileToken string) error {
+	_, err := p.call(ctx, "GotoHomePosition", `<tptz:ProfileToken>`+escapeXML(profileToken)+`</tptz:ProfileToken>`, Mutating)
+	return err
+}
+
+// SetHomePosition stores the current position as the home position.
+func (p *PTZClient) SetHomePosition(ctx context.Context, profileToken string) error {
+	_, err := p.call(ctx, "SetHomePosition", `<tptz:ProfileToken>`+escapeXML(profileToken)+`</tptz:ProfileToken>`, Mutating)
+	return err
+}
+
+// PTZNode describes what a PTZ node really supports; the UI enables only these operations.
+type PTZNode struct {
+	Token             string `json:"token"`
+	Name              string `json:"name"`
+	MaximumPresets    int    `json:"maximum_presets"`
+	HomeSupported     bool   `json:"home_supported"`
+	FixedHomePosition bool   `json:"fixed_home_position"`
+	SupportsPanTilt   bool   `json:"supports_pan_tilt"`
+	SupportsZoom      bool   `json:"supports_zoom"`
+}
+
+// GetNodes returns the PTZ nodes of the device with their capabilities.
+func (p *PTZClient) GetNodes(ctx context.Context) ([]PTZNode, error) {
+	data, err := p.call(ctx, "GetNodes", "", ReadOnly)
+	if err != nil {
+		return nil, err
+	}
+	var response struct {
+		Nodes []struct {
+			Token             string `xml:"token,attr"`
+			FixedHomePosition string `xml:"FixedHomePosition,attr"`
+			Name              string `xml:"http://www.onvif.org/ver10/schema Name"`
+			HomeSupported     string `xml:"http://www.onvif.org/ver10/schema HomeSupported"`
+			MaximumPresets    int    `xml:"http://www.onvif.org/ver10/schema MaximumNumberOfPresets"`
+			Spaces            struct {
+				PanTilt []struct{} `xml:"http://www.onvif.org/ver10/schema ContinuousPanTiltVelocitySpace"`
+				Zoom    []struct{} `xml:"http://www.onvif.org/ver10/schema ContinuousZoomVelocitySpace"`
+			} `xml:"http://www.onvif.org/ver10/schema SupportedPTZSpaces"`
+		} `xml:"http://www.onvif.org/ver20/ptz/wsdl PTZNode"`
+	}
+	if err := decodePTZOperation(data, "GetNodesResponse", &response); err != nil {
+		return nil, &CallError{Status: StatusFailed, Code: "invalid_ptz_nodes"}
+	}
+	out := make([]PTZNode, 0, len(response.Nodes))
+	for _, n := range response.Nodes {
+		out = append(out, PTZNode{
+			Token: n.Token, Name: n.Name, MaximumPresets: n.MaximumPresets,
+			HomeSupported:     n.HomeSupported == "true" || n.HomeSupported == "1",
+			FixedHomePosition: n.FixedHomePosition == "true" || n.FixedHomePosition == "1",
+			SupportsPanTilt:   len(n.Spaces.PanTilt) > 0,
+			SupportsZoom:      len(n.Spaces.Zoom) > 0,
+		})
+	}
+	return out, nil
+}
+
 func decodePTZOperation(data []byte, name string, target any) error {
 	decoder := xml.NewDecoder(bytes.NewReader(data))
 	for {

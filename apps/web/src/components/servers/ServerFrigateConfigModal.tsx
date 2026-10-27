@@ -22,7 +22,9 @@ import {
   Zap,
 } from "lucide-react";
 import { api, type Schemas, unwrap } from "@/api/client";
-import { serverAgentQuery, serverFrigateRawQuery, serverFrigateRevisionsQuery } from "@/api/queries";
+import { objectCatalogQuery, serverAgentQuery, serverFrigateRawQuery, serverFrigateRevisionsQuery } from "@/api/queries";
+import { setSectionScalar } from "@/lib/frigateGroups";
+import { AccelerationPanel, DefaultsPanel, ModelPanel, ObjectCatalogView, OtherPanel } from "./FrigateGlobalPanels";
 import {
   FRIGATE_OBJECT_CATALOG,
   FRIGATE_OBJECT_CATEGORIES,
@@ -52,9 +54,11 @@ interface ServerFrigateConfigModalProps {
   open: boolean;
   onClose: () => void;
   canRestart: boolean;
+  /** False renders the screen read-only (no saving, no acceleration change). Defaults to true. */
+  canEdit?: boolean;
 }
 
-type ConfigTab = "mqtt" | "detectors" | "objects" | "record" | "birdseye" | "yaml" | "history";
+type ConfigTab = "mqtt" | "detectors" | "model" | "objects" | "record" | "accel" | "defaults" | "birdseye" | "other" | "yaml" | "history";
 
 // Helper regex-based parsers to inspect and patch YAML without requiring a heavyweight client-side YAML parser
 function extractYamlSection(yaml: string, sectionKey: string): string | null {
@@ -108,6 +112,7 @@ export function ServerFrigateConfigModal({
   open,
   onClose,
   canRestart,
+  canEdit = true,
 }: ServerFrigateConfigModalProps) {
   const qc = useQueryClient();
   const [activeTab, setActiveTab] = useState<ConfigTab>("mqtt");
@@ -122,6 +127,7 @@ export function ServerFrigateConfigModal({
   const rawQuery = useQuery(serverFrigateRawQuery(server.id));
   const revisionsQuery = useQuery(serverFrigateRevisionsQuery(server.id));
   const agentQuery = useQuery(serverAgentQuery(server.id));
+  const catalogQuery = useQuery(objectCatalogQuery("frigate", server.id));
 
   const detectedHw = useMemo(() => {
     const data = agentQuery.data;
@@ -319,7 +325,16 @@ export function ServerFrigateConfigModal({
             onClick={() => setActiveTab("objects")}
           >
             <Icon icon={Sparkles} size="xs" />
-            Objetos Globales
+            Objetos disponibles
+          </Button>
+
+          <Button
+            size="sm"
+            variant={activeTab === "model" ? "primary" : "text"}
+            onClick={() => setActiveTab("model")}
+          >
+            <Icon icon={Bot} size="xs" />
+            Modelo
           </Button>
 
           <Button
@@ -328,7 +343,25 @@ export function ServerFrigateConfigModal({
             onClick={() => setActiveTab("record")}
           >
             <Icon icon={HardDrive} size="xs" />
-            Grabación & Retención
+            Grabación & Almacenamiento
+          </Button>
+
+          <Button
+            size="sm"
+            variant={activeTab === "accel" ? "primary" : "text"}
+            onClick={() => setActiveTab("accel")}
+          >
+            <Icon icon={Zap} size="xs" />
+            Aceleración
+          </Button>
+
+          <Button
+            size="sm"
+            variant={activeTab === "defaults" ? "primary" : "text"}
+            onClick={() => setActiveTab("defaults")}
+          >
+            <Icon icon={Sliders} size="xs" />
+            Defaults de cámaras
           </Button>
 
           <Button
@@ -342,11 +375,20 @@ export function ServerFrigateConfigModal({
 
           <Button
             size="sm"
+            variant={activeTab === "other" ? "primary" : "text"}
+            onClick={() => setActiveTab("other")}
+          >
+            <Icon icon={Database} size="xs" />
+            Otros parámetros
+          </Button>
+
+          <Button
+            size="sm"
             variant={activeTab === "yaml" ? "primary" : "text"}
             onClick={() => setActiveTab("yaml")}
           >
             <Icon icon={Code2} size="xs" />
-            Editor YAML
+            Editor YAML (avanzado)
           </Button>
 
           <Button
@@ -378,6 +420,17 @@ export function ServerFrigateConfigModal({
 
         {!rawQuery.isLoading && !rawQuery.error && (
           <div className="flex-1 flex flex-col gap-4">
+            {activeTab === "model" && <ModelPanel yaml={yamlText} catalog={catalogQuery.data} />}
+            {activeTab === "accel" && (
+              <AccelerationPanel
+                yaml={yamlText}
+                canEdit={canEdit}
+                onChange={(preset) => setYamlText((prev) => setSectionScalar(prev, "ffmpeg", "hwaccel_args", preset))}
+              />
+            )}
+            {activeTab === "defaults" && <DefaultsPanel yaml={yamlText} onOpenYaml={() => setActiveTab("yaml")} />}
+            {activeTab === "other" && <OtherPanel yaml={yamlText} />}
+
             {/* 1. Tab MQTT & OpenVMS Integration */}
             {activeTab === "mqtt" && (
               <div className="flex flex-col gap-4">
@@ -661,6 +714,7 @@ export function ServerFrigateConfigModal({
             {/* 3. Tab Objetos Globales */}
             {activeTab === "objects" && (
               <div className="flex flex-col gap-5">
+                <ObjectCatalogView catalog={catalogQuery.data} loading={catalogQuery.isLoading} failed={catalogQuery.isError} />
                 <div className="flex flex-col gap-1">
                   <div className="flex items-center justify-between">
                     <h3 className="text-sm font-bold text-on-surface flex items-center gap-2">
@@ -1184,7 +1238,7 @@ export function ServerFrigateConfigModal({
             </Button>
             <Button
               variant="primary"
-              disabled={saveMutation.isPending || !isDirty}
+              disabled={saveMutation.isPending || !isDirty || !canEdit}
               onClick={() => saveMutation.mutate()}
             >
               <Icon icon={Save} size="xs" className={saveMutation.isPending ? "animate-spin" : ""} />
