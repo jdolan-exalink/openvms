@@ -60,3 +60,32 @@ func TestConfigTrailDoesNotLeakStreamCredentials(t *testing.T) {
 		}
 	}
 }
+
+func TestOpenCameraEngineKeepsLegacyViewersReading(t *testing.T) {
+	env := demofix.Setup(t)
+	useYAMLEngine(env, newYAMLEngine())
+	cam := env.Cameras["frigate-h01/acceso_norte"]
+	ctx := context.Background()
+
+	viewer := grantAt(t, env, "cfg-viewer", cam.TenantID, authz.CamerasView)
+	if _, err := env.Svc.OpenCameraEngine(ctx, viewer, cam.ID); err != nil {
+		t.Fatalf("cameras.view alone must read the config: %v", err)
+	}
+	ptz := grantAt(t, env, "cfg-viewer-ptz", cam.TenantID, authz.CamerasView, authz.CamerasConfigPTZ)
+	if _, err := env.Svc.OpenCameraEngine(ctx, ptz, cam.ID); err != nil {
+		t.Fatalf("a granular grant elsewhere must not revoke the legacy read: %v", err)
+	}
+	denied := grantAt(t, env, "cfg-viewer-deny", cam.TenantID, authz.CamerasView)
+	if _, err := env.Svc.CreateGrant(ctx, env.Admin, inventory.GrantInput{
+		SubjectType: "user", SubjectID: denied.UserID, Permission: authz.CamerasConfigView,
+		Effect: authz.Deny, ScopeType: authz.ScopeTenant, ScopeID: &cam.TenantID,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := env.Svc.OpenCameraEngine(ctx, denied, cam.ID); err == nil {
+		t.Fatal("an explicit deny of cameras.config.view must refuse the read")
+	}
+	if _, err := env.Svc.OpenCameraEngine(ctx, grantAt(t, env, "cfg-none", cam.TenantID, authz.CamerasConfigPTZ), cam.ID); err == nil {
+		t.Fatal("without cameras.view there is no read")
+	}
+}
