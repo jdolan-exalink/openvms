@@ -1512,8 +1512,10 @@ export interface paths {
          *     probe); credentials and device addresses are never returned. When the camera cannot be
          *     asked the answer is still 200 with `available: false` and a reason code: `no_onvif`
          *     (no ONVIF endpoint), `no_credentials` (none stored), `unreachable` (the camera did not
-         *     answer) or `unsupported` (it does not expose the settings, or the stream's ONVIF profile
-         *     could not be identified). `apply_via` tells, per field, whether a change goes to the
+         *     answer), `unsupported` (it does not expose the settings, or the stream's ONVIF profile
+         *     could not be identified) or `agent_outdated` (the camera is reached through its server's
+         *     agent, which has to be updated first). A camera whose server has an agent is always reached
+         *     through it; without an agent the API dials the camera directly on private addresses. `apply_via` tells, per field, whether a change goes to the
          *     camera (`onvif`), to Frigate's detect section (`frigate`) or cannot be made (`none`).
          *     Applying changes goes through the normalized-config review and apply endpoints with
          *     `streams.primary` / `streams.detection`; a change that restarts the stream says so in
@@ -5371,7 +5373,7 @@ export interface components {
             warnings: string[];
         };
         /** @enum {string} */
-        CameraVideoReason: "no_onvif" | "no_credentials" | "unreachable" | "unsupported";
+        CameraVideoReason: "no_onvif" | "no_credentials" | "unreachable" | "unsupported" | "agent_outdated";
         CameraVideoOptions: {
             /** Format: uuid */
             camera_id: string;

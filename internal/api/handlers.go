@@ -84,6 +84,8 @@ type Handlers struct {
 	camProfile camProfileService
 	// camVideo replaces the ONVIF video link lookup in tests; nil uses the camera's credentials.
 	camVideo videoLinkFunc
+	// camAgentVideo replaces the agent video operations in tests; nil uses Provision.
+	camAgentVideo agentVideoProvider
 
 	// catalogLabels reads the model labels a server's engine supports for the object catalog;
 	// nil uses Inv, which reads them from the server's Frigate model.
