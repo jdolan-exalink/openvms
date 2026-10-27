@@ -1,0 +1,65 @@
+# ONVIF-05 — Camera delete with tombstones and recording disposition
+
+Objective: delete a camera from OpenVMS without losing recordings by default and without Frigate sync bringing it back. Parent: `odd/tasks/onvif-camera-management.md` (ONVIF-05, the only ONVIF unit prioritized, 2026-10-27).
+Branch: `feat/onvif-05-camera-delete` (not created yet). Delivery strategy: `ask-on-risk`. Runner: `go test ./internal/...`, `go test -tags integration`, `pnpm --dir apps/web test`.
+Status: spec only. Nothing is implemented. Owner decisions D1-D4 recorded 2026-10-27 (Log L2); D5 approved (Log L3); D6 is open.
+
+## Specs
+
+- S1. "Delete preserves recordings by default; discard requires explicit confirmation and must fail closed if the disposition is missing/invalid." (parent ONVIF-05). Superseded in part by L2: there is no discard; delete always keeps history until the recording days pass (S7).
+- S2. "retain stable IDs and deletion tombstones to prevent reimport." (parent ONVIF-05)
+- S3. "synchronize Frigate additions/edits/removals" (parent ONVIF-05). D2: "borrrar de los 2 lados y avisar que va a ser borrada y no vamos a tener grabaciones". Delete removes the camera from OpenVMS and from Frigate's config, and the confirmation warns that the camera will be deleted and will stop recording.
+- S4. "Never factory-reset a device." No ONVIF factory-reset or reboot call is added; delete never touches the physical camera.
+- S5. Delete is audited like other camera changes (new action constant next to `ActionCameraUpdated` in `internal/inventory/service.go`), including the disposition in the details.
+- S7. D3: "que se queden las grabaciones y enventos en los dos lados hasta que pasne los dias de grabacion". Recordings and events stay in Frigate and in OpenVMS until the recording days pass; delete does not purge history.
+- S8. D4: "podemos restaurar una camara grabada teniendo en cuenta de que si tiene el mismo nombre no pisemos el historial de la misma y avisemos que vamos a mergear el historial de la vieja con las nuevas grabaciones". A deleted camera can be restored; the old history is kept and joined with the new recordings, and the confirmation says so.
+- S9. D1: "reusá servers.manage". Delete and restore require `servers.manage` on the camera's server; no new permission.
+- S6. Assumption: delete is a soft delete. It sets `cameras.deleted_at` and `deleted_by`, which already exist and are honoured by every camera query, so history rows keep their FK.
+
+## Current state (verified 2026-10-27, `main` at 70fd59f)
+
+- No camera delete exists: `/api/v1/cameras/{cameraId}` has only `get` and `patch` (`packages/api-contract/openapi.yaml:1177`); no inventory method; no SQL query. `PurgeServerCameras` (`internal/store/queries/inventory.sql:393`) is a hard delete used only by server delete.
+- Soft-delete columns exist but nothing sets them: `deleted_at`, `deleted_by` (`migrations/00002_inventory_and_authz.sql:118-119`), partial unique index `cameras_server_remote_key ON (server_id, remote_name) WHERE deleted_at IS NULL` (line 121).
+- Reimport trap: `UpsertCamera` conflicts only on live rows (`inventory.sql:136`), so a soft-deleted camera whose `remote_name` is still in Frigate is inserted again as a new row with a new id on the next sync. Callers: `upsertCamera` (`internal/inventory/servers.go:299`) from `SyncServer` and `CreateServer`, and `AddCameraToFrigate` (`internal/inventory/frigate_config.go:622`) through `SyncServer`.
+- Many tables reference `cameras(id)` without `ON DELETE` (events, lpr_reads, alarms, vehicle and person attributes, object_tracks, exports, export items, clip_watermark_jobs). A hard delete is blocked; soft delete avoids it.
+- Recordings live only in Frigate on the remote server. OpenVMS keeps `events.thumb_key`, `preview_key`, `clip_watermark_jobs.output_key` blobs and export paths. `DeleteServer` is the only existing media purge (`ListServerBlobKeys`, `PurgeServer*`, `deleteBlobs` after commit, `internal/inventory/servers.go:~505-573`); its doc says Frigate and its recordings are untouched.
+- No code removes a camera from Frigate's config. `AddCameraToFrigate` and `writeRaw` (`frigate_config.go:457`) show the pattern (raw config, mutate `cameras`, save with revision and audit).
+- Permissions: no camera delete permission. `DeleteServer` requires `ServersManage`; Frigate config edits need `ServersConfig` and `ServersConfigSecrets` (`internal/authz/catalog.go`).
+- Web: `ConfirmDialog` supports a danger button but no extra inputs; a disposition choice needs its own modal.
+- Next migration number: `00081`.
+
+## Decisions
+
+- D1-D4: answered by the owner (Log L2, S3, S7-S9).
+- D5 (approved, L3: purge is in scope). OpenVMS has no event retention of its own: events and their copied thumbnails live indefinitely (`copyThumbnails`, `internal/events/syncer.go:866`; only Frigate expires recordings). "Until the recording days pass" therefore needs a purge of a deleted camera's OpenVMS history once its retention window ends. Proposed: a periodic job that, per tombstoned camera, purges history older than the camera's last known `record.retain.days` (stored on the tombstone at delete time), following `DeleteServer`'s purge order. Approved by the owner; it deletes data, so T7 gets its own commit and an integration test that nothing outside the tombstoned camera and its retention window is touched.
+- D6 (open, verify). Whether Frigate keeps a removed camera's existing recordings until their retention expires, or cleans them up when the camera leaves the config, is not verified in this repo. S7 depends on it; it has to be checked against a real Frigate 0.17/0.18 before T5 ships, and the warning text must match what Frigate really does.
+- Permission note: Frigate config edits today need `servers.config` and `servers.config.secrets` (`internal/authz/catalog.go`). Per S9 delete checks only `servers.manage`, so T5 writes the config through the existing raw-config path without requiring those two.
+
+## Design (proposed, pending D5-D6)
+
+- Tombstone table `camera_tombstones (tenant_id, server_id, remote_name, camera_id, deleted_at, deleted_by, retain_days)`, unique on `(server_id, remote_name)`. Migration `00081_camera_tombstones.sql`, additive.
+- `UpsertCamera` skips a `(server_id, remote_name)` that has a tombstone, in the query itself, since it is the single choke point. `SyncServer` reports such cameras as skipped. Adding a camera with a tombstoned name (`AddCameraToFrigate`) is refused with a message pointing to restore.
+- `DELETE /api/v1/cameras/{cameraId}`: sets `deleted_at` and `deleted_by` (soft delete, the row and its id are kept so history stays attached), inserts the tombstone, strips the camera from groups and view cells, removes it from Frigate's config through the raw-config path (revision and audit as `writeRaw` does), audits `CAMERA_REMOVED`. No body options; there is no disposition to validate.
+- `POST /api/v1/cameras/{cameraId}/restore`: clears `deleted_at` and the tombstone on the same row and re-adds the camera to Frigate's config. History needs no merge step because the id is the same: old events stay and new ones attach to it. If a live camera with the same `(server_id, remote_name)` exists, restore is refused with 409.
+- Web: "Eliminar cámara" in the camera menu; the modal says the camera will be deleted, will stop recording, and that history stays until its recording days pass. A "Restaurar" action on deleted cameras; its modal says the old history will be merged with the new recordings. Spanish strings.
+
+## Tasks
+
+- [x] T1 (S3, S7-S9) Owner decisions D1-D4 recorded (Log L2). D5 approved in L3; D6 stays open and gates T5. Route: inline. Commit: -
+- [x] T2 (S2, S6) Migration `00081` + tombstone check in `UpsertCamera`; integration test that sync after delete does not recreate the camera. Risk: item 1 (migration). Route: inline. Evidence: RED `live cameras named "plaza" after the sync = 1, want 0`; GREEN with the tombstone check; `go test -tags integration ./internal/inventory/... ./migrations/...` pass. Commit: see git log (`feat(inventory): tombstones stop the sync from recreating deleted cameras`).
+- [ ] T3 (S5, S6, S7) `inventory.DeleteCamera` and `RestoreCamera` (soft delete, tombstone, groups and view cells, audit, 409 on a live same-name camera); integration tests for delete, restore keeping history, and reimport blocked. Risk: item 1 (changes stored data). Route: inline. Commit: -
+- [ ] T4 (S9) OpenAPI `DELETE /cameras/{cameraId}` and `POST /cameras/{cameraId}/restore`, generated code, handlers, `servers.manage` check. Risk: item 3 (adds contract). Route: inline. Commit: -
+- [ ] T5 (S3, D6) Remove and re-add the camera in Frigate's config through the raw-config path; verify against a real Frigate before shipping. Risk: item 5 (touches a remote system's config). Route: inline. Commit: -
+- [ ] T6 (S3, S8) Web delete and restore flows with the warnings and tests. Route: inline. Commit: -
+- [ ] T7 (S7, D5) Retention purge of a deleted camera's OpenVMS history once its recording days pass (approved in L3). Risk: item 1 (deletes data). Route: inline. Commit: -
+- [ ] T8 (S4, S5) Differential check that sync, groups and view behavior for non-deleted cameras are unchanged; docs update; deploy only with the owner's go-ahead. Route: inline. Commit: -
+
+## Log
+
+- L1 (2026-10-27, owner): "dale, solo ONVIF-05 y diferí el resto" and "dale, arrancá con el doc de ONVIF-05". Parent text: "Implement camera manifest/state reconciliation and CRUD through API/agent; synchronize Frigate additions/edits/removals; retain stable IDs and deletion tombstones to prevent reimport. Health/readiness surfaces device and protocol state. Delete preserves recordings by default; discard requires explicit confirmation and must fail closed if the disposition is missing/invalid. Never factory-reset a device."
+- 2026-10-27: Mapped by a read-only explorer and spot-checked by the parent (`deleted_at` columns, partial unique index, `UpsertCamera` conflict clause, latest migration 00080). Scope of this document is delete only; the manifest/health/CRUD parts of ONVIF-05 stay in the umbrella doc as unscheduled.
+- L2 (2026-10-27, owner): "dale, reusá servers.manage, d2 borrrar de los 2 lados y avisar que va a ser borrada y no vamos a tener grabaciones, d3 que se queden las grabaciones y enventos en los dos lados hasta que pasne los dias de grabacion. d4 podemos restaurar una camara grabada teniendo en cuenta de que si tiene el mismo nombre no pisemos el historial de la misma y avisemos que vamos a mergear el historial de la vieja con las nuevas grabaciones". Effects: no discard disposition (S1 narrowed, S7); Frigate config removal added (S3, T5); restore added (S8, T3, T6); permission fixed (S9).
+- 2026-10-27: found that OpenVMS has no event retention of its own, so S7 needs D5; and Frigate's behavior for a removed camera's recordings is unverified (D6).
+- L3 (2026-10-27, owner): "dale, incluí la purga en el alcance". D5 approved: the retention purge of a deleted camera's OpenVMS history is part of this feature (T7).
+- 2026-10-27: T2 done. `UpsertCamera` now returns no row for a tombstoned name (`INSERT ... SELECT ... WHERE NOT EXISTS`), `upsertCamera` reports it as skipped, `SyncResult.Skipped` and the sync audit carry the count. Not changed: the API response of the sync (no contract change). Existing sync behavior for untouched servers pinned by `TestSyncWithoutTombstonesSkipsNothing`.
+- Next step: T3 (delete/restore in the inventory service). Previously: T2 starts on `feat/onvif-05-camera-delete`; D6 must be checked on a real Frigate before T5.
