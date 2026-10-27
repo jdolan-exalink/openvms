@@ -1,5 +1,8 @@
+import { useMutation } from "@tanstack/react-query";
 import { MoreHorizontal } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
+import { api, unwrap } from "@/api/client";
+import { ConfirmDialog } from "@/components/ConfirmDialog";
 import { Icon } from "@/components/Icon";
 import { Button } from "@/components/ui";
 
@@ -39,5 +42,31 @@ export function MoreActions({ actions }: { actions: MoreAction[] }) {
         </div>
       )}
     </div>
+  );
+}
+
+export const RESTART_CAMERA_LABEL = "Reiniciar cámara";
+export const RESTART_CAMERA_WARNING = "La cámara dejará de transmitir mientras se reinicia.";
+
+/** Confirmation of a camera restart (ONVIF SystemReboot); the request carries the explicit confirm flag. */
+export function RestartCameraDialog({ cameraId, onClose }: { cameraId: string; onClose: () => void }) {
+  const [done, setDone] = useState(false);
+  const restart = useMutation({
+    mutationFn: async () => unwrap(await api.POST("/api/v1/cameras/{cameraId}/restart", { params: { path: { cameraId } }, body: { confirm: true } })),
+    onSuccess: () => setDone(true),
+  });
+  if (done) {
+    return <ConfirmDialog title={RESTART_CAMERA_LABEL} message="La cámara aceptó el reinicio. Volverá a transmitir en unos instantes." confirmLabel="Entendido" cancelLabel="Cerrar" onConfirm={onClose} onCancel={onClose} />;
+  }
+  return (
+    <ConfirmDialog
+      title={RESTART_CAMERA_LABEL}
+      message={RESTART_CAMERA_WARNING}
+      confirmLabel="Reiniciar"
+      pending={restart.isPending}
+      error={restart.error}
+      onConfirm={() => restart.mutate()}
+      onCancel={onClose}
+    />
   );
 }

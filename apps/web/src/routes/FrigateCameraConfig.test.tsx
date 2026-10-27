@@ -149,6 +149,22 @@ describe("FrigateCameraConfig", () => {
     expect(await patch.clone().json()).toEqual({ sections: { detect: { fps: 12 } } });
   });
 
+  it("offers Reiniciar cámara to servers.restart holders and asks to confirm before restarting", async () => {
+    const fetchMock = mount({}, { "/api/v1/cameras/c1/restart": () => json({ restarted: true, via: "agent" }) });
+    fireEvent.click(await screen.findByRole("button", { name: "Más acciones" }));
+    fireEvent.click(await screen.findByRole("menuitem", { name: "Reiniciar cámara" }));
+    expect(await screen.findByText("La cámara dejará de transmitir mientras se reinicia.")).toBeInTheDocument();
+    expect(fetchMock.mock.calls.some(([r]) => (r as Request).method === "POST" && new URL((r as Request).url).pathname.endsWith("/restart"))).toBe(false);
+    fireEvent.click(screen.getByRole("button", { name: "Reiniciar" }));
+    await waitFor(() => expect(fetchMock.mock.calls.some(([r]) => (r as Request).method === "POST" && new URL((r as Request).url).pathname === "/api/v1/cameras/c1/restart")).toBe(true));
+  });
+
+  it("hides Reiniciar cámara without the restart permission", async () => {
+    mount({}, { "/api/v1/me": () => json({ id: "u", tenant_id: "t", grants: [{ permission: "cameras.view", effect: "allow" }] }) });
+    fireEvent.click(await screen.findByRole("button", { name: "Más acciones" }));
+    expect(screen.queryByRole("menuitem", { name: "Reiniciar cámara" })).not.toBeInTheDocument();
+  });
+
   it("applies the reviewed camera sections to the selected cameras on the same server", async () => {
     const fetchMock = mount({}, {
       "/api/v1/cameras": () => json({ items: [
