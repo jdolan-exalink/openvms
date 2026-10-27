@@ -229,7 +229,7 @@ func TestApplyCameraConfigMapsOriginAndErrors(t *testing.T) {
 	body := gen.ApplyCameraConfigJSONRequestBody{
 		Patch: gen.CameraConfigPatch{"recording": map[string]any{"enabled": true}}, ExpectedRevision: 4,
 	}
-	origin := gen.CameraConfigOrigin("profile")
+	origin := gen.CameraConfigOrigin("api")
 	body.Origin = &origin
 
 	t.Run("passes revision and origin on", func(t *testing.T) {
@@ -242,7 +242,7 @@ func TestApplyCameraConfigMapsOriginAndErrors(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		if w.gotApply.ExpectedRevision != 4 || w.gotApply.Origin != "profile" {
+		if w.gotApply.ExpectedRevision != 4 || w.gotApply.Origin != "api" {
 			t.Fatalf("input = %+v", w.gotApply)
 		}
 		out := res.(gen.ApplyCameraConfig200JSONResponse)
