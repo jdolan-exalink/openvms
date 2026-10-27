@@ -25,7 +25,7 @@ The fisheye UI exposes view layouts the user no longer wants, while the camera s
 - [ ] FGI-01 — Implementation and focused regressions are present; task remains open because required broader checks fail. Remove only Panorama/180° and 4 Cuadrantes; retain Original, 360°, Virtual PTZ, and 3 fixed.
 - [x] FGI-02 — Implementation and focused regressions are present; task remains open because required broader checks fail. Mark grid cameras bold and offline names dark gray.
 - [x] FGI-03 — Fish icon and far-right disclosure implementation and regression are present; task remains open because required broader checks fail. Preserve disclosure tooltip and accessibility label.
-- [ ] FGI-04 — Implemented transient tile overlay visibility and timer regression, but offline-name pinning and touch-only behavior remain without direct mounted-tile coverage.
+- [x] FGI-04 — Transient tile overlay visibility (3 s), offline-name pinning and touch-only reveal are covered by mounted-tile tests in `apps/web/src/routes/Live.test.tsx` ("Live tile overlay"); each was checked to fail when its behavior is removed.
 - [x] FGI-05 — Implemented compact enhancement-icon settings access and relocated all mode choices into settings; task remains open while broader web suite/lint failures remain.
 - [x] FGI-06 — Implemented non-fisheye dewarping suppression and a focused Live regression; task remains open while broader web suite/lint failures remain.
 - [x] FGI-07 — Corrected both Live placement test handles after identity-key remount; the Live suite passes. Not committed per the bounded follow-up's explicit no-commit constraint.
