@@ -49,6 +49,13 @@ Migration `00078_camera_config_permissions.sql` and `internal/authz/camera_confi
   not open it either (it never did: raw YAML needed the secrets pair) but still opens the advanced panels.
 - The YAML shows credentials only to actors holding `servers.config.secrets`; others get masked
   placeholders that round-trip without overwriting the real values.
-- History and rollback (`/normalized-config/history|rollback`) need `servers.config` like the review,
-  and the rollback needs the permission of each section it restores.
+- History and rollback (`/normalized-config/history|rollback`) need `servers.config` like the review
+  plus `cameras.view` on the camera, and the rollback needs the permission of each section it restores.
+- `cameras.config.view` is an Always-compat permission: it can never grant more than `cameras.view`
+  did, so a legacy viewer keeps reading a camera's config even when holding granular grants elsewhere;
+  an explicit deny of it still revokes the read.
+- Denies now apply to the legacy `PATCH /cameras/{id}/frigate-config` route and to the YAML apply: each
+  Frigate section needs its granular permission (detect/objects/motion edit; record/snapshots recording;
+  ffmpeg/live/rtmp video; lpr/face_recognition/semantic_search/genai/classification analytics).
+  Legacy `servers.config` holders without granular allows are unaffected.
 - Matrix test: `TestCameraYAMLAndAdvancedPermissionMatrix` in `internal/inventory/camera_advanced_integration_test.go`.
