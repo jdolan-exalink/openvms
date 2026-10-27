@@ -247,7 +247,8 @@ export function FisheyeSection({
                 className="w-full text-xs"
               >
                 <option value="original">Original (Sin dewarp)</option>
-                <option value="360">360° Panorámica</option>
+                <option value="360">360°</option>
+                <option value="panorama">2×180°</option>
                 <option value="virtual_ptz">PTZ Virtual</option>
                 <option value="3_fixed_120">3 Fijas de 120°</option>
               </Select>

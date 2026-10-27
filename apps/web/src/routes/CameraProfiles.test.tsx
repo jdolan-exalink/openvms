@@ -100,4 +100,43 @@ describe("CameraProfiles", () => {
     expect(within(outdated).queryByText("Patio")).toBeNull();
     expect(within(screen.getByRole("region", { name: "Cámaras al día" })).getByText("Patio")).toBeInTheDocument();
   });
+
+  describe("re-apply to outdated cameras", () => {
+    const review = (parameters: number) => ({ review: { changes: [], impact: [{ code: "engine_reload", message: "Frigate recargará configuración" }], unsupported: [] }, parameters, shadowed: [], converted: [], dropped: [] });
+    const twoOutdated = { "/api/v1/camera-config/profiles/p1": () => json({ ...profile("p1", "Exterior"), cameras: [{ camera_id: "c1", outdated: true }, { camera_id: "c2", outdated: true }] }) };
+
+    it("reviews every outdated camera, applies nothing until confirmed, then reports per-camera outcomes", async () => {
+      const sent = setup(["cameras.manage"], {
+        ...twoOutdated,
+        "/api/v1/cameras/c1/profile/review": () => json(review(2)),
+        "/api/v1/cameras/c2/profile/review": () => json(review(1)),
+        "/api/v1/cameras/c1/profile/apply": () => json({ review: review(2) }),
+        "/api/v1/cameras/c2/profile/apply": () => json({ message: "boom" }, 500),
+      });
+      fireEvent.click(await screen.findByRole("button", { name: "Ver cámaras de Exterior" }));
+      fireEvent.click(await screen.findByRole("button", { name: "Reaplicar a las desactualizadas" }));
+      const confirm = await screen.findByRole("button", { name: "Aplicar a 2 cámaras" });
+      const table = within(screen.getByRole("table", { name: "Resumen de reaplicación" }));
+      expect(table.getByText("Entrada")).toBeInTheDocument();
+      expect(table.getAllByText("Frigate recargará configuración")).toHaveLength(2);
+      expect(sent.filter((s) => s.path.endsWith("/profile/apply"))).toHaveLength(0);
+      fireEvent.click(confirm);
+      await waitFor(() => expect(sent.filter((s) => s.path.endsWith("/profile/apply"))).toHaveLength(2));
+      expect(await table.findByText("Aplicada")).toBeInTheDocument();
+      expect(await table.findByText(/Falló/)).toBeInTheDocument();
+      expect(sent.filter((s) => s.path.endsWith("/profile/apply"))[0]?.body).toEqual({ profile_id: "p1", keep_values: true });
+    });
+
+    it("keeps a camera whose review fails out of the confirmation", async () => {
+      setup(["cameras.manage"], {
+        ...twoOutdated,
+        "/api/v1/cameras/c1/profile/review": () => json(review(2)),
+        "/api/v1/cameras/c2/profile/review": () => json({ message: "sin permiso" }, 403),
+      });
+      fireEvent.click(await screen.findByRole("button", { name: "Ver cámaras de Exterior" }));
+      fireEvent.click(await screen.findByRole("button", { name: "Reaplicar a las desactualizadas" }));
+      expect(await screen.findByRole("button", { name: "Aplicar a 1 cámaras" })).toBeEnabled();
+      expect(screen.getAllByRole("alert").length).toBeGreaterThan(0);
+    });
+  });
 });

@@ -102,7 +102,7 @@ describe("FisheyeSection Component", () => {
     expect(screen.getByText(/No hay vistas virtuales configuradas/i)).toBeInTheDocument();
   });
 
-  it("removes panorama as a view mode while retaining panoramic projection", () => {
+  it("lists 360° and 2×180° as view modes while retaining panoramic projection", () => {
     render(<FisheyeSection cameraId="cam-fe-panorama" cameraName="Camera 360" />);
     fireEvent.click(screen.getByRole("switch"));
 
@@ -111,7 +111,8 @@ describe("FisheyeSection Component", () => {
     const modeSelect = selects[3]!;
     expect(within(modeSelect).queryByRole("option", { name: /Panorama 180°/i })).not.toBeInTheDocument();
     expect(within(modeSelect).queryByRole("option", { name: /4 Cuadrantes/i })).not.toBeInTheDocument();
-    expect(within(modeSelect).getByRole("option", { name: /360° Panorámica/i })).toBeInTheDocument();
+    expect(within(modeSelect).getByRole("option", { name: "360°" })).toBeInTheDocument();
+    expect(within(modeSelect).getByRole("option", { name: "2×180°" })).toHaveValue("panorama");
     expect(within(lensSelect).getByRole("option", { name: /Panorámica/i })).toBeInTheDocument();
   });
 

@@ -5,6 +5,7 @@ import { EditYamlLink } from "@/components/camera/advanced/YamlEntry";
 import { useCameraChange } from "@/components/camera/CameraChangeProvider";
 import { ProvenanceBadge } from "@/components/camera/profile/ProvenanceBadge";
 import { Switch } from "@/components/ui";
+import type { ServerDefaults } from "@/lib/useServerDefaults";
 import { DetectionSettings, type DetectionSettingsValue } from "./DetectionSettings";
 import { ObjectCatalogPicker } from "./ObjectCatalogPicker";
 
@@ -18,12 +19,14 @@ export type DetectionTabProps = {
   onMotion: (next: Rec) => void;
   onObjects: (next: Rec) => void;
   onOpenZones: () => void;
+  /** Server-level Frigate defaults the camera inherits (only fields it does not override). */
+  serverDefaults?: ServerDefaults;
   /** The previous Frigate detect/objects/motion editors, kept under an advanced disclosure. */
   legacy: ReactNode;
 };
 
 /** Detection tab: enable it, pick what to detect from the catalog, tune the common settings. */
-export function DetectionTab({ serverId, readOnly, settings, onMotion, onObjects, onOpenZones, legacy }: DetectionTabProps) {
+export function DetectionTab({ serverId, readOnly, settings, onMotion, onObjects, onOpenZones, legacy, serverDefaults }: DetectionTabProps) {
   const change = useCameraChange();
   const catalog = useQuery(objectCatalogQuery("frigate", serverId));
   const model = change.config.data?.detection;
@@ -31,6 +34,8 @@ export function DetectionTab({ serverId, readOnly, settings, onMotion, onObjects
   const enabled = draft.enabled ?? model?.enabled;
   const selected = draft.selection ?? model?.selection ?? [];
   const raw = model?.raw ?? [];
+  const notes = model?.notes ?? [];
+  const provisionOnly = change.config.data?.origin?.engine === "provision";
 
   return (
     <div className="flex flex-col gap-5">
@@ -47,7 +52,14 @@ export function DetectionTab({ serverId, readOnly, settings, onMotion, onObjects
         ) : catalog.isError || !catalog.data ? (
           <p role="alert" className="text-sm text-bad">No se pudo cargar el catálogo de objetos.</p>
         ) : (
-          <ObjectCatalogPicker catalog={catalog.data} selected={selected} disabled={readOnly || !model} onChange={(next) => change.setPatch({ detection: { selection: next } })} />
+          <ObjectCatalogPicker catalog={catalog.data} selected={selected} disabled={readOnly || !model} vehicleLevelOnly={provisionOnly ? notes[0] ?? "Provision no distingue el tipo de vehículo" : undefined} onChange={(next) => change.setPatch({ detection: { selection: next } })} />
+        )}
+        {notes.length > 0 && (
+          <ul aria-label="Notas del motor" className="flex flex-col gap-1 rounded-m3-lg bg-surface-2 p-3 text-xs text-muted">
+            {notes.map((n) => (
+              <li key={n}>{n}</li>
+            ))}
+          </ul>
         )}
         {raw.length > 0 && (
           <div className="rounded-m3-lg bg-surface-2 p-3">
@@ -64,7 +76,7 @@ export function DetectionTab({ serverId, readOnly, settings, onMotion, onObjects
 
       <section aria-label="Ajustes de detección" className="flex flex-col gap-2">
         <h3 className="text-sm font-bold">Ajustes de detección</h3>
-        <DetectionSettings value={settings} readOnly={readOnly} onMotion={onMotion} onObjects={onObjects} onOpenZones={onOpenZones} />
+        <DetectionSettings value={settings} readOnly={readOnly} onMotion={onMotion} onObjects={onObjects} onOpenZones={onOpenZones} serverDefaults={serverDefaults} />
       </section>
 
       <details className="rounded-m3-lg bg-surface-1">
