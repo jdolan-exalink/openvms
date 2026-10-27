@@ -1,12 +1,13 @@
 import { Field, TextInput } from "@/components/ui";
 import { LprTestCard } from "@/components/provision/LprTestCard";
-import { type AnalyticsModule, draftMinArea } from "./draft";
+import { type AnalyticsModule, draftEnhancement, draftMinArea } from "./draft";
 
 type Props = {
   cameraId: string;
   module: AnalyticsModule;
   patch: Record<string, unknown>;
   onMinArea: (value: number) => void;
+  onEnhancement?: (value: number) => void;
   readOnly?: boolean;
 };
 
@@ -14,8 +15,9 @@ type Props = {
  * Detail of the LPR module, the same whatever reads the plates (Frigate, Provision ISR...).
  * Only values with a real backing are editable; engine-specific parameters are listed read-only.
  */
-export function LprSettings({ cameraId, module: m, patch, onMinArea, readOnly }: Props) {
+export function LprSettings({ cameraId, module: m, patch, onMinArea, onEnhancement, readOnly }: Props) {
   const minArea = draftMinArea(patch, m);
+  const enhancement = draftEnhancement(patch, m);
   const canTest = m.engine === "frigate" || m.engine === "provision";
   return (
     <div className="flex flex-col gap-3">
@@ -27,6 +29,18 @@ export function LprSettings({ cameraId, module: m, patch, onMinArea, readOnly }:
             disabled={readOnly}
             value={minArea ?? ""}
             onChange={(e) => e.target.value !== "" && onMinArea(Math.max(0, Math.round(Number(e.target.value))))}
+          />
+        </Field>
+      )}
+      {m.writable && onEnhancement && (
+        <Field label="Mejora de imagen (0 a 10)" hint="Mejora el recorte de la matrícula antes de leerla; 0 la desactiva.">
+          <TextInput
+            type="number"
+            min={0}
+            max={10}
+            disabled={readOnly}
+            value={enhancement ?? ""}
+            onChange={(e) => e.target.value !== "" && onEnhancement(Math.min(10, Math.max(0, Math.round(Number(e.target.value)))))}
           />
         </Field>
       )}
