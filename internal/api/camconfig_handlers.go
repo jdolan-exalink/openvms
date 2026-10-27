@@ -207,7 +207,14 @@ func (h *Handlers) ApplyCameraConfig(ctx context.Context, r gen.ApplyCameraConfi
 	}
 	in := inventory.ConfigApplyInput{Patch: patch, ExpectedRevision: r.Body.ExpectedRevision}
 	if r.Body.Origin != nil {
-		in.Origin = string(*r.Body.Origin)
+		// Only the interactive origins are the caller's to claim; profile, group, yaml, sync
+		// and external_device are set by the server paths that really produce them.
+		switch o := string(*r.Body.Origin); o {
+		case camconfig.OriginUI, camconfig.OriginAPI:
+			in.Origin = o
+		default:
+			return nil, &inventory.ValidationError{Msg: "origin must be ui or api"}
+		}
 	}
 	var res inventory.ConfigApplyResult
 	if vw, ok := h.configWriter().(videoConfigWriter); ok {

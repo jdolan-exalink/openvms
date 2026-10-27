@@ -1160,7 +1160,9 @@ export interface paths {
          *     caller last read; a different value answers 409. An engine failure answers 200 with
          *     `result: error` and a sanitized `state.last_error`; a failed apply never leaves the
          *     state `synced`. Every apply is audited (CAMERA_CONFIG_CHANGED) with previous and new
-         *     values, origin and result.
+         *     values, origin and result. A caller may send `origin` `ui` (default) or `api`; any other
+         *     value (`profile`, `group`, `yaml`, `sync`, `external_device`) answers 400, because those
+         *     origins are set by the server paths that produce them.
          */
         post: operations["applyCameraConfig"];
         delete?: never;

@@ -277,6 +277,30 @@ func TestApplyCameraConfigMapsOriginAndErrors(t *testing.T) {
 	})
 }
 
+func TestApplyCameraConfigOnlyAcceptsCallerOrigins(t *testing.T) {
+	for _, tc := range []struct {
+		origin gen.CameraConfigOrigin
+		ok     bool
+	}{
+		{gen.CameraConfigOriginUi, true}, {gen.CameraConfigOriginApi, true},
+		{gen.CameraConfigOriginProfile, false}, {gen.CameraConfigOriginGroup, false}, {gen.CameraConfigOriginYaml, false},
+		{gen.CameraConfigOriginSync, false}, {gen.CameraConfigOriginExternalDevice, false}, {"bogus", false},
+	} {
+		w := &fakeCamConfigWriter{}
+		h := &Handlers{camConfigWrite: w}
+		o := tc.origin
+		body := gen.ApplyCameraConfigJSONRequestBody{Patch: gen.CameraConfigPatch{"detection": map[string]any{"enabled": true}}, Origin: &o}
+		_, err := h.ApplyCameraConfig(writerCtx(), gen.ApplyCameraConfigRequestObject{CameraId: uuid.New(), Body: &body})
+		status, _, _ := statusFor(err)
+		if tc.ok && (err != nil || w.applyCalls != 1) {
+			t.Errorf("%s: err = %v calls = %d", tc.origin, err, w.applyCalls)
+		}
+		if !tc.ok && (status != http.StatusBadRequest || w.applyCalls != 0) {
+			t.Errorf("%s: status = %d calls = %d, want 400 and no apply", tc.origin, status, w.applyCalls)
+		}
+	}
+}
+
 func TestGetCameraConfigCarriesState(t *testing.T) {
 	ce := camConfigFixture(fakeFrigate{doc: map[string]any{"detect": map[string]any{"enabled": false}}})
 	// Desired says detection on, the engine reports it off: a drift the response must show.
