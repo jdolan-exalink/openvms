@@ -158,3 +158,24 @@ func TestLegacyFrigatePatchHonoursGranularSections(t *testing.T) {
 		t.Fatalf("legacy yaml holder must keep working: %v", err)
 	}
 }
+
+func TestConfigHistoryNeedsCameraVisibility(t *testing.T) {
+	env := demofix.Setup(t)
+	useYAMLEngine(env, newYAMLEngine())
+	cam := env.Cameras["frigate-h01/acceso_norte"]
+	ctx := context.Background()
+	if _, err := env.Svc.ApplyCameraConfig(ctx, env.Admin, cam.ID, inventory.ConfigApplyInput{Patch: detectionOn()}); err != nil {
+		t.Fatal(err)
+	}
+	blind := grantAt(t, env, "hist-blind", cam.TenantID, authz.ServersConfig)
+	if _, err := env.Svc.ListCameraConfigHistory(ctx, blind, cam.ID, 10); !errors.Is(err, access.ErrForbidden) {
+		t.Fatalf("history without cameras.view = %v, want forbidden", err)
+	}
+	if _, err := env.Svc.RollbackCameraConfig(ctx, blind, cam.ID, inventory.RollbackInput{}, nil); !errors.Is(err, access.ErrForbidden) {
+		t.Fatalf("rollback without cameras.view = %v, want forbidden", err)
+	}
+	seer := grantAt(t, env, "hist-seer", cam.TenantID, authz.ServersConfig, authz.CamerasView)
+	if h, err := env.Svc.ListCameraConfigHistory(ctx, seer, cam.ID, 10); err != nil || len(h) != 1 {
+		t.Fatalf("history with cameras.view = %v (%v)", h, err)
+	}
+}
