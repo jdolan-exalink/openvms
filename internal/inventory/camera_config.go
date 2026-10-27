@@ -86,7 +86,9 @@ type sectionWriter struct {
 }
 
 func (w sectionWriter) PatchSections(ctx context.Context, sections map[string]any) error {
-	_, err := w.s.PatchCameraFrigateConfig(ctx, w.actor, w.cameraID, sections)
+	// The normalized apply already required the permission of every section it edits
+	// (requireSections); one normalized section can write several Frigate sections.
+	_, err := w.s.PatchCameraFrigateConfig(withoutFrigateSectionCheck(ctx), w.actor, w.cameraID, sections)
 	return err
 }
 
