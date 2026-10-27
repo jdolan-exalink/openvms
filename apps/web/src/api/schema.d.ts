@@ -474,6 +474,28 @@ export interface paths {
         patch: operations["updateServer"];
         trace?: never;
     };
+    "/api/v1/servers/{serverId}/deleted-cameras": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                serverId: string;
+            };
+            cookie?: never;
+        };
+        /**
+         * List the server's deleted cameras that can still be restored
+         * @description Requires servers.manage on the server.
+         */
+        get: operations["listDeletedCameras"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/servers/{serverId}/sync": {
         parameters: {
             query?: never;
@@ -997,11 +1019,37 @@ export interface paths {
         get: operations["getCamera"];
         put?: never;
         post?: never;
-        delete?: never;
+        /**
+         * Delete a camera from OpenVMS and from Frigate, keeping its history
+         * @description Removes the camera's block from the server's Frigate config.yml (Frigate restarts, so every camera on that server stops recording for a moment and this camera stops recording for good), then soft-deletes it in OpenVMS and leaves a tombstone so the Frigate sync does not bring it back. Recordings and events are kept, in Frigate and in OpenVMS, until their recording days pass. Frigate is changed first: if it cannot be changed (400 when it rejects the config, 502 when it is unreachable) nothing changes in OpenVMS. A camera that is already absent from the Frigate config is still deleted. Requires servers.manage on the camera's server; the caller needs neither servers.config nor servers.config.secrets and never receives config content. Never touches the physical device.
+         */
+        delete: operations["deleteCamera"];
         options?: never;
         head?: never;
         /** Update a camera's VMS-side settings (name, enabled, default live quality, description, location, tags) */
         patch: operations["updateCamera"];
+        trace?: never;
+    };
+    "/api/v1/cameras/{cameraId}/restore": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                cameraId: string;
+            };
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Restore a deleted camera with its history
+         * @description Puts the camera's block back into the server's Frigate config.yml (Frigate restarts), lifts the tombstone and returns the same camera row, so the history it already has joins the recordings that come next. 409 when a live camera already has the same name on that server; nothing is changed in Frigate in that case. 400 when the camera's Frigate block was not kept. Requires servers.manage on the camera's server.
+         */
+        post: operations["restoreCamera"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
         trace?: never;
     };
     "/api/v1/cameras/{cameraId}/config": {
@@ -5238,6 +5286,20 @@ export interface components {
             /** @description Go VCS revision embedded in these exact binary bytes, when available. */
             commit?: string;
         };
+        DeletedCamera: {
+            /** Format: uuid */
+            id: string;
+            /** Format: uuid */
+            server_id: string;
+            remote_name: string;
+            display_name: string;
+            /** Format: date-time */
+            deleted_at: string;
+            /** @description The camera's recording window when it was deleted; null when its config did not state one. */
+            retain_days: number | null;
+            /** @description True when the camera's Frigate block was kept, so restoring can put it back. */
+            has_frigate_config: boolean;
+        };
         Camera: {
             /** Format: uuid */
             id: string;
@@ -8939,6 +9001,33 @@ export interface operations {
             409: components["responses"]["Conflict"];
         };
     };
+    listDeletedCameras: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                serverId: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Deleted cameras, newest first */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        items: components["schemas"]["DeletedCamera"][];
+                    };
+                };
+            };
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+        };
+    };
     syncServer: {
         parameters: {
             query?: never;
@@ -9714,6 +9803,31 @@ export interface operations {
             404: components["responses"]["NotFound"];
         };
     };
+    deleteCamera: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                cameraId: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Deleted */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            400: components["responses"]["BadRequest"];
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+            502: components["responses"]["FrigateUnreachable"];
+        };
+    };
     updateCamera: {
         parameters: {
             query?: never;
@@ -9742,6 +9856,34 @@ export interface operations {
             401: components["responses"]["Unauthorized"];
             403: components["responses"]["Forbidden"];
             404: components["responses"]["NotFound"];
+        };
+    };
+    restoreCamera: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                cameraId: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Restored */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Camera"];
+                };
+            };
+            400: components["responses"]["BadRequest"];
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+            409: components["responses"]["Conflict"];
+            502: components["responses"]["FrigateUnreachable"];
         };
     };
     getCameraFrigateConfig: {
