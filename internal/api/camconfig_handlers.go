@@ -3,6 +3,7 @@ package api
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 
 	"github.com/jdolan-exalink/openvms/internal/api/gen"
@@ -43,6 +44,7 @@ func (h *Handlers) GetCameraConfig(ctx context.Context, r gen.GetCameraConfigReq
 	if err != nil {
 		return nil, err
 	}
+	model.State = camconfig.ComputeState(inventory.StoredConfigState(ce.State), model)
 	// The model's JSON tags are the contract: decode into the generated type.
 	raw, err := json.Marshal(model)
 	if err != nil {
@@ -56,22 +58,105 @@ func (h *Handlers) GetCameraConfig(ctx context.Context, r gen.GetCameraConfigReq
 }
 
 func cameraInventory(ce inventory.CameraEngine) camconfig.Inventory {
-	c := ce.Camera
-	in := camconfig.Inventory{
-		CameraID: c.ID.String(), Name: c.DisplayName, RemoteName: c.RemoteName,
-		Description: c.Description, Location: c.Location, Tags: c.Tags, Enabled: c.Enabled, LPR: c.Lpr,
-		LiveStream: c.LiveStream, HQStream: c.HqStream, LiveCodec: c.LiveCodec, HQCodec: c.HqCodec,
-		DefaultLiveQuality: c.DefaultLiveQuality, ServerID: c.ServerID.String(), ServerName: ce.ServerName,
-		ONVIFCapabilities: c.OnvifCapabilities,
+	return inventory.CameraConfigInventory(ce.Camera, ce.ServerName)
+}
+
+// camConfigWriter reviews and applies changes of the normalized configuration; the production
+// implementation is the inventory service, tests replace it.
+type camConfigWriter interface {
+	ReviewCameraConfig(ctx context.Context, a authz.Actor, id uuid.UUID, patch camconfig.Patch) (camconfig.Review, error)
+	ApplyCameraConfig(ctx context.Context, a authz.Actor, id uuid.UUID, in inventory.ConfigApplyInput) (inventory.ConfigApplyResult, error)
+}
+
+func (h *Handlers) configWriter() camConfigWriter {
+	if h.camConfigWrite != nil {
+		return h.camConfigWrite
 	}
-	if c.OnvifEndpoint != nil {
-		in.ONVIFEndpoint = *c.OnvifEndpoint
+	return h.Inv
+}
+
+// parsePatch turns the request's open patch object into the strict model patch: unknown or
+// untranslatable fields are a 400, never ignored.
+func parsePatch(in map[string]any) (camconfig.Patch, error) {
+	raw, err := json.Marshal(in)
+	if err != nil {
+		return camconfig.Patch{}, &inventory.ValidationError{Msg: "patch is not valid JSON"}
 	}
-	if c.OnvifProfile != nil {
-		in.ONVIFProfile = *c.OnvifProfile
+	p, err := camconfig.ParsePatch(raw)
+	if err != nil {
+		var ve *camconfig.ValidationError
+		if errors.As(err, &ve) {
+			return camconfig.Patch{}, &inventory.ValidationError{Msg: ve.Msg}
+		}
+		return camconfig.Patch{}, err
 	}
-	if c.OnvifVersion != nil {
-		in.ONVIFVersion = *c.OnvifVersion
+	return p, nil
+}
+
+// reviewToGen and the helpers below carry the model's JSON shape into the generated types.
+func toGen[T any](v any) (T, error) {
+	var out T
+	raw, err := json.Marshal(v)
+	if err != nil {
+		return out, err
 	}
-	return in
+	if err := json.Unmarshal(raw, &out); err != nil {
+		return out, fmt.Errorf("camera config: %w", err)
+	}
+	return out, nil
+}
+
+// ReviewCameraConfig describes what a change would do, without side effects.
+func (h *Handlers) ReviewCameraConfig(ctx context.Context, r gen.ReviewCameraConfigRequestObject) (gen.ReviewCameraConfigResponseObject, error) {
+	a, err := actor(ctx)
+	if err != nil {
+		return nil, err
+	}
+	if r.Body == nil {
+		return nil, &inventory.ValidationError{Msg: "patch is required"}
+	}
+	patch, err := parsePatch(*r.Body)
+	if err != nil {
+		return nil, err
+	}
+	review, err := h.configWriter().ReviewCameraConfig(ctx, a, r.CameraId, patch)
+	if err != nil {
+		return nil, err
+	}
+	out, err := toGen[gen.CameraConfigReview](review)
+	if err != nil {
+		return nil, err
+	}
+	return gen.ReviewCameraConfig200JSONResponse(out), nil
+}
+
+// ApplyCameraConfig records, applies and verifies a change of the normalized configuration.
+func (h *Handlers) ApplyCameraConfig(ctx context.Context, r gen.ApplyCameraConfigRequestObject) (gen.ApplyCameraConfigResponseObject, error) {
+	a, err := actor(ctx)
+	if err != nil {
+		return nil, err
+	}
+	if r.Body == nil {
+		return nil, &inventory.ValidationError{Msg: "patch is required"}
+	}
+	patch, err := parsePatch(r.Body.Patch)
+	if err != nil {
+		return nil, err
+	}
+	in := inventory.ConfigApplyInput{Patch: patch, ExpectedRevision: r.Body.ExpectedRevision}
+	if r.Body.Origin != nil {
+		in.Origin = string(*r.Body.Origin)
+	}
+	res, err := h.configWriter().ApplyCameraConfig(ctx, a, r.CameraId, in)
+	if err != nil {
+		return nil, err
+	}
+	out := gen.CameraConfigApplyResult{Result: gen.CameraConfigApplyResultResult(res.Outcome.Result)}
+	if out.State, err = toGen[gen.CameraConfigState](res.State); err != nil {
+		return nil, err
+	}
+	if out.Review, err = toGen[gen.CameraConfigReview](res.Review); err != nil {
+		return nil, err
+	}
+	return gen.ApplyCameraConfig200JSONResponse(out), nil
 }

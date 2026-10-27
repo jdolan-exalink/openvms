@@ -124,6 +124,8 @@ func statusFor(err error) (int, string, string) {
 		return http.StatusNotFound, "not_found", "not found"
 	case errors.Is(err, store.ErrConflict):
 		return http.StatusConflict, "conflict", "a resource with the same name already exists"
+	case errors.Is(err, inventory.ErrRevisionConflict):
+		return http.StatusConflict, "revision_conflict", err.Error()
 	case errors.Is(err, inventory.ErrDuplicateServer):
 		return http.StatusConflict, "server_duplicate", err.Error()
 	case errors.Is(err, inventory.ErrSiteNotEmpty):

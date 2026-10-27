@@ -1,0 +1,254 @@
+package inventory
+
+import (
+	"context"
+	"encoding/json"
+	"errors"
+	"fmt"
+	"log/slog"
+
+	"github.com/google/uuid"
+
+	"github.com/jdolan-exalink/openvms/internal/access"
+	"github.com/jdolan-exalink/openvms/internal/authz"
+	"github.com/jdolan-exalink/openvms/internal/camconfig"
+	"github.com/jdolan-exalink/openvms/internal/store"
+	"github.com/jdolan-exalink/openvms/internal/store/db"
+)
+
+// ErrRevisionConflict is returned when the caller's expected revision is no longer the
+// camera's desired revision: somebody else changed it first.
+var ErrRevisionConflict = errors.New("the camera configuration changed since it was read")
+
+// ConfigApplyInput is a request to change a camera's normalized configuration.
+type ConfigApplyInput struct {
+	Patch camconfig.Patch
+	// ExpectedRevision is the desired_revision the caller last read.
+	ExpectedRevision int64
+	// Origin says where the change comes from (camconfig.Origin*); empty means the UI.
+	Origin string
+}
+
+// ConfigApplyResult is the outcome of one apply.
+type ConfigApplyResult struct {
+	Review  camconfig.Review
+	Outcome camconfig.Outcome
+	State   camconfig.State
+}
+
+// CameraConfigInventory is what OpenVMS itself knows about a camera, for the model's adapters.
+func CameraConfigInventory(c db.GetCameraRow, serverName string) camconfig.Inventory {
+	in := camconfig.Inventory{
+		CameraID: c.ID.String(), Name: c.DisplayName, RemoteName: c.RemoteName,
+		Description: c.Description, Location: c.Location, Tags: c.Tags, Enabled: c.Enabled, LPR: c.Lpr,
+		LiveStream: c.LiveStream, HQStream: c.HqStream, LiveCodec: c.LiveCodec, HQCodec: c.HqCodec,
+		DefaultLiveQuality: c.DefaultLiveQuality, ServerID: c.ServerID.String(), ServerName: serverName,
+		ONVIFCapabilities: c.OnvifCapabilities,
+	}
+	if c.OnvifEndpoint != nil {
+		in.ONVIFEndpoint = *c.OnvifEndpoint
+	}
+	if c.OnvifProfile != nil {
+		in.ONVIFProfile = *c.OnvifProfile
+	}
+	if c.OnvifVersion != nil {
+		in.ONVIFVersion = *c.OnvifVersion
+	}
+	return in
+}
+
+// StoredConfigState converts a stored row (nil: never configured) to the model's type.
+func StoredConfigState(row *db.CameraConfigState) camconfig.Stored {
+	if row == nil {
+		return camconfig.Stored{SyncState: camconfig.SyncSynced}
+	}
+	var desired camconfig.Patch
+	if err := json.Unmarshal(row.Desired, &desired); err != nil {
+		// The column only ever holds what Merge produced; a broken document counts as empty
+		// so reads keep working.
+		desired = camconfig.Patch{}
+	}
+	return camconfig.Stored{
+		Desired: desired, DesiredRevision: row.DesiredRevision, AppliedRevision: row.AppliedRevision,
+		SyncState: row.SyncState, LastError: row.LastError,
+	}
+}
+
+// sectionWriter sends section patches through PatchCameraFrigateConfig, the service behind the
+// frigate-config endpoint, so its permission check, validation, revisions and audit apply.
+type sectionWriter struct {
+	s        *Service
+	actor    authz.Actor
+	cameraID uuid.UUID
+}
+
+func (w sectionWriter) PatchSections(ctx context.Context, sections map[string]any) error {
+	_, err := w.s.PatchCameraFrigateConfig(ctx, w.actor, w.cameraID, sections)
+	return err
+}
+
+type configTarget struct {
+	cam db.GetCameraRow
+	srv db.GetServerRow
+}
+
+// loadConfigTarget loads the camera and its server and requires the permission the Frigate
+// config PATCH needs (servers.config on the server).
+func (s *Service) loadConfigTarget(ctx context.Context, id uuid.UUID, q *db.Queries, c *access.Checker) (configTarget, error) {
+	var t configTarget
+	var err error
+	if t.cam, err = q.GetCamera(ctx, id); err != nil {
+		return t, notFoundOr(err)
+	}
+	if t.srv, err = q.GetServer(ctx, t.cam.ServerID); err != nil {
+		return t, notFoundOr(err)
+	}
+	return t, c.Require(authz.ServersConfig, access.Server(t.srv.TenantID, t.srv.SiteID, t.srv.ID))
+}
+
+// configAdapter builds the Frigate adapter of a camera; an unreachable server yields an
+// adapter without engine, which reads as "unverifiable" and fails writes.
+func (s *Service) configAdapter(ctx context.Context, actor authz.Actor, t configTarget) camconfig.FrigateAdapter {
+	ad := camconfig.FrigateAdapter{Writer: sectionWriter{s: s, actor: actor, cameraID: t.cam.ID}}
+	if a, err := s.frigateAdapter(ctx, t.srv); err == nil && a != nil {
+		ad.Engine = a
+	} else if err != nil {
+		slog.WarnContext(ctx, "camera config: engine not reachable", "camera_id", t.cam.ID)
+	}
+	return ad
+}
+
+// ReviewCameraConfig describes what a patch would change and affect. It has no side effects:
+// nothing is written to the engine or the database.
+func (s *Service) ReviewCameraConfig(ctx context.Context, actor authz.Actor, id uuid.UUID, patch camconfig.Patch) (camconfig.Review, error) {
+	if err := patch.Validate(); err != nil {
+		return camconfig.Review{}, invalid("%s", err.Error())
+	}
+	var t configTarget
+	err := s.tx(ctx, actor, func(q *db.Queries, c *access.Checker) error {
+		var err error
+		t, err = s.loadConfigTarget(ctx, id, q, c)
+		return err
+	})
+	if err != nil {
+		return camconfig.Review{}, err
+	}
+	ad := s.configAdapter(ctx, actor, t)
+	current, err := ad.Read(ctx, CameraConfigInventory(t.cam, t.srv.Name))
+	if err != nil {
+		return camconfig.Review{}, err
+	}
+	return ad.Plan(ctx, current, patch)
+}
+
+// ApplyCameraConfig records the desired state, writes it to the engine, reads the camera back
+// and stores the verified state. The desired state is recorded first (sync_state pending) so a
+// crash never leaves a change that looks synced; the final state and the audit row are written
+// together once the outcome is known.
+func (s *Service) ApplyCameraConfig(ctx context.Context, actor authz.Actor, id uuid.UUID, in ConfigApplyInput) (ConfigApplyResult, error) {
+	if err := in.Patch.Validate(); err != nil {
+		return ConfigApplyResult{}, invalid("%s", err.Error())
+	}
+	origin := in.Origin
+	if origin == "" {
+		origin = camconfig.OriginUI
+	}
+	if !camconfig.ValidOrigin(origin) {
+		return ConfigApplyResult{}, invalid("unknown origin %q", origin)
+	}
+	patch := in.Patch.Normalized()
+
+	var t configTarget
+	var rec db.CameraConfigState
+	err := s.tx(ctx, actor, func(q *db.Queries, c *access.Checker) error {
+		var err error
+		if t, err = s.loadConfigTarget(ctx, id, q, c); err != nil {
+			return err
+		}
+		if err = q.EnsureCameraConfigState(ctx, db.EnsureCameraConfigStateParams{CameraID: t.cam.ID, TenantID: t.cam.TenantID}); err != nil {
+			return err
+		}
+		cur, err := q.GetCameraConfigState(ctx, t.cam.ID)
+		if err != nil {
+			return err
+		}
+		merged, err := json.Marshal(camconfig.Merge(StoredConfigState(&cur).Desired, patch))
+		if err != nil {
+			return err
+		}
+		rec, err = q.RecordCameraConfigDesired(ctx, db.RecordCameraConfigDesiredParams{
+			CameraID: t.cam.ID, Desired: merged, ExpectedRevision: in.ExpectedRevision, UpdatedBy: &actor.UserID,
+		})
+		if errors.Is(store.Classify(err), store.ErrNotFound) {
+			return ErrRevisionConflict
+		}
+		return err
+	})
+	if err != nil {
+		return ConfigApplyResult{}, err
+	}
+	desired := StoredConfigState(&rec).Desired
+
+	ad := s.configAdapter(ctx, actor, t)
+	invRow := CameraConfigInventory(t.cam, t.srv.Name)
+	before, err := ad.Read(ctx, invRow)
+	if err != nil {
+		return ConfigApplyResult{}, err
+	}
+	review, _ := ad.Plan(ctx, before, patch)
+	applyErr := ad.Apply(ctx, patch)
+	after, err := ad.Read(ctx, invRow)
+	if err != nil {
+		return ConfigApplyResult{}, err
+	}
+	out := camconfig.DecideOutcome(applyErr, after, patch, desired)
+
+	var fin db.CameraConfigState
+	err = s.tx(ctx, actor, func(q *db.Queries, _ *access.Checker) error {
+		var err error
+		fin, err = q.FinishCameraConfigApply(ctx, db.FinishCameraConfigApplyParams{
+			CameraID: t.cam.ID, DesiredRevision: rec.DesiredRevision, SyncState: out.SyncState,
+			LastError: out.LastError, Applied: out.Applied,
+		})
+		if errors.Is(store.Classify(err), store.ErrNotFound) {
+			// A newer apply took over the revision; it records its own outcome.
+			fin, err = rec, nil
+		}
+		if err != nil {
+			return err
+		}
+		return audit(ctx, q, actor, &t.cam.TenantID, ActionCameraConfigChanged, "camera", t.cam.ID, map[string]any{
+			"camera_id": t.cam.ID, "camera_name": t.cam.RemoteName, "server_id": t.srv.ID,
+			"origin": origin, "result": out.Result, "error": out.LastError, "sync_state": out.SyncState,
+			"expected_revision": in.ExpectedRevision, "desired_revision": rec.DesiredRevision,
+			"previous_values": changeValues(review.Changes, true), "new_values": changeValues(review.Changes, false),
+			"patch": patch,
+		})
+	})
+	if err != nil {
+		return ConfigApplyResult{}, fmt.Errorf("camera config: recording the outcome: %w", err)
+	}
+	// The state reported is the one just recorded, never a recomputed one: a failed apply must
+	// not read as synced even if the engine happens to agree with the desired values.
+	state := camconfig.State{
+		DesiredRevision: fin.DesiredRevision, AppliedRevision: fin.AppliedRevision,
+		SyncState: out.SyncState, LastError: out.LastError, Drift: []camconfig.Drift{},
+	}
+	if camconfig.EngineReadable(after) {
+		state.Drift = camconfig.Diff(desired, after)
+	}
+	return ConfigApplyResult{Review: review, Outcome: out, State: state}, nil
+}
+
+// changeValues maps each changed path to its previous (from) or new (to) value.
+func changeValues(changes []camconfig.Change, from bool) map[string]any {
+	m := make(map[string]any, len(changes))
+	for _, c := range changes {
+		if from {
+			m[c.Path] = c.From
+		} else {
+			m[c.Path] = c.To
+		}
+	}
+	return m
+}

@@ -1320,6 +1320,71 @@ paths:
         "401": { $ref: "#/components/responses/Unauthorized" }
         "403": { $ref: "#/components/responses/Forbidden" }
         "404": { $ref: "#/components/responses/NotFound" }
+  /api/v1/cameras/{cameraId}/normalized-config/review:
+    parameters:
+      - { name: cameraId, in: path, required: true, schema: { type: string, format: uuid } }
+    post:
+      tags: [cameras]
+      operationId: reviewCameraConfig
+      summary: Review a change of the normalized configuration before applying it
+      description: |
+        Requires the permission the Frigate config PATCH needs (servers.config on the camera's
+        server). Compares the patch with the camera's current configuration and returns the
+        changes (path, label, from, to) and their impact. It has no side effects: nothing is
+        written to the engine or the database. Fields the model cannot represent or translate
+        are rejected with 400, never ignored.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/CameraConfigPatch" }
+      responses:
+        "200":
+          description: What applying the patch would do
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/CameraConfigReview" }
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { $ref: "#/components/responses/NotFound" }
+  /api/v1/cameras/{cameraId}/normalized-config/apply:
+    parameters:
+      - { name: cameraId, in: path, required: true, schema: { type: string, format: uuid } }
+    post:
+      tags: [cameras]
+      operationId: applyCameraConfig
+      summary: Apply a change of the normalized configuration
+      description: |
+        Requires the permission the Frigate config PATCH needs (servers.config on the camera's
+        server). Records the desired state, translates it to the engine, reads the camera back
+        and stores the verified state. `expected_revision` is the `state.desired_revision` the
+        caller last read; a different value answers 409. An engine failure answers 200 with
+        `result: error` and a sanitized `state.last_error`; a failed apply never leaves the
+        state `synced`. Every apply is audited (CAMERA_CONFIG_CHANGED) with previous and new
+        values, origin and result.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [patch, expected_revision]
+              properties:
+                patch: { $ref: "#/components/schemas/CameraConfigPatch" }
+                expected_revision: { type: integer, format: int64, minimum: 0 }
+                origin: { $ref: "#/components/schemas/CameraConfigOrigin" }
+      responses:
+        "200":
+          description: Outcome of the apply
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/CameraConfigApplyResult" }
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { $ref: "#/components/responses/NotFound" }
+        "409": { $ref: "#/components/responses/Conflict" }
   /api/v1/cameras/{cameraId}/onvif/check:
     parameters:
       - { name: cameraId, in: path, required: true, schema: { type: string, format: uuid } }
@@ -6042,8 +6107,9 @@ components:
     CameraConfig:
       type: object
       description: Engine-agnostic configuration model of one camera.
-      required: [identity, origin, device, capabilities, streams, recording, detection, analytics, zones, ptz, fisheye, integrations, overrides, sources, warnings]
+      required: [identity, origin, device, capabilities, streams, recording, detection, analytics, zones, ptz, fisheye, integrations, overrides, sources, warnings, state]
       properties:
+        state: { $ref: "#/components/schemas/CameraConfigState" }
         identity:
           type: object
           required: [camera_id, name, remote_name, tags, enabled]
@@ -6143,6 +6209,77 @@ components:
               status: { type: string, enum: [ok, unavailable] }
               detail: { type: string }
         warnings: { type: array, items: { type: string } }
+    CameraConfigOrigin:
+      type: string
+      description: Where a configuration change comes from. Defaults to ui.
+      enum: [ui, profile, group, api, sync, yaml, external_device]
+    CameraConfigPatch:
+      type: object
+      description: |
+        Sparse change to the normalized model; omitted fields stay as they are. The fields that can
+        be changed today are `detection.enabled` (boolean), `detection.objects` (raw engine object
+        labels until the object catalog lands), `recording.enabled` (boolean) and `analytics.lpr`
+        (boolean). The schema is deliberately open so the server can reject every other field,
+        nested ones included, with 400 instead of dropping it silently.
+      additionalProperties: true
+      example:
+        detection: { enabled: true, objects: [person, car] }
+        recording: { enabled: true }
+        analytics: { lpr: false }
+    CameraConfigReview:
+      type: object
+      required: [changes, impact, unsupported]
+      properties:
+        changes:
+          type: array
+          items:
+            type: object
+            required: [path, label]
+            properties:
+              path: { type: string, example: detection.enabled }
+              label: { type: string, example: detección de objetos }
+              from: { nullable: true, description: Current value; null when the engine did not report it }
+              to: { nullable: true }
+        impact:
+          type: array
+          items:
+            type: object
+            required: [code, message]
+            properties:
+              code: { type: string, enum: [engine_reload, engine_restart, recording_interruption] }
+              message: { type: string, example: "Frigate recargará configuración;" }
+        unsupported:
+          type: array
+          description: Fields of the request the engine cannot apply (never silently dropped)
+          items: { type: string }
+    CameraConfigState:
+      type: object
+      description: Desired state against the effective state reported by the engine.
+      required: [desired_revision, applied_revision, sync_state, last_error, drift]
+      properties:
+        desired_revision: { type: integer, format: int64 }
+        applied_revision: { type: integer, format: int64 }
+        sync_state:
+          type: string
+          description: synced = Sincronizado, pending = Cambios pendientes, drift = Diferencia detectada, error = Error, unverifiable = No verificable
+          enum: [synced, pending, drift, error, unverifiable]
+        last_error: { type: string, description: Sanitized; never carries credentials }
+        drift:
+          type: array
+          items:
+            type: object
+            required: [path]
+            properties:
+              path: { type: string }
+              desired: { nullable: true }
+              effective: { nullable: true }
+    CameraConfigApplyResult:
+      type: object
+      required: [result, state, review]
+      properties:
+        result: { type: string, enum: [ok, error, unverified] }
+        state: { $ref: "#/components/schemas/CameraConfigState" }
+        review: { $ref: "#/components/schemas/CameraConfigReview" }
     CameraConfigStream:
       type: object
       required: [roles]

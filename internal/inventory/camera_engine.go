@@ -2,12 +2,14 @@ package inventory
 
 import (
 	"context"
+	"errors"
 
 	"github.com/google/uuid"
 
 	"github.com/jdolan-exalink/openvms/internal/access"
 	"github.com/jdolan-exalink/openvms/internal/authz"
 	"github.com/jdolan-exalink/openvms/internal/frigate"
+	"github.com/jdolan-exalink/openvms/internal/store"
 	"github.com/jdolan-exalink/openvms/internal/store/db"
 )
 
@@ -17,6 +19,9 @@ type CameraEngine struct {
 	Camera     db.GetCameraRow
 	ServerName string
 	Adapter    frigate.Adapter
+	// State is the stored desired state; nil when the camera was never configured through the
+	// normalized model.
+	State *db.CameraConfigState
 }
 
 // OpenCameraEngine loads a camera (cameras.view required) and connects to its Frigate server.
@@ -36,6 +41,13 @@ func (s *Service) OpenCameraEngine(ctx context.Context, actor authz.Actor, camer
 			return notFoundOr(err)
 		}
 		out.Camera, out.ServerName = cam, srv.Name
+		st, err := q.GetCameraConfigState(ctx, cameraID)
+		switch {
+		case err == nil:
+			out.State = &st
+		case !errors.Is(store.Classify(err), store.ErrNotFound):
+			return err
+		}
 		return nil
 	})
 	if err != nil {

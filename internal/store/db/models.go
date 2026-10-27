@@ -172,6 +172,19 @@ type Camera struct {
 	HqCodec            string
 }
 
+type CameraConfigState struct {
+	CameraID        uuid.UUID
+	TenantID        uuid.UUID
+	Desired         json.RawMessage
+	DesiredRevision int64
+	AppliedRevision int64
+	SyncState       string
+	LastError       string
+	LastAppliedAt   *time.Time
+	UpdatedBy       *uuid.UUID
+	UpdatedAt       time.Time
+}
+
 type CameraFolder struct {
 	ID        uuid.UUID
 	TenantID  uuid.UUID

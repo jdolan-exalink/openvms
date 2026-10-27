@@ -23,6 +23,8 @@ type FrigateEngine interface {
 // then carries inventory data only.
 type FrigateAdapter struct {
 	Engine FrigateEngine
+	// Writer applies section patches; nil means the adapter can only read.
+	Writer SectionWriter
 }
 
 var _ Adapter = FrigateAdapter{}

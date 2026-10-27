@@ -72,6 +72,8 @@ type Handlers struct {
 
 	// camConfig replaces the camera config model's lookups in tests; nil uses Inv.
 	camConfig camConfigSource
+	// camConfigWrite replaces the review/apply service in tests; nil uses Inv.
+	camConfigWrite camConfigWriter
 
 	// lprTest replaces the LPR link test's lookups in tests; nil uses the services above.
 	lprTest lprTestSource

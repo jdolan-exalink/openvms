@@ -85,6 +85,10 @@ const (
 	ActionServerConfigUpdated = "SERVER_CONFIG_UPDATED"
 	ActionServerRestarted     = "SERVER_RESTARTED"
 
+	// ActionCameraConfigChanged records a change of the normalized camera configuration with its
+	// old and new values, origin and result.
+	ActionCameraConfigChanged = "CAMERA_CONFIG_CHANGED"
+
 	ActionFrigateConfigPatched    = "FRIGATE_CONFIG_PATCHED"
 	ActionFrigateConfigRawSaved   = "FRIGATE_CONFIG_RAW_SAVED"
 	ActionFrigateConfigRolledBack = "FRIGATE_CONFIG_ROLLED_BACK"
