@@ -1,0 +1,9 @@
+/var/log/openvms/web-apk-refresh.log {
+    weekly
+    rotate 26
+    compress
+    delaycompress
+    missingok
+    notifempty
+    create 0640 root root
+}

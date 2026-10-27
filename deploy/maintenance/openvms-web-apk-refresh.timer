@@ -1,0 +1,11 @@
+[Unit]
+Description=Weekly OpenVMS web image Alpine package refresh (Sunday 23:59, host time)
+
+[Timer]
+OnCalendar=Sun *-*-* 23:59:00
+# A host that was off at 23:59 runs the refresh at the next boot.
+Persistent=true
+Unit=openvms-web-apk-refresh.service
+
+[Install]
+WantedBy=timers.target
