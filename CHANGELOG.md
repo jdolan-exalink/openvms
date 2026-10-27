@@ -32,6 +32,11 @@ The version of OpenVMS lives in `VERSION` and the version of the edge agent in
   controls over the preview) and a Fisheye tab that separates the original stream and recording from the
   dewarped view; tours use migration 00079 and `/api/v1/cameras/{id}/ptz/tours`. Preset editing and home
   position need agent support (see docs/camera-ptz-fisheye.md).
+- Camera editor behind an agent (agent 0.4.5): cameras whose server has an agent are configured through it
+  (video options and changes, PTZ presets/home/nodes, reboot); an older agent reads as `agent_outdated`.
+  The PTZ endpoint reports the device `capabilities`, tours can be run (`/cameras/{id}/ptz/tours/{id}/start|stop`,
+  in memory, one per camera, cancelled by manual movement) and `POST /cameras/{id}/restart` (`cameras.restart`,
+  explicit confirm, audited) restarts the camera. See docs/camera-ptz-fisheye.md.
 - Agent 0.4.0 (in progress): the agent version is one file, `deploy/agent/VERSION`, embedded in
   the API as the version it expects (it used to be a second string stuck at 0.2.1), and a check
   (`tools/agent_version.sh`, `make hooks`, CI job "Agent version") requires a new version for any

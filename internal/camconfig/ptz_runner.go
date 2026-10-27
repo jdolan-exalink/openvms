@@ -125,11 +125,11 @@ func (r *TourRunner) Start(cameraID uuid.UUID, tour Tour, move TourMove) (TourSt
 	run := &tourRun{cancel: cancel, done: make(chan struct{}), status: TourStatus{State: TourRunning, TourID: tour.ID, TourName: tour.Name, StartedAt: r.now()}}
 	r.runs[cameraID] = run
 	r.wg.Add(1)
-	go r.loop(ctx, cameraID, run, tour, move)
+	go r.loop(ctx, run, tour, move)
 	return run.status, nil
 }
 
-func (r *TourRunner) loop(ctx context.Context, cameraID uuid.UUID, run *tourRun, tour Tour, move TourMove) {
+func (r *TourRunner) loop(ctx context.Context, run *tourRun, tour Tour, move TourMove) {
 	defer r.wg.Done()
 	defer close(run.done)
 	for round := 0; tour.Repeat == 0 || round < tour.Repeat; round++ {

@@ -163,7 +163,7 @@ func (h *OpsHandler) HandleVideoDevice(w http.ResponseWriter, r *http.Request) {
 	if req.Username != "" {
 		creds = onvif.NewCredentials(req.Username, req.Password)
 	}
-	var transport http.RoundTripper = h.onvifTransport
+	transport := h.onvifTransport
 	if transport == nil {
 		transport = &http.Transport{Proxy: nil, TLSClientConfig: &tls.Config{MinVersion: tls.VersionTLS12}}
 	}

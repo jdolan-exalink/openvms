@@ -286,7 +286,7 @@ func TestTourStartRefusesWithoutPresetsMissingPresetsAndUnavailablePTZ(t *testin
 		status string
 	}{
 		"no presets":     {func(f *fakePTZ) { f.presets = nil }, "no_presets", "409"},
-		"missing preset": {func(f *fakePTZ) {}, "preset_missing", "409"},
+		"missing preset": {func(*fakePTZ) {}, "preset_missing", "409"},
 		"ptz down":       {func(f *fakePTZ) { f.listErr = errors.New("agent returned 502") }, "ptz_unavailable", "502"},
 	} {
 		f := newFakePTZ()
