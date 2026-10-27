@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"maps"
 	"regexp"
 	"slices"
 
@@ -246,6 +247,12 @@ type SectionWriter interface {
 	PatchSections(ctx context.Context, sections map[string]any) error
 }
 
+// LocalWriter stores the per-camera switch of an analytics module OpenVMS runs itself. The
+// inventory service implements it behind the same permission checks as the section writer.
+type LocalWriter interface {
+	SetModuleEnabled(ctx context.Context, module string, enabled bool) error
+}
+
 // Plan implements Adapter. It is pure: it compares the patch with the current model and
 // lists changes and impact; fields the current model already has are not listed.
 func (a FrigateAdapter) Plan(ctx context.Context, current Camera, patch Patch) (Review, error) {
@@ -258,7 +265,8 @@ func (a FrigateAdapter) Plan(ctx context.Context, current Camera, patch Patch) (
 	var sections []string
 	add := func(section string, c Change) {
 		rev.Changes = append(rev.Changes, c)
-		if !slices.Contains(sections, section) {
+		// An empty section is a change stored by OpenVMS itself: nothing reloads in Frigate.
+		if section != "" && !slices.Contains(sections, section) {
 			sections = append(sections, section)
 		}
 	}
@@ -346,13 +354,32 @@ func (a FrigateAdapter) Apply(ctx context.Context, patch Patch) error {
 		}
 		sections["detect"] = cur
 	}
-	if len(sections) == 0 {
+	if len(sections) > 0 {
+		if a.Writer == nil {
+			return errors.New("camconfig: the engine cannot be written")
+		}
+		if err := a.Writer.PatchSections(ctx, sections); err != nil {
+			return err
+		}
+	}
+	return a.applyLocal(ctx, p)
+}
+
+// applyLocal stores the OpenVMS-side module switches of the patch.
+func (a FrigateAdapter) applyLocal(ctx context.Context, p Patch) error {
+	local := LocalChanges(p)
+	if len(local) == 0 {
 		return nil
 	}
-	if a.Writer == nil {
-		return errors.New("camconfig: the engine cannot be written")
+	if a.Local == nil {
+		return errors.New("camconfig: the analytics of OpenVMS cannot be written")
 	}
-	return a.Writer.PatchSections(ctx, sections)
+	for _, id := range slices.Sorted(maps.Keys(local)) {
+		if err := a.Local.SetModuleEnabled(ctx, id, local[id]); err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
 // FrigateSections translates a patch to Frigate's section patch.

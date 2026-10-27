@@ -182,6 +182,43 @@ func (s *Service) GetServerFrigateSchema(ctx context.Context, actor authz.Actor,
 	return out, nil
 }
 
+type skipFrigateSectionCheck struct{}
+
+// withoutFrigateSectionCheck marks a call whose caller already required the per-section
+// permissions on its own terms (the normalized apply).
+func withoutFrigateSectionCheck(ctx context.Context) context.Context {
+	return context.WithValue(ctx, skipFrigateSectionCheck{}, true)
+}
+
+// frigateSectionPermission is the granular permission a Frigate section needs, on top of
+// servers.config, when written through the legacy frigate-config route or the YAML editor.
+// Sections not listed need nothing more.
+var frigateSectionPermission = map[string]authz.Permission{
+	"detect": authz.CamerasConfigEdit, "objects": authz.CamerasConfigEdit, "motion": authz.CamerasConfigEdit,
+	"record": authz.CamerasConfigRecording, "snapshots": authz.CamerasConfigRecording,
+	"ffmpeg": authz.CamerasConfigVideo, "live": authz.CamerasConfigVideo, "rtmp": authz.CamerasConfigVideo,
+	"lpr": authz.CamerasConfigAnalytics, "face_recognition": authz.CamerasConfigAnalytics,
+	"semantic_search": authz.CamerasConfigAnalytics, "genai": authz.CamerasConfigAnalytics,
+	"classification": authz.CamerasConfigAnalytics,
+}
+
+// requireFrigateSections requires the granular permission of every listed section. Legacy
+// servers.config holders keep passing through authz.DecideCompat, so only an explicit deny or a
+// granular allow set that lacks the section changes anything.
+func requireFrigateSections(c *access.Checker, cam db.GetCameraRow, patch map[string]any) error {
+	var denied []string
+	for sec := range patch {
+		if p, ok := frigateSectionPermission[sec]; ok && !c.CanCompat(p, cameraResource(cam)) {
+			denied = append(denied, sec)
+		}
+	}
+	if len(denied) > 0 {
+		sort.Strings(denied)
+		return &SectionsForbiddenError{Sections: denied}
+	}
+	return nil
+}
+
 // PatchCameraFrigateConfig applies a patch (top-level section -> value) to one camera. It
 // stores a revision (full config.yml before and after) and an audit row. The write fails
 // closed when config.yml cannot be read first, because then it could not be rolled back.
@@ -199,6 +236,11 @@ func (s *Service) PatchCameraFrigateConfig(ctx context.Context, actor authz.Acto
 		res := access.Server(srv.TenantID, srv.SiteID, srv.ID)
 		if err := c.Require(authz.ServersConfig, res); err != nil {
 			return err
+		}
+		if skip, _ := ctx.Value(skipFrigateSectionCheck{}).(bool); !skip {
+			if err := requireFrigateSections(c, cam, patch); err != nil {
+				return err
+			}
 		}
 		if frigate.TouchesSecrets(patch) {
 			return c.Require(authz.ServersConfigSecrets, res)

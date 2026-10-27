@@ -10,7 +10,8 @@ export const PREVIEW_NOTE = "Con esta sección abierta, la vista previa muestra 
 
 /**
  * PTZ tab. Shown only when the camera has PTZ. Controls exist only for what the ONVIF PTZ path
- * really does today: move, zoom, speed, go to preset, and stored tours.
+ * really does today: move, zoom, speed, presets (create, rename, delete, go), home and tours with a runner, each enabled
+ * only when the device declares support.
  */
 export function PtzTab({ cameraId, canManage }: { cameraId: string; canManage: boolean }) {
   const ptz = usePtzControl(cameraId);
@@ -28,7 +29,16 @@ export function PtzTab({ cameraId, canManage }: { cameraId: string; canManage: b
         {ptz.status && <p role="status" className="text-xs text-ok">{ptz.status}</p>}
         <ErrorNote error={ptz.error} />
       </section>
-      <PresetsPanel cameraId={cameraId} canManage={canManage} onGo={ptz.gotoPreset} busy={ptz.pending} />
+      <PresetsPanel
+        cameraId={cameraId}
+        canManage={canManage}
+        busy={ptz.pending}
+        onGo={ptz.gotoPreset}
+        onSave={ptz.savePreset}
+        onRemove={ptz.removePreset}
+        onGoHome={ptz.gotoHome}
+        onSetHome={ptz.setHome}
+      />
       <ToursPanel cameraId={cameraId} canManage={canManage} />
     </div>
   );

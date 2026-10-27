@@ -19,6 +19,8 @@ import { EditYamlLink, YamlEntryProvider } from "@/components/camera/advanced/Ya
 import { DetectionTab } from "@/components/camera/detection/DetectionTab";
 import { CameraChangeProvider, useCameraChange } from "@/components/camera/CameraChangeProvider";
 import { ProfileCard } from "@/components/camera/profile/ProfileCard";
+import { ProvenanceBadge } from "@/components/camera/profile/ProvenanceBadge";
+import { useServerDefaults } from "@/lib/useServerDefaults";
 import { CameraHeader } from "@/components/camera/CameraHeader";
 import { SyncStatusPanel } from "@/components/camera/SyncStatusPanel";
 import { CameraPreview } from "@/components/camera/CameraPreview";
@@ -28,7 +30,7 @@ import { IntegrationsTab } from "@/components/camera/integrations/IntegrationsTa
 import { CameraTabs } from "@/components/camera/CameraTabs";
 import { VideoTab } from "@/components/camera/video/VideoTab";
 import { CameraWebView } from "@/components/camera/CameraWebView";
-import { MoreActions } from "@/components/camera/MoreActions";
+import { MoreActions, RESTART_CAMERA_LABEL, RestartCameraDialog } from "@/components/camera/MoreActions";
 import { PendingChangesBar } from "@/components/camera/PendingChangesBar";
 import { capabilityList, deviceRows, NONE, statusChips, videoRows } from "@/components/camera/summary";
 import { LprTestCard } from "@/components/provision/LprTestCard";
@@ -157,6 +159,8 @@ function FrigateCameraConfigScreen({ cameraId }: { cameraId: string }) {
   // The camera web view needs cameras.web.access (the legacy servers.manage + secrets pair counts).
   const canOpenCameraWeb = canCamera(me.data, "cameras.web.access");
   const canRestart = can(me.data, "servers.restart");
+  const canRestartCamera = canCamera(me.data, "cameras.restart");
+  const [restartingCamera, setRestartingCamera] = useState(false);
   const secretsVisible = !!doc.data?.secrets_visible;
   const needsRestart = serverId ? (restartPending[serverId] ?? loadRestart(serverId)) : false;
   const setNeedsRestart = (on: boolean) => {
@@ -164,6 +168,12 @@ function FrigateCameraConfigScreen({ cameraId }: { cameraId: string }) {
     saveRestart(serverId, on);
     setRestartPending((p) => ({ ...p, [serverId]: on }));
   };
+
+  const trackedLabels = (() => {
+    const o = config.objects;
+    return isRec(o) && Array.isArray(o.track) ? (o.track as string[]) : [];
+  })();
+  const serverDefaults = useServerDefaults({ serverId, camera: camera.data?.remote_name ?? doc.data?.camera_name, track: trackedLabels, allowed: secretsVisible });
 
   const valueOf = (s: string) => (s in edits ? edits[s] : config[s]);
   const dirty = sections.filter((s) => s in edits && !deepEqual(edits[s], config[s]));
@@ -448,8 +458,10 @@ function FrigateCameraConfigScreen({ cameraId }: { cameraId: string }) {
                 { id: "bulk", label: "Aplicar a varias cámaras", disabled: readOnly || !dirty.length || errorCount > 0 || !serverId, onSelect: openBulk },
                 { id: "onvif", label: "Capacidades ONVIF", onSelect: () => setActive(ONVIF_INFO) },
                 { id: "history", label: "Historial de cambios", onSelect: () => setActive(HISTORY) },
+                ...(canRestartCamera ? [{ id: "restart", label: RESTART_CAMERA_LABEL, onSelect: () => setRestartingCamera(true) }] : []),
               ]}
             />
+            {restartingCamera && <RestartCameraDialog cameraId={cameraId} onClose={() => setRestartingCamera(false)} />}
           </>
         }
       />
@@ -486,6 +498,13 @@ function FrigateCameraConfigScreen({ cameraId }: { cameraId: string }) {
         className="flex min-w-0 flex-1 flex-col gap-5 rounded-m3-2xl bg-surface-1 p-5 border border-outline-variant/60 shadow-sm"
       >
         {tab.id === "record" && <EditYamlLink section="record" label="Editar YAML de grabación" />}
+        {tab.id === "record" && (
+          <div className="flex flex-wrap items-center gap-2 text-xs text-muted">
+            <span>Origen de la grabación</span>
+            <ProvenanceBadge path="recording.enabled" />
+            {serverDefaults.recordRetention && <span>Valor del servidor: retención {serverDefaults.recordRetention}</span>}
+          </div>
+        )}
         {tab.id === "analytics" && (section === "lpr" || section === "face_recognition") && <EditYamlLink section={section} label={section === "lpr" ? "Editar YAML de LPR" : "Editar YAML de reconocimiento facial"} />}
         {tab.id === "analytics" && cameraType === "lpr_frigate" && section !== PROVISION && section !== ANALYTICS_MODULES && <LprTestCard cameraId={cameraId} engine="frigate" />}
         {tab.id === "video" ? (
@@ -521,6 +540,7 @@ function FrigateCameraConfigScreen({ cameraId }: { cameraId: string }) {
             onMotion={(v) => setSection("motion", v)}
             onObjects={(v) => setSection("objects", v)}
             onOpenZones={() => setZoneEditor(true)}
+            serverDefaults={serverDefaults}
             legacy={
               <>
                 {subNav}

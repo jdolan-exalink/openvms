@@ -149,6 +149,22 @@ describe("FrigateCameraConfig", () => {
     expect(await patch.clone().json()).toEqual({ sections: { detect: { fps: 12 } } });
   });
 
+  it("offers Reiniciar cámara to servers.restart holders and asks to confirm before restarting", async () => {
+    const fetchMock = mount({}, { "/api/v1/cameras/c1/restart": () => json({ restarted: true, via: "agent" }) });
+    fireEvent.click(await screen.findByRole("button", { name: "Más acciones" }));
+    fireEvent.click(await screen.findByRole("menuitem", { name: "Reiniciar cámara" }));
+    expect(await screen.findByText("La cámara dejará de transmitir mientras se reinicia.")).toBeInTheDocument();
+    expect(fetchMock.mock.calls.some(([r]) => (r as Request).method === "POST" && new URL((r as Request).url).pathname.endsWith("/restart"))).toBe(false);
+    fireEvent.click(screen.getByRole("button", { name: "Reiniciar" }));
+    await waitFor(() => expect(fetchMock.mock.calls.some(([r]) => (r as Request).method === "POST" && new URL((r as Request).url).pathname === "/api/v1/cameras/c1/restart")).toBe(true));
+  });
+
+  it("hides Reiniciar cámara without the restart permission", async () => {
+    mount({}, { "/api/v1/me": () => json({ id: "u", tenant_id: "t", grants: [{ permission: "cameras.view", effect: "allow" }] }) });
+    fireEvent.click(await screen.findByRole("button", { name: "Más acciones" }));
+    expect(screen.queryByRole("menuitem", { name: "Reiniciar cámara" })).not.toBeInTheDocument();
+  });
+
   it("applies the reviewed camera sections to the selected cameras on the same server", async () => {
     const fetchMock = mount({}, {
       "/api/v1/cameras": () => json({ items: [
@@ -838,6 +854,32 @@ describe("FrigateCameraConfig", () => {
       mountFull({}, { "/api/v1/cameras/c1": () => cam({ tags: ["fisheye"] }) });
       await goTo("Fisheye");
       expect(await screen.findByRole("region", { name: "Original y vista" })).toBeInTheDocument();
+    });
+  });
+
+  describe("provenance and server defaults", () => {
+    const model = { recording: { enabled: true }, detection: { enabled: true, objects: [], selection: [] }, provenance: { "recording.enabled": { source: "profile", profile_name: "Exterior" } }, state: { desired_revision: 1, applied_revision: 1, sync_state: "synced", last_error: "", drift: [] } };
+    const serverYaml = "motion:\n  threshold: 30\nrecord:\n  retain:\n    days: 7\ncameras:\n  acceso:\n    detect:\n      enabled: true\n";
+    const doc = { secrets_visible: true, config: { detect: { enabled: true }, record: { enabled: true }, motion: { threshold: 30 }, objects: { track: ["person"] } } };
+
+    it("shows the recording provenance chip and the server retention on the Grabación tab", async () => {
+      mountFull(doc, { "/api/v1/cameras/c1/normalized-config": () => json(model), "/api/v1/servers/s1/frigate-config/raw": () => json({ yaml: serverYaml }) });
+      await goTo("Grabación");
+      expect(await screen.findByText("Definido por perfil")).toBeInTheDocument();
+      expect(await screen.findByText(/Valor del servidor: retención 7 días/)).toBeInTheDocument();
+    });
+
+    it("shows the server motion threshold in Detección and hides it when the server config is unreadable", async () => {
+      mountFull(doc, { "/api/v1/cameras/c1/normalized-config": () => json(model), "/api/v1/servers/s1/frigate-config/raw": () => json({ yaml: serverYaml }) });
+      await goTo("Detección");
+      expect(await screen.findByText("Valor del servidor: 30")).toBeInTheDocument();
+    });
+
+    it("shows no server value without permission to read the server config", async () => {
+      mountFull({ ...doc, secrets_visible: false }, { "/api/v1/cameras/c1/normalized-config": () => json(model), "/api/v1/servers/s1/frigate-config/raw": () => json({ yaml: serverYaml }) });
+      await goTo("Detección");
+      await screen.findByText("Sensibilidad de movimiento");
+      expect(screen.queryByText(/Valor del servidor/)).toBeNull();
     });
   });
 });

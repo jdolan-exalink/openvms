@@ -2,6 +2,7 @@ package camconfig
 
 import (
 	"maps"
+	"slices"
 )
 
 // ModulePatch changes one analytics module: nil fields mean "leave as is".
@@ -12,10 +13,88 @@ type ModulePatch struct {
 
 // ModuleSettingsPatch changes the settings that have a real backing in the engine.
 type ModuleSettingsPatch struct {
-	MinArea *int `json:"min_area,omitempty"`
+	MinArea     *int `json:"min_area,omitempty"`
+	Enhancement *int `json:"enhancement,omitempty"`
 }
 
 const maxMinArea = 10_000_000
+
+// Setting keys, in the order they are reviewed and diffed.
+const (
+	settingMinArea     = "min_area"
+	settingEnhancement = "enhancement"
+)
+
+var settingKeys = []string{settingMinArea, settingEnhancement}
+
+// settingRules says which modules take which setting and its range. Only settings Frigate has
+// per camera are listed: thresholds, model and lists are server-wide there.
+var settingRules = map[string]struct {
+	modules  []string
+	min, max int
+	label    string
+}{
+	settingMinArea:     {[]string{ModuleLPR, ModuleFaceRecognition}, 0, maxMinArea, "área mínima"},
+	settingEnhancement: {[]string{ModuleLPR}, 0, 10, "mejora de imagen"},
+}
+
+// value returns the patch value of a setting key, nil when unset. It is nil-safe.
+func (s *ModuleSettingsPatch) value(key string) *int {
+	if s == nil {
+		return nil
+	}
+	switch key {
+	case settingMinArea:
+		return s.MinArea
+	case settingEnhancement:
+		return s.Enhancement
+	}
+	return nil
+}
+
+// value returns the effective value of a setting key, nil when the engine did not report it.
+func (s ModuleSettings) value(key string) *int {
+	switch key {
+	case settingMinArea:
+		return s.MinArea
+	case settingEnhancement:
+		return s.Enhancement
+	}
+	return nil
+}
+
+func (s *ModuleSettingsPatch) set(key string, v *int) {
+	switch key {
+	case settingMinArea:
+		s.MinArea = v
+	case settingEnhancement:
+		s.Enhancement = v
+	}
+}
+
+func (s *ModuleSettingsPatch) empty() bool {
+	for _, k := range settingKeys {
+		if s.value(k) != nil {
+			return false
+		}
+	}
+	return true
+}
+
+// copyPatch returns a copy of s without empty keys, nil when nothing is set.
+func (s *ModuleSettingsPatch) copyPatch() *ModuleSettingsPatch {
+	if s.empty() {
+		return nil
+	}
+	out := &ModuleSettingsPatch{}
+	for _, k := range settingKeys {
+		if v := s.value(k); v != nil {
+			c := *v
+			out.set(k, &c)
+		}
+	}
+	return out
+}
 
 // moduleSections maps the modules a Frigate camera can change to the camera section holding
 // them. Every other module has no Frigate switch.
@@ -25,7 +104,7 @@ var moduleSections = map[string]string{
 }
 
 func (m *ModulePatch) empty() bool {
-	return m == nil || (m.Enabled == nil && (m.Settings == nil || m.Settings.MinArea == nil))
+	return m == nil || (m.Enabled == nil && (m.Settings == nil || m.Settings.empty()))
 }
 
 func analyticsEmpty(a *AnalyticsPatch) bool {
@@ -55,12 +134,17 @@ func (a *AnalyticsPatch) validate() error {
 		if m.empty() {
 			return invalid("analytics.modules.%s: nothing to change", id)
 		}
-		if m.Settings != nil && m.Settings.MinArea != nil {
-			if _, ok := moduleSections[id]; !ok {
-				return invalid("analytics.modules.%s.settings: this module has no settings to change", id)
+		for _, key := range settingKeys {
+			v := m.Settings.value(key)
+			if v == nil {
+				continue
 			}
-			if v := *m.Settings.MinArea; v < 0 || v > maxMinArea {
-				return invalid("analytics.modules.%s.settings.min_area: must be between 0 and %d", id, maxMinArea)
+			rule := settingRules[key]
+			if !slices.Contains(rule.modules, id) {
+				return invalid("analytics.modules.%s.settings.%s: this module has no such setting", id, key)
+			}
+			if *v < rule.min || *v > rule.max {
+				return invalid("analytics.modules.%s.settings.%s: must be between %d and %d", id, key, rule.min, rule.max)
 			}
 		}
 		if id == ModuleLPR && m.Enabled != nil && a.LPR != nil && *m.Enabled != *a.LPR {
@@ -81,11 +165,7 @@ func (a *AnalyticsPatch) normalized() *AnalyticsPatch {
 		if m.empty() {
 			continue
 		}
-		n := &ModulePatch{Enabled: m.Enabled}
-		if m.Settings != nil && m.Settings.MinArea != nil {
-			v := *m.Settings.MinArea
-			n.Settings = &ModuleSettingsPatch{MinArea: &v}
-		}
+		n := &ModulePatch{Enabled: m.Enabled, Settings: m.Settings.copyPatch()}
 		if out.Modules == nil {
 			out.Modules = map[string]*ModulePatch{}
 		}
@@ -112,6 +192,7 @@ func mergeAnalytics(base, over *AnalyticsPatch) *AnalyticsPatch {
 		out.Modules = map[string]*ModulePatch{}
 		for id, m := range base.Modules {
 			c := *m
+			c.Settings = m.Settings.copyPatch()
 			out.Modules[id] = &c
 		}
 	} else {
@@ -135,8 +216,14 @@ func mergeAnalytics(base, over *AnalyticsPatch) *AnalyticsPatch {
 				out.LPR = nil
 			}
 		}
-		if m.Settings != nil && m.Settings.MinArea != nil {
-			cur.Settings = &ModuleSettingsPatch{MinArea: m.Settings.MinArea}
+		for _, key := range settingKeys {
+			if v := m.Settings.value(key); v != nil {
+				if cur.Settings = cur.Settings.copyPatch(); cur.Settings == nil {
+					cur.Settings = &ModuleSettingsPatch{}
+				}
+				c := *v
+				cur.Settings.set(key, &c)
+			}
 		}
 	}
 	return out.normalized()
@@ -167,14 +254,19 @@ func planModules(current Camera, a *AnalyticsPatch) (changes []sectionChange, un
 				Path: "analytics.modules." + id + ".enabled", Label: "módulo " + label, From: cur.Enabled, To: *mp.Enabled,
 			}})
 		}
-		if mp.Settings != nil && mp.Settings.MinArea != nil && (cur.Settings.MinArea == nil || *cur.Settings.MinArea != *mp.Settings.MinArea) {
+		for _, key := range settingKeys {
+			want := mp.Settings.value(key)
+			have := cur.Settings.value(key)
+			if want == nil || (have != nil && *have == *want) {
+				continue
+			}
 			var from any
-			if cur.Settings.MinArea != nil {
-				from = *cur.Settings.MinArea
+			if have != nil {
+				from = *have
 			}
 			changes = append(changes, sectionChange{section, Change{
-				Path: "analytics.modules." + id + ".settings.min_area", Label: "área mínima (" + label + ")",
-				From: from, To: *mp.Settings.MinArea,
+				Path:  "analytics.modules." + id + ".settings." + key,
+				Label: settingRules[key].label + " (" + label + ")", From: from, To: *want,
 			}})
 		}
 	}
@@ -189,6 +281,9 @@ func addModuleSections(out map[string]any, a *AnalyticsPatch) error {
 	}
 	for _, id := range sortedModuleIDs(a.Modules) {
 		section, ok := moduleSections[id]
+		if !ok && localModules[id] {
+			continue // switched in OpenVMS, not in Frigate (see LocalChanges)
+		}
 		if !ok {
 			label, _ := ModuleLabel(id)
 			return invalid("analytics.modules.%s: %s: %s", id, label, ReasonNotAvailable)
@@ -202,10 +297,24 @@ func addModuleSections(out map[string]any, a *AnalyticsPatch) error {
 		if mp.Enabled != nil {
 			cur["enabled"] = *mp.Enabled
 		}
-		if mp.Settings != nil && mp.Settings.MinArea != nil {
-			cur["min_area"] = *mp.Settings.MinArea
+		for _, key := range settingKeys {
+			if v := mp.Settings.value(key); v != nil {
+				cur[key] = *v
+			}
 		}
 		out[section] = cur
 	}
 	return nil
+}
+
+// LocalChanges lists the OpenVMS-side module switches of a patch (module id -> enabled), which
+// are stored by OpenVMS instead of being sent to Frigate.
+func LocalChanges(patch Patch) map[string]bool {
+	out := map[string]bool{}
+	for id, m := range modulesOf(patch.Normalized()) {
+		if localModules[id] && m.Enabled != nil {
+			out[id] = *m.Enabled
+		}
+	}
+	return out
 }

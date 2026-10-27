@@ -2,7 +2,24 @@ import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { useState } from "react";
 import { api, unwrap } from "@/api/client";
 
-export type PtzCommand = { action: "continuous_move" | "stop" | "goto_preset"; pan?: number; tilt?: number; zoom?: number; presetToken?: string };
+export type PtzCommand = {
+  action: "continuous_move" | "stop" | "goto_preset" | "set_preset" | "remove_preset" | "goto_home" | "set_home";
+  pan?: number;
+  tilt?: number;
+  zoom?: number;
+  presetToken?: string;
+  presetName?: string;
+};
+
+const STATUS: Record<PtzCommand["action"], string> = {
+  continuous_move: "Comando PTZ enviado.",
+  stop: "Movimiento detenido.",
+  goto_preset: "Preset ejecutado.",
+  set_preset: "Preset guardado.",
+  remove_preset: "Preset eliminado.",
+  goto_home: "Cámara en la posición home.",
+  set_home: "Posición home guardada.",
+};
 
 export type PtzDirection = "up" | "down" | "left" | "right" | "zoom_in" | "zoom_out";
 
@@ -35,12 +52,14 @@ export function usePtzControl(cameraId: string) {
       unwrap(
         await api.POST("/api/v1/cameras/{cameraId}/onvif/ptz", {
           params: { path: { cameraId } },
-          body: { action: cmd.action, pan: cmd.pan, tilt: cmd.tilt, zoom: cmd.zoom, preset_token: cmd.presetToken },
+          body: { action: cmd.action, pan: cmd.pan, tilt: cmd.tilt, zoom: cmd.zoom, preset_token: cmd.presetToken, preset_name: cmd.presetName },
         }),
       ),
     onSuccess: (_res, cmd) => {
-      setStatus(cmd.action === "stop" ? "Movimiento detenido." : cmd.action === "goto_preset" ? "Preset ejecutado." : "Comando PTZ enviado.");
-      if (cmd.action === "goto_preset") void qc.invalidateQueries({ queryKey: ["cameras", cameraId, "ptz-presets"] });
+      setStatus(STATUS[cmd.action]);
+      if (cmd.action === "goto_preset" || cmd.action === "set_preset" || cmd.action === "remove_preset") void qc.invalidateQueries({ queryKey: ["cameras", cameraId, "ptz-presets"] });
+      // A manual movement cancels the running tour on the server.
+      if (["continuous_move", "stop", "goto_preset", "goto_home"].includes(cmd.action)) void qc.invalidateQueries({ queryKey: ["cameras", cameraId, "ptz-tours"] });
     },
     onError: () => setStatus(null),
   });
@@ -53,5 +72,10 @@ export function usePtzControl(cameraId: string) {
     move: (direction: PtzDirection) => mutation.mutate({ action: "continuous_move", ...velocityOf(direction, speed) }),
     stop: () => mutation.mutate({ action: "stop" }),
     gotoPreset: (presetToken: string) => mutation.mutate({ action: "goto_preset", presetToken }),
+    /** The name is optional; with an existing token this renames (and re-saves) that preset. */
+    savePreset: (presetName: string, presetToken?: string) => mutation.mutate({ action: "set_preset", presetName: presetName.trim() || undefined, presetToken }),
+    removePreset: (presetToken: string) => mutation.mutate({ action: "remove_preset", presetToken }),
+    gotoHome: () => mutation.mutate({ action: "goto_home" }),
+    setHome: () => mutation.mutate({ action: "set_home" }),
   };
 }

@@ -1,4 +1,5 @@
 import { TextInput } from "@/components/ui";
+import type { ServerDefaults } from "@/lib/useServerDefaults";
 
 type Rec = Record<string, unknown>;
 const isRec = (v: unknown): v is Rec => typeof v === "object" && v !== null && !Array.isArray(v);
@@ -36,7 +37,11 @@ export function withFilter(objects: unknown, field: "min_score" | "min_area", va
 
 const parse = (s: string) => (s.trim() === "" || Number.isNaN(Number(s)) ? undefined : Number(s));
 
-export function DetectionSettings({ value, onMotion, onObjects, onOpenZones, readOnly }: { value: DetectionSettingsValue; onMotion: (next: Rec) => void; onObjects: (next: Rec) => void; onOpenZones: () => void; readOnly?: boolean }) {
+function ServerValue({ value }: { value?: string }) {
+  return value === undefined ? null : <span className="font-normal text-muted">Valor del servidor: {value}</span>;
+}
+
+export function DetectionSettings({ value, onMotion, onObjects, onOpenZones, readOnly, serverDefaults }: { value: DetectionSettingsValue; onMotion: (next: Rec) => void; onObjects: (next: Rec) => void; onOpenZones: () => void; readOnly?: boolean; serverDefaults?: ServerDefaults }) {
   const motion: Rec = isRec(value.motion) ? value.motion : {};
   const noTracked = !(isRec(value.objects) && Array.isArray(value.objects.track) && value.objects.track.length > 0);
   return (
@@ -45,16 +50,19 @@ export function DetectionSettings({ value, onMotion, onObjects, onOpenZones, rea
         Sensibilidad de movimiento
         <TextInput type="number" min={1} max={255} disabled={readOnly} value={num(motion.threshold) ?? ""} onChange={(e) => onMotion({ ...motion, threshold: parse(e.target.value) })} />
         <span className="font-normal text-muted">Umbral de Frigate: un valor menor detecta cambios más chicos.</span>
+        <ServerValue value={serverDefaults?.motionThreshold} />
       </label>
       <label className="flex flex-col gap-1 text-xs font-semibold">
         Confianza mínima
         <TextInput type="number" min={0} max={1} step={0.05} disabled={readOnly || noTracked} value={sharedFilter(value.objects, "min_score") ?? ""} onChange={(e) => onObjects(withFilter(value.objects, "min_score", parse(e.target.value)))} />
         <span className="font-normal text-muted">{noTracked ? "Elegí objetos para ajustarla." : "Entre 0 y 1; se aplica a todos los objetos elegidos."}</span>
+        <ServerValue value={serverDefaults?.minScore} />
       </label>
       <label className="flex flex-col gap-1 text-xs font-semibold">
         Tamaño mínimo (px²)
         <TextInput type="number" min={0} disabled={readOnly || noTracked} value={sharedFilter(value.objects, "min_area") ?? ""} onChange={(e) => onObjects(withFilter(value.objects, "min_area", parse(e.target.value)))} />
         <span className="font-normal text-muted">{noTracked ? "Elegí objetos para ajustarlo." : "Área mínima del recuadro; se aplica a todos los objetos elegidos."}</span>
+        <ServerValue value={serverDefaults?.minArea} />
       </label>
       <div className="flex flex-col gap-1 text-xs font-semibold">
         Zonas aplicables

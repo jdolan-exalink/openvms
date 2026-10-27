@@ -229,7 +229,7 @@ func TestApplyCameraConfigMapsOriginAndErrors(t *testing.T) {
 	body := gen.ApplyCameraConfigJSONRequestBody{
 		Patch: gen.CameraConfigPatch{"recording": map[string]any{"enabled": true}}, ExpectedRevision: 4,
 	}
-	origin := gen.CameraConfigOrigin("profile")
+	origin := gen.CameraConfigOrigin("api")
 	body.Origin = &origin
 
 	t.Run("passes revision and origin on", func(t *testing.T) {
@@ -242,7 +242,7 @@ func TestApplyCameraConfigMapsOriginAndErrors(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		if w.gotApply.ExpectedRevision != 4 || w.gotApply.Origin != "profile" {
+		if w.gotApply.ExpectedRevision != 4 || w.gotApply.Origin != "api" {
 			t.Fatalf("input = %+v", w.gotApply)
 		}
 		out := res.(gen.ApplyCameraConfig200JSONResponse)
@@ -275,6 +275,30 @@ func TestApplyCameraConfigMapsOriginAndErrors(t *testing.T) {
 			t.Fatalf("status = %d calls = %d", status, w.applyCalls)
 		}
 	})
+}
+
+func TestApplyCameraConfigOnlyAcceptsCallerOrigins(t *testing.T) {
+	for _, tc := range []struct {
+		origin gen.CameraConfigOrigin
+		ok     bool
+	}{
+		{gen.CameraConfigOriginUi, true}, {gen.CameraConfigOriginApi, true},
+		{gen.CameraConfigOriginProfile, false}, {gen.CameraConfigOriginGroup, false}, {gen.CameraConfigOriginYaml, false},
+		{gen.CameraConfigOriginSync, false}, {gen.CameraConfigOriginExternalDevice, false}, {"bogus", false},
+	} {
+		w := &fakeCamConfigWriter{}
+		h := &Handlers{camConfigWrite: w}
+		o := tc.origin
+		body := gen.ApplyCameraConfigJSONRequestBody{Patch: gen.CameraConfigPatch{"detection": map[string]any{"enabled": true}}, Origin: &o}
+		_, err := h.ApplyCameraConfig(writerCtx(), gen.ApplyCameraConfigRequestObject{CameraId: uuid.New(), Body: &body})
+		status, _, _ := statusFor(err)
+		if tc.ok && (err != nil || w.applyCalls != 1) {
+			t.Errorf("%s: err = %v calls = %d", tc.origin, err, w.applyCalls)
+		}
+		if !tc.ok && (status != http.StatusBadRequest || w.applyCalls != 0) {
+			t.Errorf("%s: status = %d calls = %d, want 400 and no apply", tc.origin, status, w.applyCalls)
+		}
+	}
 }
 
 func TestGetCameraConfigCarriesState(t *testing.T) {
@@ -361,5 +385,51 @@ func TestPatchSectionsMapToTheirPermissions(t *testing.T) {
 	only := camconfig.Patch{Recording: p.Recording}
 	if got := only.Sections(); len(got) != 1 || got[0] != "recording" {
 		t.Fatalf("sections = %v", got)
+	}
+}
+
+func TestOpenVMSModulePatchNeedsTheAnalyticsSection(t *testing.T) {
+	p, err := parsePatch(map[string]any{"analytics": map[string]any{"modules": map[string]any{
+		"vehicle_color": map[string]any{"enabled": false}, "lpr": map[string]any{"settings": map[string]any{"enhancement": 3}},
+	}}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := strings.Join(p.Sections(), ","); got != "analytics" {
+		t.Fatalf("sections = %s, want only analytics (cameras.config.analytics)", got)
+	}
+	var ve *inventory.ValidationError
+	if _, err := parsePatch(map[string]any{"analytics": map[string]any{"modules": map[string]any{"face_recognition": map[string]any{"settings": map[string]any{"threshold": 0.9}}}}}); !errors.As(err, &ve) {
+		t.Fatalf("a setting Frigate does not have per camera must be a 400, got %v", err)
+	}
+}
+
+func TestGetCameraConfigReportsOpenVMSModules(t *testing.T) {
+	ce := camConfigFixture(fakeFrigate{doc: map[string]any{"lpr": map[string]any{"enabled": true, "enhancement": 2.0}, "face_recognition": map[string]any{"enabled": true}}})
+	_, raw := getCamConfig(t, fakeCamConfigSource{ce: ce})
+	var out struct {
+		Analytics struct {
+			Modules []struct {
+				ID, Engine, Reason string
+				Available          bool
+				Settings           map[string]any
+			}
+		}
+	}
+	if err := json.Unmarshal(raw, &out); err != nil {
+		t.Fatal(err)
+	}
+	seen := map[string]bool{}
+	for _, m := range out.Analytics.Modules {
+		seen[m.ID] = m.Available
+		if !m.Available && m.Reason == "" {
+			t.Fatalf("%s unavailable without reason", m.ID)
+		}
+		if m.ID == "lpr" && m.Settings["enhancement"] != 2.0 {
+			t.Fatalf("lpr settings = %v", m.Settings)
+		}
+	}
+	if !seen["face_detection"] || !seen["lpr"] || seen["similar_search"] {
+		t.Fatalf("availability = %v", seen)
 	}
 }

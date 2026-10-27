@@ -194,6 +194,8 @@ func videoReasonText(reason string) string {
 		return "Faltan credenciales ONVIF o no tiene permiso para usarlas."
 	case VideoUnreachable:
 		return "No se pudo consultar la cámara por ONVIF."
+	case VideoAgentOutdated:
+		return "Actualizá el agente para configurar el video de esta cámara."
 	default:
 		return "La cámara no permite consultar ni cambiar el video por ONVIF."
 	}
@@ -204,6 +206,9 @@ func videoReasonText(reason string) string {
 func reasonFor(err error) string {
 	if errors.Is(err, onvif.ErrProfileNotFound) || errors.Is(err, onvif.ErrNoVideoEncoder) {
 		return VideoUnsupported
+	}
+	if errors.Is(err, ErrAgentOutdated) {
+		return VideoAgentOutdated
 	}
 	return VideoUnreachable
 }
@@ -466,6 +471,8 @@ func videoApplyError(label string, err error) error {
 		return fmt.Errorf("stream %s: la cámara no aplicó el cambio (%s)", label, strings.Join(verr.Fields, ", "))
 	case errors.Is(err, onvif.ErrProfileNotFound), errors.Is(err, onvif.ErrNoVideoEncoder), errors.Is(err, onvif.ErrGOPNotWritable):
 		return fmt.Errorf("stream %s: la cámara no permite cambiar este parámetro", label)
+	case errors.Is(err, ErrAgentOutdated):
+		return fmt.Errorf("stream %s: %s", label, videoReasonText(VideoAgentOutdated))
 	default:
 		return fmt.Errorf("stream %s: no se pudo aplicar el cambio de video en la cámara", label)
 	}

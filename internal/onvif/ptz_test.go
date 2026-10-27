@@ -147,6 +147,9 @@ func TestPTZClientPresetAndHomeOperations(t *testing.T) {
 	if !strings.Contains(last, "Gate &lt;&amp;&gt;") || strings.Contains(last, "PresetToken") {
 		t.Fatalf("create must escape the name and omit the token: %s", last)
 	}
+	if _, err := ptz.SetPreset(ctx, "P1", "", ""); err != nil || strings.Contains(bodies[len(bodies)-1], "PresetName") {
+		t.Fatalf("an empty name must be omitted: %v %s", err, bodies[len(bodies)-1])
+	}
 	if _, err := ptz.SetPreset(ctx, "P1", "Renamed", "7"); err != nil || !strings.Contains(bodies[len(bodies)-1], "<tptz:PresetToken>7</tptz:PresetToken>") {
 		t.Fatalf("rename must carry the token: %v %s", err, bodies[len(bodies)-1])
 	}

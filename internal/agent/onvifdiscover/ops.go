@@ -156,11 +156,14 @@ type PTZRequest struct {
 	Username     string  `json:"username"`
 	Password     string  `json:"password"`
 	ProfileToken string  `json:"profile_token"`
-	Action       string  `json:"action"` // continuous_move, stop, goto_preset, get_presets
+	Action       string  `json:"action"` // continuous_move, stop, goto_preset, get_presets, set_preset, remove_preset, goto_home, set_home, get_nodes
 	Pan          float64 `json:"pan,omitempty"`
 	Tilt         float64 `json:"tilt,omitempty"`
 	Zoom         float64 `json:"zoom,omitempty"`
 	PresetToken  string  `json:"preset_token,omitempty"`
+	// PresetName names a preset on set_preset; with an existing PresetToken it renames (and
+	// re-saves) that preset.
+	PresetName string `json:"preset_name,omitempty"`
 }
 
 func (h *OpsHandler) HandlePTZ(w http.ResponseWriter, r *http.Request) {
@@ -229,6 +232,56 @@ func (h *OpsHandler) HandlePTZ(w http.ResponseWriter, r *http.Request) {
 		}
 		w.Header().Set("Content-Type", "application/json")
 		_ = json.NewEncoder(w).Encode(map[string]any{"success": true, "presets": presets})
+
+	case "set_preset":
+		if len(req.PresetName) > maxProbeFieldRunes || len(req.PresetToken) > maxProbeFieldRunes {
+			http.Error(w, "invalid preset", http.StatusBadRequest)
+			return
+		}
+		token, err := ptz.SetPreset(r.Context(), req.ProfileToken, req.PresetName, req.PresetToken)
+		if err != nil {
+			http.Error(w, "ptz set preset failed", http.StatusBadGateway)
+			return
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(map[string]any{"success": true, "preset_token": token})
+
+	case "remove_preset":
+		if req.PresetToken == "" {
+			http.Error(w, "preset_token required", http.StatusBadRequest)
+			return
+		}
+		if err := ptz.RemovePreset(r.Context(), req.ProfileToken, req.PresetToken); err != nil {
+			http.Error(w, "ptz remove preset failed", http.StatusBadGateway)
+			return
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(map[string]any{"success": true})
+
+	case "goto_home":
+		if err := ptz.GotoHomePosition(r.Context(), req.ProfileToken); err != nil {
+			http.Error(w, "ptz goto home failed", http.StatusBadGateway)
+			return
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(map[string]any{"success": true})
+
+	case "set_home":
+		if err := ptz.SetHomePosition(r.Context(), req.ProfileToken); err != nil {
+			http.Error(w, "ptz set home failed", http.StatusBadGateway)
+			return
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(map[string]any{"success": true})
+
+	case "get_nodes":
+		nodes, err := ptz.GetNodes(r.Context())
+		if err != nil {
+			http.Error(w, "ptz get nodes failed", http.StatusBadGateway)
+			return
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(map[string]any{"success": true, "nodes": nodes})
 
 	default:
 		http.Error(w, "unknown ptz action", http.StatusBadRequest)

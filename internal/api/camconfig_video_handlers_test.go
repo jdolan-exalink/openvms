@@ -11,11 +11,13 @@ import (
 	"github.com/google/uuid"
 
 	"github.com/jdolan-exalink/openvms/internal/access"
+	"github.com/jdolan-exalink/openvms/internal/agent/onvifdiscover"
 	"github.com/jdolan-exalink/openvms/internal/api/gen"
 	"github.com/jdolan-exalink/openvms/internal/authz"
 	"github.com/jdolan-exalink/openvms/internal/camconfig"
 	"github.com/jdolan-exalink/openvms/internal/inventory"
 	"github.com/jdolan-exalink/openvms/internal/onvif"
+	"github.com/jdolan-exalink/openvms/internal/provision"
 	"github.com/jdolan-exalink/openvms/internal/store/db"
 )
 
@@ -275,3 +277,57 @@ func TestLazyVideoDeviceFailureIsSanitized(t *testing.T) {
 type roundTripFunc func(*http.Request) (*http.Response, error)
 
 func (f roundTripFunc) RoundTrip(r *http.Request) (*http.Response, error) { return f(r) }
+
+type fakeAgentVideo struct {
+	registered bool
+	err        error
+	calls      []onvifdiscover.VideoDeviceRequest
+}
+
+func (f *fakeAgentVideo) HasRegisteredAgent(context.Context, authz.Actor, uuid.UUID) bool {
+	return f.registered
+}
+
+func (f *fakeAgentVideo) ExecuteOnvifVideoDevice(_ context.Context, _ authz.Actor, _ uuid.UUID, req onvifdiscover.VideoDeviceRequest) (onvifdiscover.VideoDeviceResult, int, error) {
+	f.calls = append(f.calls, req)
+	if f.err != nil {
+		return onvifdiscover.VideoDeviceResult{}, 0, f.err
+	}
+	return onvifdiscover.VideoDeviceResult{Success: true, Streams: []onvif.ProfileStream{{Token: "main"}}}, 200, nil
+}
+
+func TestVideoDevicePrefersTheAgentAndFallsBackToTheDirectDialWithoutOne(t *testing.T) {
+	cam := db.GetCameraRow{ServerID: uuid.New()}
+	agent := &fakeAgentVideo{registered: true}
+	h := &Handlers{camAgentVideo: agent}
+	dev := h.videoDeviceFor(context.Background(), authz.Actor{}, cam, "http://192.168.1.50/onvif/device_service", "admin", videoSecret)
+	streams, err := dev.Streams(context.Background())
+	if _, ok := dev.(*camconfig.AgentVideoDevice); !ok || err != nil || len(streams) != 1 || len(agent.calls) != 1 || agent.calls[0].Op != "profile_streams" {
+		t.Fatalf("device %T streams %v err %v calls %+v", dev, streams, err, agent.calls)
+	}
+
+	agent.registered = false
+	if dev := h.videoDeviceFor(context.Background(), authz.Actor{}, cam, "http://192.168.1.50/x", "admin", videoSecret); func() bool { _, ok := dev.(*lazyVideoDevice); return !ok }() {
+		t.Fatalf("no agent: want the direct dial, got %T", dev)
+	}
+	if dev := (&Handlers{}).videoDeviceFor(context.Background(), authz.Actor{}, cam, "http://192.168.1.50/x", "admin", videoSecret); func() bool { _, ok := dev.(*lazyVideoDevice); return !ok }() {
+		t.Fatalf("no provision service: want the direct dial, got %T", dev)
+	}
+}
+
+func TestVideoDeviceThroughAnOldAgentReadsAsAgentOutdated(t *testing.T) {
+	agent := &fakeAgentVideo{registered: true, err: provision.ErrAgentOpUnsupported}
+	h := &Handlers{camAgentVideo: agent}
+	dev := h.videoDeviceFor(context.Background(), authz.Actor{}, db.GetCameraRow{ServerID: uuid.New()}, "http://192.168.1.50/x", "admin", videoSecret)
+	link := camconfig.VideoLink{Device: dev, PrimaryToken: "main"}
+	rep := camconfig.BuildVideoOptions(context.Background(), "cam", &link)
+	if rep.Available || rep.Reason != "agent_outdated" {
+		t.Fatalf("report %+v", rep)
+	}
+	// Other agent failures keep reading as an unreachable camera.
+	agent.err = errors.New("registered agent probe unavailable")
+	rep = camconfig.BuildVideoOptions(context.Background(), "cam", &link)
+	if rep.Reason != "unreachable" {
+		t.Fatalf("report %+v", rep)
+	}
+}

@@ -653,14 +653,59 @@ func flatten(out *[]LeafChange, path string, v any, kind string) {
 }
 
 var (
-	reURLUser   = regexp.MustCompile(`(?i)([a-z][a-z0-9+.-]*://)[^/\s@]*@`)
-	reSecretKey = regexp.MustCompile(`(?i)(^|\.)(pass(word)?|pwd|user(name)?|token|secret|key|authorization)$`)
+	reURLToken  = regexp.MustCompile(`(?i)[a-z][a-z0-9+.-]*://\S*`)
+	reSecretKey = regexp.MustCompile(`(?i)(pass(word|wd)?|pwd|user(name)?|token|secret|api_?key|key|credentials?|auth(orization)?|cookie|bearer)$`)
+	reStreamKey = regexp.MustCompile(`(?i)(^|\.)(path|input_args|url|uri|stream|source|endpoint|rtsp[a-z_]*)$`)
+	reCredHint  = regexp.MustCompile(`(?i)(@|user(name)?=|pass(word|wd)?=|pwd=|token=|key=|secret=|auth)`)
+	reCredSeg   = regexp.MustCompile(`(?i)(=|user|pass|pwd|token|secret|key|auth|cookie|bearer|credential)`)
 )
 
 const hidden = "[oculto]"
 
+// safeURLToken reduces one URL-looking token to scheme, host and the leading path segments that
+// do not look like credentials: userinfo (the password may itself contain '@' or '/'), query,
+// fragment and any credential-looking path segment onwards are dropped. When in doubt the whole
+// token is hidden.
+func safeURLToken(tok string) string {
+	i := strings.Index(tok, "://")
+	scheme, rest := tok[:i], tok[i+3:]
+	if at := strings.LastIndex(rest, "@"); at >= 0 {
+		rest = rest[at+1:]
+	}
+	if cut := strings.IndexAny(rest, "?#"); cut >= 0 {
+		rest = rest[:cut]
+	}
+	host, path, _ := strings.Cut(rest, "/")
+	if host == "" || strings.ContainsAny(host, "=&;,'\"") {
+		return hidden
+	}
+	var keep []string
+	for _, seg := range strings.Split(path, "/") {
+		if reCredSeg.MatchString(seg) {
+			break
+		}
+		keep = append(keep, seg)
+	}
+	out := scheme + "://" + host
+	if p := strings.Join(keep, "/"); p != "" {
+		out += "/" + p
+	}
+	return out
+}
+
+func safeString(path, s string) string {
+	if strings.Contains(s, "://") {
+		return reURLToken.ReplaceAllStringFunc(s, safeURLToken)
+	}
+	if reStreamKey.MatchString(path) && reCredHint.MatchString(s) {
+		return hidden
+	}
+	return s
+}
+
 // SafeValue removes credentials from a value shown in a diff or stored in the audit trail:
-// the user info of URLs and the value of any key named like a secret.
+// every URL is reduced to scheme, host and a credential-free path (no userinfo, no query), and
+// the value of any key named like a secret is hidden.
 func SafeValue(path string, v any) any {
 	if reSecretKey.MatchString(path) {
 		if v == nil {
@@ -670,7 +715,7 @@ func SafeValue(path string, v any) any {
 	}
 	switch t := v.(type) {
 	case string:
-		return reURLUser.ReplaceAllString(t, "${1}")
+		return safeString(path, t)
 	case []any:
 		out := make([]any, len(t))
 		for i, e := range t {

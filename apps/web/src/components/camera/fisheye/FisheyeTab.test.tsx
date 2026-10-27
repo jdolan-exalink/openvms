@@ -1,7 +1,7 @@
-import { render, screen } from "@testing-library/react";
+import { fireEvent, render, screen } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { fisheyeConfigStorageKey } from "@/lib/fisheye/storage";
-import { FisheyeTab } from "./FisheyeTab";
+import { exportPreferenceKey, FisheyeTab } from "./FisheyeTab";
 
 vi.mock("@/components/fisheye/FisheyeSection", () => ({ FisheyeSection: () => <div data-testid="fisheye-section" /> }));
 
@@ -20,7 +20,7 @@ describe("FisheyeTab", () => {
     expect(screen.getByText("Grabación original")).toBeInTheDocument();
     expect(screen.getByText(/Activa · 3 vistas fijas de 120°/)).toBeInTheDocument();
     expect(screen.getByText(/nunca modifica el stream ni la grabación/)).toBeInTheDocument();
-    expect(screen.getByText(/todavía no hay una preferencia guardada por cámara/)).toBeInTheDocument();
+    expect(screen.getByText(/Las exportaciones siguen usando el original/)).toBeInTheDocument();
     expect(screen.getByTestId("fisheye-section")).toBeInTheDocument();
     expect(fetchMock).not.toHaveBeenCalled();
   });
@@ -28,5 +28,21 @@ describe("FisheyeTab", () => {
   it("reports the dewarped view as off by default", () => {
     render(<FisheyeTab cameraId="c2" cameraName="domo" canManage={false} />);
     expect(screen.getByText("Desactivada")).toBeInTheDocument();
+  });
+
+  it("stores the export preference per camera next to the other fisheye settings", () => {
+    render(<FisheyeTab cameraId="c3" cameraName="domo" canManage />);
+    const select = screen.getByLabelText("Exportar");
+    expect(select).toHaveValue("original");
+    fireEvent.change(select, { target: { value: "dewarp" } });
+    expect(localStorage.getItem(exportPreferenceKey("c3"))).toBe("dewarp");
+    expect(screen.getByText(/Las exportaciones siguen usando el original/)).toBeInTheDocument();
+  });
+
+  it("restores the stored export preference and locks it without manage permission", () => {
+    localStorage.setItem(exportPreferenceKey("c4"), "dewarp");
+    render(<FisheyeTab cameraId="c4" cameraName="domo" canManage={false} />);
+    expect(screen.getByLabelText("Exportar")).toHaveValue("dewarp");
+    expect(screen.getByLabelText("Exportar")).toBeDisabled();
   });
 });

@@ -3,12 +3,14 @@ package api
 import (
 	"context"
 	"log/slog"
+	"sync"
 	"time"
 
 	"github.com/jdolan-exalink/openvms/internal/agentenroll"
 	"github.com/jdolan-exalink/openvms/internal/alarms"
 	"github.com/jdolan-exalink/openvms/internal/api/gen"
 	"github.com/jdolan-exalink/openvms/internal/branding"
+	"github.com/jdolan-exalink/openvms/internal/camconfig"
 	"github.com/jdolan-exalink/openvms/internal/camweb"
 	"github.com/jdolan-exalink/openvms/internal/clipwatermark"
 	"github.com/jdolan-exalink/openvms/internal/events"
@@ -84,6 +86,16 @@ type Handlers struct {
 	camProfile camProfileService
 	// camVideo replaces the ONVIF video link lookup in tests; nil uses the camera's credentials.
 	camVideo videoLinkFunc
+	// camAgentVideo replaces the agent video operations in tests; nil uses Provision.
+	camAgentVideo agentVideoProvider
+	// camPTZ replaces the PTZ services in tests; nil uses Inv and Provision.
+	camPTZ ptzBackend
+	// camRestart replaces the camera restart services in tests; nil uses Inv and Provision.
+	camRestart restartBackend
+
+	// ptzRunner runs stored PTZ tours (in memory); created on first use, closed by StopPTZTours.
+	ptzRunner     *camconfig.TourRunner
+	ptzRunnerOnce sync.Once
 
 	// catalogLabels reads the model labels a server's engine supports for the object catalog;
 	// nil uses Inv, which reads them from the server's Frigate model.

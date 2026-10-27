@@ -40,6 +40,9 @@ const modelVersion = "4"
 // when the person box was blue, and it dropped near-black cloth.
 const personModelVersion = "2"
 
+// unknownColor is what an event stores while vehicle color is switched off for its camera.
+var unknownColor = Color{Name: "unknown", Quality: qualityLow}
+
 // Worker drains vehicle_attribute_jobs. It never blocks event ingest.
 type Worker struct {
 	Store *store.Store
@@ -151,9 +154,13 @@ func (w *Worker) enrich(ctx context.Context, eventID uuid.UUID, reevaluate bool)
 	if err != nil {
 		return err
 	}
-	color := ClassifyColor(img)
+	colorOn := w.moduleOn(ctx, cameraID, ModuleVehicleColor)
+	color := unknownColor
+	if colorOn {
+		color = ClassifyColor(img)
+	}
 	frigateType, frigateConf := SubjectType(labels, HasGreenBox(img))
-	if color.Name == "unknown" || color.Name == "other" {
+	if colorOn && (color.Name == "unknown" || color.Name == "other") {
 		if alt, ok := w.colorFromRegion(ctx, serverID, detectionIDs, frigateType); ok {
 			color = alt
 		}
@@ -186,7 +193,9 @@ func (w *Worker) enrich(ctx context.Context, eventID uuid.UUID, reevaluate bool)
 	trailerName, trailerConf := "", float32(0)
 	if typ == "truck_trailer" {
 		trailerName, trailerConf = trailer.Name, trailer.Confidence
-		if cab.Name != "unknown" && cab.Name != "other" {
+		if !colorOn {
+			trailerName, trailerConf = "", 0
+		} else if cab.Name != "unknown" && cab.Name != "other" {
 			color = cab
 		}
 	}
@@ -370,6 +379,13 @@ func (w *Worker) enrichPerson(ctx context.Context, eventID uuid.UUID) error {
 	})
 	if err != nil {
 		return err
+	}
+	if !w.moduleOn(ctx, cameraID, ModuleClothingColor) {
+		// Switched off for this camera: no attributes are stored, the job is simply done.
+		return w.Store.TxRaw(ctx, store.AllTenants, func(tx pgx.Tx) error {
+			_, err := tx.Exec(ctx, `UPDATE person_attribute_jobs SET status = 'completed', last_error = 'clothing color off for this camera', updated_at = now() WHERE event_id = $1`, eventID)
+			return err
+		})
 	}
 	img, err := w.still(ctx, key, serverID, detectionIDs, HasPersonBox)
 	if err != nil {

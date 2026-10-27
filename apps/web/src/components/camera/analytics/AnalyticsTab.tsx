@@ -1,7 +1,8 @@
 import { LprSettings } from "./LprSettings";
 import { FaceSettings } from "./FaceSettings";
+import { Advanced } from "./LprSettings";
 import { ModuleCard } from "./ModuleCard";
-import { type AnalyticsModule, draftEnabled, enabledPatch, minAreaPatch } from "./draft";
+import { type AnalyticsModule, draftEnabled, enabledPatch, enhancementPatch, minAreaPatch } from "./draft";
 
 type Props = {
   cameraId: string;
@@ -36,7 +37,8 @@ export function AnalyticsTab({ cameraId, modules, patch, setPatch, readOnly }: P
         }
         return (
           <ModuleCard key={m.id} module={m} enabled={draftEnabled(patch, m)} onToggle={(v) => setPatch(enabledPatch(m.id, v))} readOnly={readOnly}>
-            {m.id === "lpr" && <LprSettings cameraId={cameraId} module={m} patch={patch} onMinArea={(v) => setPatch(minAreaPatch(m.id, v))} readOnly={readOnly} />}
+            {m.id === "lpr" && <LprSettings cameraId={cameraId} module={m} patch={patch} onMinArea={(v) => setPatch(minAreaPatch(m.id, v))} onEnhancement={(v) => setPatch(enhancementPatch(m.id, v))} readOnly={readOnly} />}
+            {m.id !== "lpr" && <Advanced items={m.advanced} />}
           </ModuleCard>
         );
       })}

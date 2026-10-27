@@ -7,6 +7,8 @@ import (
 	"net/url"
 	"slices"
 	"strings"
+
+	"github.com/jdolan-exalink/openvms/internal/frigate"
 )
 
 // FrigateEngine is the part of a Frigate adapter the model needs; frigate.Adapter satisfies it.
@@ -25,6 +27,11 @@ type FrigateAdapter struct {
 	Engine FrigateEngine
 	// Writer applies section patches; nil means the adapter can only read.
 	Writer SectionWriter
+	// Local stores the switches of the analytics OpenVMS runs itself; nil means they cannot be
+	// written (a patch touching them is then refused by the apply).
+	Local LocalWriter
+	// LocalState loads the OpenVMS-side switches when the inventory does not carry them.
+	LocalState func(ctx context.Context) *LocalAnalytics
 	// Video reaches the camera's ONVIF video settings: it enriches the streams on Read and
 	// applies stream patches. Nil means the camera's own video is not consulted.
 	Video *VideoLink
@@ -36,6 +43,9 @@ var _ Adapter = FrigateAdapter{}
 func (a FrigateAdapter) Read(ctx context.Context, in Inventory) (Camera, error) {
 	if in.CameraID == "" {
 		return Camera{}, fmt.Errorf("camconfig: camera id is required")
+	}
+	if in.Local == nil && a.LocalState != nil {
+		in.Local = a.LocalState(ctx)
 	}
 	cam := baseModel(in)
 	cam.Origin.Engine = "frigate"
@@ -70,9 +80,33 @@ func (a FrigateAdapter) Read(ctx context.Context, in Inventory) (Camera, error) 
 	}
 	detectionView(&cam.Detection)
 	finish(&cam, in, doc)
-	deriveModules(&cam, in, doc)
+	deriveModulesWith(&cam, in, doc, a.faceGlobals(ctx, doc))
 	enrichVideo(ctx, &cam, a.Video)
 	return cam, nil
+}
+
+// faceGlobals reads Frigate's server-wide face settings, only when the camera has a
+// face_recognition section; an engine that cannot report them just yields nil.
+func (a FrigateAdapter) faceGlobals(ctx context.Context, doc map[string]any) (out *frigate.FaceRecognitionSettings) {
+	// Test doubles that embed a nil frigate.Adapter promote the method and panic when called:
+	// the settings are optional detail, so that reads as "not reported".
+	defer func() {
+		if recover() != nil {
+			out = nil
+		}
+	}()
+	if doc == nil || doc["face_recognition"] == nil {
+		return nil
+	}
+	src, ok := a.Engine.(faceGlobals)
+	if !ok {
+		return nil
+	}
+	f, err := src.FaceRecognitionSettings(ctx)
+	if err != nil {
+		return nil
+	}
+	return &f
 }
 
 // unavailable marks a source as unreadable. The cause is not copied: engine errors can quote
@@ -358,12 +392,16 @@ func floatOf(v any) float64 {
 
 func intOf(v any) int { return int(floatOf(v)) }
 
-// RedactURL reduces a stream URL to scheme, host and path: userinfo, query and fragment are
-// dropped. Anything that does not parse as an absolute URL yields "".
+// RedactURL reduces a stream URL to scheme, host and a credential-free path: userinfo (even
+// when the password holds '@' or '/'), query, fragment and any credential-looking path segment
+// onwards are dropped. Anything that does not look like an absolute URL yields "".
 func RedactURL(raw string) string {
-	u, err := url.Parse(strings.TrimSpace(raw))
-	if err != nil || u.Scheme == "" || u.Host == "" {
+	raw = strings.TrimSpace(raw)
+	if i := strings.Index(raw, "://"); i <= 0 || strings.ContainsAny(raw[:i], " \t/") {
 		return ""
 	}
-	return (&url.URL{Scheme: u.Scheme, Host: u.Host, Path: u.Path}).String()
+	if out := safeURLToken(raw); out != hidden {
+		return out
+	}
+	return ""
 }

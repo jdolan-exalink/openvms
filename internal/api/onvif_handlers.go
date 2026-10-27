@@ -761,6 +761,10 @@ func (h *Handlers) ControlCameraOnvifPTZ(ctx context.Context, r gen.ControlCamer
 		}, nil
 	}
 
+	if resp, handled, err := h.ptzExtras(ctx, a, cam, *r.Body); handled {
+		return resp, err
+	}
+
 	if string(r.Body.Action) != "get_presets" {
 		if err := h.Inv.RequireCameraPTZ(ctx, a, cam.ID); err != nil {
 			return nil, err

@@ -654,7 +654,7 @@ func TestCameraYAMLGranularHolderWithoutSecretsKeepsRealCredentials(t *testing.T
 	useYAMLEngine(env, eng)
 	cam := env.Cameras["frigate-h01/acceso_norte"]
 	ctx := context.Background()
-	u := grantAt(t, env, "yaml-nosecrets", cam.TenantID, authz.CamerasView, authz.CamerasConfigYAML, authz.ServersConfig)
+	u := grantAt(t, env, "yaml-nosecrets", cam.TenantID, authz.CamerasView, authz.CamerasConfigYAML, authz.CamerasConfigVideo, authz.ServersConfig)
 
 	sec, err := env.Svc.GetCameraYAMLSection(ctx, u, cam.ID, "ffmpeg")
 	if err != nil {

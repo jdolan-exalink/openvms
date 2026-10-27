@@ -123,3 +123,33 @@ func TestDecideCompatMatrix(t *testing.T) {
 		}
 	})
 }
+
+// A legacy cameras.view holder keeps reading a camera's configuration even when it holds a
+// granular grant on another camera, and an explicit deny still revokes it.
+func TestCamerasConfigViewIsAlwaysCompat(t *testing.T) {
+	tenant, server := uuid.New(), uuid.New()
+	mk := func() (Resource, Scope) {
+		r := Resource{Kind: ScopeCamera, ID: uuid.New(), TenantID: tenant, SiteID: uuid.New(), ServerID: server}
+		return r, Scope{ScopeCamera, r.ID}
+	}
+	r1, s1 := mk()
+	r2, s2 := mk()
+	g := []Grant{{CamerasView, Allow, s1}, {CamerasConfigView, Allow, s1}, {CamerasView, Allow, s2}}
+	dec := func(g []Grant, r Resource) bool {
+		cov := r.Covering()
+		return DecideCompat(g, CamerasConfigView, cov, legacyAllowed(g, CamerasConfigView, cov))
+	}
+	if !dec(g, r2) {
+		t.Fatal("cameras.view on c2 must still read the config despite a granular grant on c1")
+	}
+	g = append(g, Grant{CamerasConfigView, Deny, s2})
+	if dec(g, r2) {
+		t.Fatal("an explicit deny of cameras.config.view must revoke the read")
+	}
+	if !dec(g, r1) {
+		t.Fatal("deny on c2 must not affect c1")
+	}
+	if dec([]Grant{{CamerasConfigPTZ, Allow, s1}}, r1) {
+		t.Fatal("no cameras.view, no config view")
+	}
+}

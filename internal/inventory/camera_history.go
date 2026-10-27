@@ -171,8 +171,16 @@ func classifyHistory(records []auditRecord) []ConfigHistoryEntry {
 
 func (s *Service) requireHistory(ctx context.Context, actor authz.Actor, id uuid.UUID) error {
 	return s.tx(ctx, actor, func(q *db.Queries, c *access.Checker) error {
-		_, err := s.loadConfigTarget(ctx, id, q, c, camconfig.Patch{})
-		return err
+		t, err := s.loadConfigTarget(ctx, id, q, c, camconfig.Patch{})
+		if err != nil {
+			return err
+		}
+		// History shows other people's names and the old and new values: the camera must be
+		// visible to the reader, not only its server configurable.
+		if err := c.Require(authz.CamerasView, cameraResource(t.cam)); err != nil {
+			return err
+		}
+		return c.RequireCompat(authz.CamerasConfigView, cameraResource(t.cam))
 	})
 }
 

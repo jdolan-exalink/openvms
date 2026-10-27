@@ -505,6 +505,17 @@ export function FisheyeViewer({
             </button>
             <button
               type="button"
+              onClick={() => handleModeChange("panorama")}
+              className={cn(
+                "px-2 py-0.5 rounded transition-colors",
+                mode === "panorama" ? "bg-primary text-on-primary font-bold" : "hover:bg-white/10",
+              )}
+              title="Panorámica 2×180°"
+            >
+              2×180°
+            </button>
+            <button
+              type="button"
               onClick={() => handleModeChange("virtual_ptz")}
               className={cn(
                 "px-2 py-0.5 rounded transition-colors flex items-center gap-1",

@@ -202,6 +202,19 @@ type Inventory struct {
 	ONVIFVersion       string
 	// ONVIFCapabilities is the stored onvif_capabilities JSON document, possibly empty.
 	ONVIFCapabilities []byte
+	// Local is the state of the analytics OpenVMS runs itself (vehicle and clothing color,
+	// vehicle classification). Nil means it was not loaded: those modules then read as
+	// unavailable instead of being guessed.
+	Local *LocalAnalytics
+}
+
+// LocalAnalytics is the per-camera switch state of the OpenVMS-side analytics modules.
+type LocalAnalytics struct {
+	// Enabled is the effective switch of each module (a missing row is on, as the worker does).
+	Enabled map[string]bool
+	// Locked holds, per module, why it cannot be changed for this camera (for example a switch
+	// that is off for the whole server).
+	Locked map[string]string
 }
 
 // Adapter builds the normalized model of a camera from one engine.

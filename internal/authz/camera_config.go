@@ -19,7 +19,7 @@ type Compat struct {
 }
 
 var compat = map[Permission]Compat{
-	CamerasConfigView:      {Legacy: []Permission{CamerasView}},
+	CamerasConfigView:      {Legacy: []Permission{CamerasView}, Always: true},
 	CamerasConfigEdit:      {Legacy: []Permission{ServersConfig}},
 	CamerasConfigVideo:     {Legacy: []Permission{ServersConfig}},
 	CamerasConfigRecording: {Legacy: []Permission{ServersConfig}},
