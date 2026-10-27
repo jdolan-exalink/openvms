@@ -361,7 +361,7 @@ export function FisheyeSection({
               </div>
             ) : (
               <p className="text-xs text-muted italic">
-                No hay vistas virtuales configuradas. Usa los botones de plantilla ("3 Fijas de 120°" o "4 Cuadrantes") o crea vistas navegando en el player.
+                No hay vistas virtuales configuradas. Usa el botón de plantilla ("3 Fijas de 120°") o crea vistas navegando en el player.
               </p>
             )}
           </div>
