@@ -230,7 +230,7 @@ services:
     restart: unless-stopped
 
   web:
-    build: { context: ., dockerfile: deploy/docker/web.Dockerfile, args: { VERSION: "${VERSION:-}", COMMIT: "${COMMIT:-unknown}", BUILD_TIME: "${BUILD_TIME:-unknown}" } }
+    build: { context: ., dockerfile: deploy/docker/web.Dockerfile, args: { VERSION: "${VERSION:-}", COMMIT: "${COMMIT:-unknown}", BUILD_TIME: "${BUILD_TIME:-unknown}", APK_REFRESH: "${BUILD_TIME:-}" } }
     environment:
       SITE_ADDRESS: ${SITE_ADDRESS:-:80}
       HTTPS_SITE_ADDRESS: ":443"
