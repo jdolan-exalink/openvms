@@ -42,7 +42,17 @@ func (h *Handlers) GetCameraConfig(ctx context.Context, r gen.GetCameraConfigReq
 	if err != nil {
 		return nil, err
 	}
-	model.State = camconfig.ComputeState(inventory.StoredConfigState(ce.State), model)
+	stored := inventory.StoredConfigState(ce.State)
+	if ps := h.profileSvc(); ps != nil {
+		ref, patch, perr := ps.CameraProfileContext(ctx, a, r.CameraId)
+		if perr != nil {
+			return nil, perr
+		}
+		stored.Inherited = patch
+		model.Profile = ref
+		model.Provenance = camconfig.ResolveProvenance(model, stored.Desired, ref, patch)
+	}
+	model.State = camconfig.ComputeState(stored, model)
 	// The model's JSON tags are the contract: decode into the generated type.
 	raw, err := json.Marshal(model)
 	if err != nil {

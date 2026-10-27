@@ -16,7 +16,7 @@ const ROLES: Array<{ role: Role; title: string; purpose: string }> = [
 const isRec = (v: unknown): v is Record<string, unknown> => typeof v === "object" && v !== null && !Array.isArray(v);
 
 /** Video tab: streams and their parameters in video terms; the Frigate sections stay under "Avanzado de video". */
-export function VideoTab({ cameraId, legacy }: { cameraId: string; legacy?: ReactNode }) {
+export function VideoTab({ cameraId, legacy, readOnlyReason }: { cameraId: string; legacy?: ReactNode; readOnlyReason?: string }) {
   const change = useCameraChange();
   const options = useQuery(cameraVideoOptionsQuery(cameraId));
   const model = change.config.data;
@@ -36,6 +36,7 @@ export function VideoTab({ cameraId, legacy }: { cameraId: string; legacy?: Reac
   return (
     <div className="flex flex-col gap-5">
       <p className="text-sm text-muted">Estos son los streams de la cámara y los valores que el dispositivo permite cambiar.</p>
+      {readOnlyReason && <p role="note" className="text-xs text-muted">Solo lectura. {readOnlyReason}</p>}
 
       {options.isError && (
         <div role="alert" className="rounded-m3-lg bg-bad/12 px-4 py-3 text-sm text-bad">
@@ -54,6 +55,7 @@ export function VideoTab({ cameraId, legacy }: { cameraId: string; legacy?: Reac
           purpose={r.purpose}
           summary={streamSummary({ ...r.modelStream, codec: r.current.codec, width: r.current.resolution?.width, height: r.current.resolution?.height, fps: r.current.fps })}
         >
+          <fieldset disabled={!!readOnlyReason} className="contents">
           <VideoParametersForm
             options={r.opts}
             current={r.current}
@@ -61,6 +63,7 @@ export function VideoTab({ cameraId, legacy }: { cameraId: string; legacy?: Reac
             reason={options.data?.reason}
             onChange={(partial) => change.setPatch({ streams: { [r.role]: partial } })}
           />
+          </fieldset>
         </StreamCard>
       ))}
 

@@ -127,7 +127,7 @@ func (s *Service) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	reauth := s.cfg.Now().Sub(sess.lastAuthz) >= s.cfg.ReauthEvery
 	s.mu.Unlock()
 	if reauth {
-		if err := s.authorize(r.Context(), sess.actor, sess.serverID); err != nil {
+		if err := s.authorize(r.Context(), sess.actor, Camera{ID: sess.cameraID, ServerID: sess.serverID}); err != nil {
 			s.remove(sess)
 			plain(w, http.StatusNotFound, "")
 			return

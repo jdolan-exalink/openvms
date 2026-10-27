@@ -77,6 +77,8 @@ type Handlers struct {
 	camProvision provisionAgentStatus
 	// camConfigWrite replaces the review/apply service in tests; nil uses Inv.
 	camConfigWrite camConfigWriter
+	// camProfile replaces the profile/bulk service in tests; nil uses Inv.
+	camProfile camProfileService
 	// camVideo replaces the ONVIF video link lookup in tests; nil uses the camera's credentials.
 	camVideo videoLinkFunc
 

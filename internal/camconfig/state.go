@@ -41,6 +41,9 @@ type Stored struct {
 	AppliedRevision int64
 	SyncState       string
 	LastError       string
+	// Inherited is the patch of the camera's profile; the camera's effective desired state is
+	// Inherited overlaid with Desired (the overrides).
+	Inherited Patch
 }
 
 // State is the desired-versus-effective summary served with the model.
@@ -105,7 +108,7 @@ func ComputeState(st Stored, effective Camera) State {
 		out.SyncState = SyncUnverifiable
 		return out
 	}
-	out.Drift = Diff(st.Desired, effective)
+	out.Drift = Diff(Merge(st.Inherited, st.Desired), effective)
 	switch {
 	case len(out.Drift) == 0:
 		out.SyncState, out.LastError = SyncSynced, ""

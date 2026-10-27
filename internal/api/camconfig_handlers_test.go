@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"net/http"
 	"strings"
 	"testing"
@@ -331,4 +332,34 @@ func TestApplyCameraConfigGuardsAnalyticsModules(t *testing.T) {
 			t.Fatalf("err = %v, calls = %d", err, w.applyCalls)
 		}
 	})
+}
+
+func TestStatusForSectionsForbiddenListsOnlyDeniedSections(t *testing.T) {
+	err := fmt.Errorf("apply: %w", &inventory.SectionsForbiddenError{Sections: []string{"video", "analytics"}})
+	code, errCode, msg := statusFor(err)
+	if code != http.StatusForbidden || errCode != "forbidden_sections" {
+		t.Fatalf("got %d %q", code, errCode)
+	}
+	if !strings.Contains(msg, "video, analytics") || strings.Contains(msg, "recording") {
+		t.Fatalf("message = %q", msg)
+	}
+	if c, _, _ := statusFor(&inventory.SectionsForbiddenError{}); c != http.StatusForbidden {
+		t.Fatal("must stay a 403 for errors.Is(access.ErrForbidden) consumers")
+	}
+}
+
+func TestPatchSectionsMapToTheirPermissions(t *testing.T) {
+	b := true
+	p := camconfig.Patch{
+		Detection: &camconfig.DetectionPatch{Enabled: &b}, Recording: &camconfig.RecordingPatch{Enabled: &b},
+		Analytics: &camconfig.AnalyticsPatch{LPR: &b},
+		Streams:   &camconfig.StreamsPatch{Primary: &camconfig.VideoPatch{Codec: new("h264")}},
+	}
+	if got := strings.Join(p.Sections(), ","); got != "detection,recording,analytics,video" {
+		t.Fatalf("sections = %s", got)
+	}
+	only := camconfig.Patch{Recording: p.Recording}
+	if got := only.Sections(); len(got) != 1 || got[0] != "recording" {
+		t.Fatalf("sections = %v", got)
+	}
 }

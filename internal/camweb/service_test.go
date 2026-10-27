@@ -90,7 +90,7 @@ func newEnv(t *testing.T, cfg Config) *env {
 	e.agent = &fakeAgent{camera: camSrv}
 	cfg.Now = func() time.Time { e.nowMu.Lock(); defer e.nowMu.Unlock(); return e.now }
 	e.svc = NewService(cfg, e.agent,
-		func(context.Context, authz.Actor, uuid.UUID) error { return e.authz },
+		func(context.Context, authz.Actor, Camera) error { return e.authz },
 		func(context.Context, authz.Actor, uuid.UUID) error { return nil })
 	return e
 }

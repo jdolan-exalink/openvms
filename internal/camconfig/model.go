@@ -42,6 +42,11 @@ type Camera struct {
 	Fisheye      Fisheye       `json:"fisheye"`
 	Integrations []Integration `json:"integrations"`
 	Overrides    Overrides     `json:"overrides"`
+	// Profile is the OpenVMS profile the camera follows, nil when none.
+	Profile *ProfileRef `json:"profile,omitempty"`
+	// Provenance tells, per patch path, where the value comes from (engine, profile, override).
+	// Filled by the service; adapters leave it nil.
+	Provenance map[string]Provenance `json:"provenance,omitempty"`
 	// State compares the desired configuration kept by OpenVMS with this (effective) read. The
 	// adapters leave it zero; the service fills it in.
 	State State `json:"state"`

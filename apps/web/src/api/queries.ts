@@ -139,6 +139,20 @@ export const cameraConfigQuery = (cameraId: string) =>
       unwrap(await api.GET("/api/v1/cameras/{cameraId}/normalized-config", { params: { path: { cameraId } } })),
   });
 
+/** Camera configuration profiles of the tenant (level 2 of the configuration). */
+export const cameraConfigProfilesQuery = queryOptions({
+  queryKey: ["camera-config", "profiles"],
+  queryFn: async () => unwrap(await api.GET("/api/v1/camera-config/profiles")),
+});
+
+/** One profile with the cameras that follow it (and whether each has the latest version). */
+export const cameraConfigProfileQuery = (profileId: string) =>
+  queryOptions({
+    queryKey: ["camera-config", "profiles", profileId],
+    queryFn: async () =>
+      unwrap(await api.GET("/api/v1/camera-config/profiles/{profileId}", { params: { path: { profileId } } })),
+  });
+
 /** Normalized object catalog (categories and objects in Spanish); server_id flags per-object model support. */
 export const objectCatalogQuery = (engine: "frigate" = "frigate", serverId?: string) =>
   queryOptions({

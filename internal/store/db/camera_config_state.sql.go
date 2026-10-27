@@ -36,7 +36,7 @@ SET sync_state = $1, last_error = $2,
     updated_at = now()
 WHERE camera_id = $4 AND desired_revision = $5
 RETURNING camera_id, tenant_id, desired, desired_revision, applied_revision, sync_state, last_error,
-          last_applied_at, updated_by, updated_at
+          last_applied_at, updated_by, updated_at, profile_id, profile_version
 `
 
 type FinishCameraConfigApplyParams struct {
@@ -69,13 +69,15 @@ func (q *Queries) FinishCameraConfigApply(ctx context.Context, arg FinishCameraC
 		&i.LastAppliedAt,
 		&i.UpdatedBy,
 		&i.UpdatedAt,
+		&i.ProfileID,
+		&i.ProfileVersion,
 	)
 	return i, err
 }
 
 const getCameraConfigState = `-- name: GetCameraConfigState :one
 SELECT camera_id, tenant_id, desired, desired_revision, applied_revision, sync_state, last_error,
-       last_applied_at, updated_by, updated_at
+       last_applied_at, updated_by, updated_at, profile_id, profile_version
 FROM camera_config_state
 WHERE camera_id = $1
 `
@@ -94,6 +96,50 @@ func (q *Queries) GetCameraConfigState(ctx context.Context, cameraID uuid.UUID) 
 		&i.LastAppliedAt,
 		&i.UpdatedBy,
 		&i.UpdatedAt,
+		&i.ProfileID,
+		&i.ProfileVersion,
+	)
+	return i, err
+}
+
+const linkCameraConfigProfile = `-- name: LinkCameraConfigProfile :one
+UPDATE camera_config_state
+SET profile_id = $1, profile_version = $2, updated_by = $3, updated_at = now()
+WHERE camera_id = $4
+RETURNING camera_id, tenant_id, desired, desired_revision, applied_revision, sync_state, last_error,
+          last_applied_at, updated_by, updated_at, profile_id, profile_version
+`
+
+type LinkCameraConfigProfileParams struct {
+	ProfileID      *uuid.UUID
+	ProfileVersion *int64
+	UpdatedBy      *uuid.UUID
+	CameraID       uuid.UUID
+}
+
+// Records which profile (and version) the camera follows without touching its overrides or
+// revisions; the apply that follows moves the revisions through the normal pipeline.
+func (q *Queries) LinkCameraConfigProfile(ctx context.Context, arg LinkCameraConfigProfileParams) (CameraConfigState, error) {
+	row := q.db.QueryRow(ctx, linkCameraConfigProfile,
+		arg.ProfileID,
+		arg.ProfileVersion,
+		arg.UpdatedBy,
+		arg.CameraID,
+	)
+	var i CameraConfigState
+	err := row.Scan(
+		&i.CameraID,
+		&i.TenantID,
+		&i.Desired,
+		&i.DesiredRevision,
+		&i.AppliedRevision,
+		&i.SyncState,
+		&i.LastError,
+		&i.LastAppliedAt,
+		&i.UpdatedBy,
+		&i.UpdatedAt,
+		&i.ProfileID,
+		&i.ProfileVersion,
 	)
 	return i, err
 }
@@ -104,7 +150,7 @@ SET desired = $1, desired_revision = desired_revision + 1, sync_state = 'pending
     last_error = '', updated_by = $2, updated_at = now()
 WHERE camera_id = $3 AND desired_revision = $4
 RETURNING camera_id, tenant_id, desired, desired_revision, applied_revision, sync_state, last_error,
-          last_applied_at, updated_by, updated_at
+          last_applied_at, updated_by, updated_at, profile_id, profile_version
 `
 
 type RecordCameraConfigDesiredParams struct {
@@ -134,6 +180,59 @@ func (q *Queries) RecordCameraConfigDesired(ctx context.Context, arg RecordCamer
 		&i.LastAppliedAt,
 		&i.UpdatedBy,
 		&i.UpdatedAt,
+		&i.ProfileID,
+		&i.ProfileVersion,
+	)
+	return i, err
+}
+
+const setCameraConfigProfile = `-- name: SetCameraConfigProfile :one
+UPDATE camera_config_state
+SET profile_id = $1, profile_version = $2,
+    desired = $3, desired_revision = desired_revision + 1,
+    applied_revision = CASE WHEN sync_state = 'synced' THEN desired_revision + 1 ELSE applied_revision END,
+    updated_by = $4, updated_at = now()
+WHERE camera_id = $5 AND desired_revision = $6
+RETURNING camera_id, tenant_id, desired, desired_revision, applied_revision, sync_state, last_error,
+          last_applied_at, updated_by, updated_at, profile_id, profile_version
+`
+
+type SetCameraConfigProfileParams struct {
+	ProfileID        *uuid.UUID
+	ProfileVersion   *int64
+	Desired          json.RawMessage
+	UpdatedBy        *uuid.UUID
+	CameraID         uuid.UUID
+	ExpectedRevision int64
+}
+
+// Links the camera to a profile (or unlinks it with NULLs) and replaces its overrides. The
+// effective desired state of an unlink does not change the engine, so a synced camera stays
+// synced: applied_revision follows desired_revision only in that case. Optimistic concurrency
+// as RecordCameraConfigDesired.
+func (q *Queries) SetCameraConfigProfile(ctx context.Context, arg SetCameraConfigProfileParams) (CameraConfigState, error) {
+	row := q.db.QueryRow(ctx, setCameraConfigProfile,
+		arg.ProfileID,
+		arg.ProfileVersion,
+		arg.Desired,
+		arg.UpdatedBy,
+		arg.CameraID,
+		arg.ExpectedRevision,
+	)
+	var i CameraConfigState
+	err := row.Scan(
+		&i.CameraID,
+		&i.TenantID,
+		&i.Desired,
+		&i.DesiredRevision,
+		&i.AppliedRevision,
+		&i.SyncState,
+		&i.LastError,
+		&i.LastAppliedAt,
+		&i.UpdatedBy,
+		&i.UpdatedAt,
+		&i.ProfileID,
+		&i.ProfileVersion,
 	)
 	return i, err
 }

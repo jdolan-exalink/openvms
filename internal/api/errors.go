@@ -3,6 +3,7 @@ package api
 import (
 	"errors"
 	"net/http"
+	"strings"
 
 	"github.com/jdolan-exalink/openvms/internal/access"
 	"github.com/jdolan-exalink/openvms/internal/agentca"
@@ -37,6 +38,7 @@ func statusFor(err error) (int, string, string) {
 	var pve *provision.ValidationError
 	var vae *visionai.ValidationError
 	var we *notify.WahaError
+	var sf *inventory.SectionsForbiddenError
 	var fe *inventory.FrigateError
 	var fve *faces.ValidationError
 	var fre *faces.RemoteError
@@ -95,6 +97,8 @@ func statusFor(err error) (int, string, string) {
 		return http.StatusConflict, "conflict", err.Error()
 	case errors.Is(err, provision.ErrNotFound):
 		return http.StatusNotFound, "not_found", "not found"
+	case errors.As(err, new(*inventory.ProfileInUseError)):
+		return http.StatusConflict, "profile_in_use", err.Error()
 	case errors.Is(err, inventory.ErrCameraGroupVersionConflict):
 		return http.StatusConflict, "conflict", err.Error()
 	case errors.Is(err, rules.ErrVersionConflict):
@@ -118,6 +122,8 @@ func statusFor(err error) (int, string, string) {
 		return http.StatusBadRequest, "invalid_csr", "the certificate request is not valid"
 	case errors.Is(err, errUnauthenticated):
 		return http.StatusUnauthorized, "unauthorized", "authentication required"
+	case errors.As(err, &sf):
+		return http.StatusForbidden, "forbidden_sections", "you do not have permission to change: " + strings.Join(sf.Sections, ", ")
 	case errors.Is(err, access.ErrForbidden):
 		return http.StatusForbidden, "forbidden", "you do not have permission for this action"
 	case errors.Is(err, store.ErrNotFound):
