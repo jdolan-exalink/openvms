@@ -830,16 +830,12 @@ describe("bulk selection", () => {
   const editGrant = { permission: "cameras.config.edit", effect: "allow", scope_type: "platform" };
 
   it("opens the bulk dialog with the selected camera ids", async () => {
-    const seen: unknown[] = [];
-    vi.stubGlobal("fetch", vi.fn(stubApi({
-      ...withPerm([camera("c1", "acceso"), camera("c2", "muelle")], [editGrant]),
-      "POST /api/v1/cameras/config/bulk": (init) => { seen.push(JSON.parse(String(init?.body ?? "{}"))); return json({ rows: [], summary: {} }); },
-    })));
+    vi.stubGlobal("fetch", vi.fn(stubApi(withPerm([camera("c1", "acceso"), camera("c2", "muelle")], [editGrant]))));
     renderPage(Cameras);
     fireEvent.click(await screen.findByLabelText("Seleccionar acceso"));
     fireEvent.click(screen.getByLabelText("Seleccionar muelle"));
     fireEvent.click(screen.getByRole("button", { name: "Configurar cámaras (2)" }));
-    expect(await screen.findByRole("dialog")).toBeInTheDocument();
+    expect(await screen.findByRole("dialog")).toHaveTextContent("2 cámaras");
   });
 
   it("hides the selection without the camera config permission", async () => {

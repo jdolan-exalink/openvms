@@ -28,7 +28,7 @@ export function ReapplyOutdated({ profileId, cameras }: { profileId: string; cam
     setEntries(targets.map((c) => ({ id: c.id, name: c.name })));
     for (const c of targets) {
       try {
-        const r = unwrap(await api.POST("/api/v1/cameras/{cameraId}/profile/review", { params: { path: { cameraId: c.id } }, body: { profile_id: profileId } }));
+        const r = unwrap(await api.POST("/api/v1/cameras/{cameraId}/profile/review", { params: { path: { cameraId: c.id } }, body: { profile_id: profileId, keep_values: true } }));
         patch(c.id, { review: r });
       } catch (e) {
         patch(c.id, { error: message(e) });
@@ -42,7 +42,7 @@ export function ReapplyOutdated({ profileId, cameras }: { profileId: string; cam
     setBusy("apply");
     for (const e of ready) {
       try {
-        unwrap(await api.POST("/api/v1/cameras/{cameraId}/profile/apply", { params: { path: { cameraId: e.id } }, body: { profile_id: profileId } }));
+        unwrap(await api.POST("/api/v1/cameras/{cameraId}/profile/apply", { params: { path: { cameraId: e.id } }, body: { profile_id: profileId, keep_values: true } }));
         patch(e.id, { outcome: "applied" });
       } catch (err) {
         patch(e.id, { outcome: "failed", outcomeError: message(err) });

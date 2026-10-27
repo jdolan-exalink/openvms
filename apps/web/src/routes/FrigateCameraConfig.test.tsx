@@ -840,4 +840,30 @@ describe("FrigateCameraConfig", () => {
       expect(await screen.findByRole("region", { name: "Original y vista" })).toBeInTheDocument();
     });
   });
+
+  describe("provenance and server defaults", () => {
+    const model = { recording: { enabled: true }, detection: { enabled: true, objects: [], selection: [] }, provenance: { "recording.enabled": { source: "profile", profile_name: "Exterior" } }, state: { desired_revision: 1, applied_revision: 1, sync_state: "synced", last_error: "", drift: [] } };
+    const serverYaml = "motion:\n  threshold: 30\nrecord:\n  retain:\n    days: 7\ncameras:\n  acceso:\n    detect:\n      enabled: true\n";
+    const doc = { secrets_visible: true, config: { detect: { enabled: true }, record: { enabled: true }, motion: { threshold: 30 }, objects: { track: ["person"] } } };
+
+    it("shows the recording provenance chip and the server retention on the Grabación tab", async () => {
+      mountFull(doc, { "/api/v1/cameras/c1/normalized-config": () => json(model), "/api/v1/servers/s1/frigate-config/raw": () => json({ yaml: serverYaml }) });
+      await goTo("Grabación");
+      expect(await screen.findByText("Definido por perfil")).toBeInTheDocument();
+      expect(await screen.findByText(/Valor del servidor: retención 7 días/)).toBeInTheDocument();
+    });
+
+    it("shows the server motion threshold in Detección and hides it when the server config is unreadable", async () => {
+      mountFull(doc, { "/api/v1/cameras/c1/normalized-config": () => json(model), "/api/v1/servers/s1/frigate-config/raw": () => json({ yaml: serverYaml }) });
+      await goTo("Detección");
+      expect(await screen.findByText("Valor del servidor: 30")).toBeInTheDocument();
+    });
+
+    it("shows no server value without permission to read the server config", async () => {
+      mountFull({ ...doc, secrets_visible: false }, { "/api/v1/cameras/c1/normalized-config": () => json(model), "/api/v1/servers/s1/frigate-config/raw": () => json({ yaml: serverYaml }) });
+      await goTo("Detección");
+      await screen.findByText("Sensibilidad de movimiento");
+      expect(screen.queryByText(/Valor del servidor/)).toBeNull();
+    });
+  });
 });

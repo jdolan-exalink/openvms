@@ -5,6 +5,7 @@ import { EditYamlLink } from "@/components/camera/advanced/YamlEntry";
 import { useCameraChange } from "@/components/camera/CameraChangeProvider";
 import { ProvenanceBadge } from "@/components/camera/profile/ProvenanceBadge";
 import { Switch } from "@/components/ui";
+import type { ServerDefaults } from "@/lib/useServerDefaults";
 import { DetectionSettings, type DetectionSettingsValue } from "./DetectionSettings";
 import { ObjectCatalogPicker } from "./ObjectCatalogPicker";
 
@@ -18,12 +19,14 @@ export type DetectionTabProps = {
   onMotion: (next: Rec) => void;
   onObjects: (next: Rec) => void;
   onOpenZones: () => void;
+  /** Server-level Frigate defaults the camera inherits (only fields it does not override). */
+  serverDefaults?: ServerDefaults;
   /** The previous Frigate detect/objects/motion editors, kept under an advanced disclosure. */
   legacy: ReactNode;
 };
 
 /** Detection tab: enable it, pick what to detect from the catalog, tune the common settings. */
-export function DetectionTab({ serverId, readOnly, settings, onMotion, onObjects, onOpenZones, legacy }: DetectionTabProps) {
+export function DetectionTab({ serverId, readOnly, settings, onMotion, onObjects, onOpenZones, legacy, serverDefaults }: DetectionTabProps) {
   const change = useCameraChange();
   const catalog = useQuery(objectCatalogQuery("frigate", serverId));
   const model = change.config.data?.detection;
@@ -73,7 +76,7 @@ export function DetectionTab({ serverId, readOnly, settings, onMotion, onObjects
 
       <section aria-label="Ajustes de detección" className="flex flex-col gap-2">
         <h3 className="text-sm font-bold">Ajustes de detección</h3>
-        <DetectionSettings value={settings} readOnly={readOnly} onMotion={onMotion} onObjects={onObjects} onOpenZones={onOpenZones} />
+        <DetectionSettings value={settings} readOnly={readOnly} onMotion={onMotion} onObjects={onObjects} onOpenZones={onOpenZones} serverDefaults={serverDefaults} />
       </section>
 
       <details className="rounded-m3-lg bg-surface-1">

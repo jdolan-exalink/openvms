@@ -124,7 +124,7 @@ describe("CameraProfiles", () => {
       await waitFor(() => expect(sent.filter((s) => s.path.endsWith("/profile/apply"))).toHaveLength(2));
       expect(await table.findByText("Aplicada")).toBeInTheDocument();
       expect(await table.findByText(/Falló/)).toBeInTheDocument();
-      expect(sent.filter((s) => s.path.endsWith("/profile/apply"))[0]?.body).toEqual({ profile_id: "p1" });
+      expect(sent.filter((s) => s.path.endsWith("/profile/apply"))[0]?.body).toEqual({ profile_id: "p1", keep_values: true });
     });
 
     it("keeps a camera whose review fails out of the confirmation", async () => {
