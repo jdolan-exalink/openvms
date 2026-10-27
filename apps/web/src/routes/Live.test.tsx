@@ -2198,3 +2198,54 @@ describe("Live with persistent players (P0 acceptance)", () => {
     spy.mockRestore();
   });
 });
+
+describe("Live tile overlay", () => {
+  const OVERLAY_HIDE_MS = 3000;
+  const hidden = (el: HTMLElement) => el.className.includes("opacity-0");
+  const mountGrid = async () => {
+    stubBrowserAPIs();
+    localStorage.setItem(liveSelectionKey("t1", "u1"), serializeSelection(2, [
+      { camera_id: "cam-on", quality: "sub" }, { camera_id: "cam-off", quality: "sub" }, null, null,
+    ]));
+    vi.stubGlobal("fetch", vi.fn(stubApi({
+      "/api/v1/me": meResponse,
+      "/api/v1/cameras": () => json({ items: [camera("cam-on", "Online camera"), camera("cam-off", "Offline camera", { status: "offline" })] }),
+      ...emptyCatalogs,
+    })));
+    renderPage(Live);
+    const [online] = await screen.findAllByText("Online camera", { selector: ".truncate" });
+    const [offline] = await screen.findAllByText("Offline camera", { selector: ".truncate" });
+    return { online: online!, offline: offline! };
+  };
+
+  it("keeps an offline camera's name visible after the overlay hides the others", async () => {
+    const { online, offline } = await mountGrid();
+    expect(hidden(online)).toBe(false);
+    await waitFor(() => expect(hidden(online)).toBe(true), { timeout: OVERLAY_HIDE_MS + 2000 });
+    expect(hidden(offline)).toBe(false);
+  }, 15_000);
+
+  it("reveals the overlay on a touch tap, where there is no hover, and hides it again", async () => {
+    vi.stubGlobal("matchMedia", (query: string) => ({
+      matches: query === "(hover: none)", media: query, addEventListener: () => {}, removeEventListener: () => {},
+      addListener: () => {}, removeListener: () => {}, onchange: null, dispatchEvent: () => false,
+    }));
+    const { online } = await mountGrid();
+    await waitFor(() => expect(hidden(online)).toBe(true), { timeout: OVERLAY_HIDE_MS + 2000 });
+    // detail > 0 marks a real pointer click rather than a synthetic one from the keyboard.
+    fireEvent.click(screen.getByLabelText("Cuadro 1"), { detail: 1 });
+    await waitFor(() => expect(hidden(online)).toBe(false));
+    await waitFor(() => expect(hidden(online)).toBe(true), { timeout: OVERLAY_HIDE_MS + 2000 });
+  }, 20_000);
+
+  it("does not reveal the overlay on a click when the device can hover", async () => {
+    vi.stubGlobal("matchMedia", (query: string) => ({
+      matches: false, media: query, addEventListener: () => {}, removeEventListener: () => {},
+      addListener: () => {}, removeListener: () => {}, onchange: null, dispatchEvent: () => false,
+    }));
+    const { online } = await mountGrid();
+    await waitFor(() => expect(hidden(online)).toBe(true), { timeout: OVERLAY_HIDE_MS + 2000 });
+    fireEvent.click(screen.getByLabelText("Cuadro 1"), { detail: 1 });
+    expect(hidden(online)).toBe(true);
+  }, 15_000);
+});
