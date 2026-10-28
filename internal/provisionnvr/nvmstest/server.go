@@ -38,6 +38,9 @@ type Server struct {
 	Override map[string]string
 	// Offline answers every call with HTTP 500, like a recorder whose web service is down.
 	Offline bool
+	// OnRequest, when set, sees the command and the raw request body of every call. For tests that check what
+	// the client asked.
+	OnRequest func(cmd, body string)
 
 	mu           sync.Mutex
 	calls        []string
@@ -106,6 +109,9 @@ func (s *Server) handle(w http.ResponseWriter, r *http.Request) {
 	s.mu.Lock()
 	s.calls = append(s.calls, cmd)
 	s.mu.Unlock()
+	if s.OnRequest != nil {
+		s.OnRequest(cmd, string(body))
+	}
 	if s.Offline {
 		http.Error(w, "down", http.StatusInternalServerError)
 		return
