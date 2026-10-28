@@ -4,7 +4,7 @@ import { ChevronLeft, ChevronRight, X } from "lucide-react";
 import { useEffect, useState } from "react";
 import { useT } from "@/i18n";
 import { eventsQuery, recordingsQuery } from "@/api/queries";
-import { HlsPlayer } from "@/components/HlsPlayer";
+import { RecordingPlayer } from "@/components/RecordingPlayer";
 import { RecordingTimeline } from "@/components/RecordingTimeline";
 import { Button, ErrorNote, Field, TextInput } from "@/components/ui";
 import { fmtDateTime, toLocalInput } from "@/lib/format";
@@ -89,7 +89,7 @@ export function LivePlaybackPanel({
       </div>
       <RecordingTimeline day={day} spans={recordings.data ?? []} events={dayEvents} position={position} onSeek={jump} />
       <ErrorNote error={recordings.error ?? events.error} />
-      <HlsPlayer
+      <RecordingPlayer
         key={`${cameraId}-${winStart}`}
         cameraId={cameraId}
         start={winStart}

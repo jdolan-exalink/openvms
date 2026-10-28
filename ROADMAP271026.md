@@ -67,7 +67,7 @@ Result on the real unit: through the Compose container, main (copied) and sub (H
 
 Alternative that was not chosen: put ffmpeg in the API image (distroless today). It has no new container but a larger blast radius for the process that holds every session, so it is not recommended.
 
-Not part of this proposal: recorded video (playback), which depends on Phase 4, and audio.
+Recorded video turned out not to depend on the native SDK: the recorder replays through its own RTSP replay URL (see the next section). Audio is still open.
 
 ### Later phases (blocked on evidence)
 | Phase | Item | Blocker |
@@ -77,7 +77,7 @@ Not part of this proposal: recorded video (playback), which depends on Phase 4, 
 | 2 | Events (HTTP POST, ONVIF events) | Needs a payload sample from the recorder; the existing Provision LPR receiver is the pattern to extend |
 | 3 | Analytics | `REQUIRES PAYLOAD SAMPLE` |
 | 4 | Native SDK on port 6036 (TVT `NET_SDK`) and the API Server | `REQUIRES SDK DOCUMENTATION`. The owner's reference `docs/integrations/reference/tvt-provision-ports.md` says 6036 offers login, channels, RTSP URLs, playback, events and PTZ; the port is confirmed on our unit but the protocol was not spoken. The API Server switch is off |
-| 5 | Playback of recordings | ONVIF Recording/Replay/Search are advertised, not exercised (`REQUIRES REAL DEVICE TEST`) |
+| 5 | Playback of recordings | **Built** on branch `feat/nvr-playback`: timeline from the recorder's record log, replay through its own RTSP replay URL and go2rtc, 1x only. Open: export or download of a clip, speed control, keeping several recorder cameras in step, a native SDK path if one is ever needed |
 | 6 | Metadata | Depends on 2 to 4 |
 | - | Agent route (`/v1/provision-nvr/*`) for recorders behind firewalls | Planned together with Phase 2; the client already takes an `http.RoundTripper` |
 

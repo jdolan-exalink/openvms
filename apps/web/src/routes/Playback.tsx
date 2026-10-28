@@ -5,7 +5,8 @@ import { ChevronLeft, ChevronRight, Download, X } from "lucide-react";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { api, unwrap } from "@/api/client";
 import { camerasQuery, eventsQuery, meQuery, recordingsQuery } from "@/api/queries";
-import { HlsPlayer, type HlsPlayerHandle } from "@/components/HlsPlayer";
+import { type HlsPlayerHandle } from "@/components/HlsPlayer";
+import { RecordingPlayer } from "@/components/RecordingPlayer";
 import { RecordingTimeline } from "@/components/RecordingTimeline";
 import { Button, ErrorNote, Field, IconButton, PageHeader, RemovableChip, Select, TextInput } from "@/components/ui";
 import { fmtDateTime, toLocalInput } from "@/lib/format";
@@ -293,7 +294,8 @@ export function Playback() {
                     )}
                   </div>
 
-                  <HlsPlayer
+                  <RecordingPlayer
+                    quality={selectedCameraIds.length > 1 ? "sub" : "main"}
                     ref={(h) => {
                       if (h) players.current.set(camId, h);
                       else players.current.delete(camId);

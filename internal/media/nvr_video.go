@@ -37,8 +37,9 @@ type NVRVideo struct {
 	// Now replaces time.Now. For tests.
 	Now func() time.Time
 
-	mu     sync.Mutex
-	codecs map[codecKey]codecEntry
+	mu       sync.Mutex
+	codecs   map[codecKey]codecEntry
+	sessions map[uuid.UUID]*recorderSession
 }
 
 type codecKey struct {

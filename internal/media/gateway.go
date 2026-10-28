@@ -98,6 +98,7 @@ func (g *Gateway) Routes() http.Handler {
 	r := chi.NewRouter()
 	r.Get("/cameras/{id}/snapshot.jpg", g.snapshot)
 	r.Get("/cameras/{id}/live", g.live)
+	r.Get("/cameras/{id}/playback", g.playback)
 	r.Get("/cameras/{id}/vod/{start}/{end}/{file}", g.vod)
 	r.Get("/events/{id}/snapshot.jpg", g.eventSnapshot)
 	r.Get("/lpr/reads/{id}/snapshot.jpg", g.lprReadSnapshot)
@@ -1140,10 +1141,25 @@ func redactURLCredentials(s string) string {
 // speaks the go2rtc protocol end to end; the gateway authorizes, copies frames, keeps both
 // legs alive, revalidates the caller while the socket lives, and reports failures to the
 // browser as a JSON error frame (see errorFrame) instead of a bare close.
-func (g *Gateway) live(w http.ResponseWriter, r *http.Request) {
+func (g *Gateway) live(w http.ResponseWriter, r *http.Request) { g.stream(w, r, false) }
+
+// playback relays the recorded video of a Provision-ISR recorder camera, the way live relays its live
+// video: the recorder's replay is registered in go2rtc for this session and its MSE websocket is copied to
+// the browser. Frigate cameras play recordings through HLS (vod), so they are refused here.
+//
+//	GET /media/v1/cameras/{id}/playback?start=<unix>&end=<unix>&quality=sub|main   recordings.view
+func (g *Gateway) playback(w http.ResponseWriter, r *http.Request) { g.stream(w, r, true) }
+
+// stream is the websocket relay behind live and playback. replay selects the recorder's recorded video
+// (permission recordings.view, a time window from the query) instead of its live video.
+func (g *Gateway) stream(w http.ResponseWriter, r *http.Request, replay bool) {
+	perm := authz.LiveView
+	if replay {
+		perm = authz.RecordingsView
+	}
 	if !websocket.IsWebSocketUpgrade(r) {
 		// Plain HTTP callers still get the JSON error contract.
-		if _, _, _, ok := g.camera(w, r, authz.LiveView); ok {
+		if _, _, _, ok := g.camera(w, r, perm); ok {
 			writeErr(w, http.StatusBadRequest, "bad_request", "websocket upgrade required")
 		}
 		return
@@ -1172,7 +1188,7 @@ func (g *Gateway) live(w http.ResponseWriter, r *http.Request) {
 		reject(CodeCameraOffline, "invalid camera id")
 		return
 	}
-	cam, err := g.Svc.Authorize(r.Context(), a, id, authz.LiveView)
+	cam, err := g.Svc.Authorize(r.Context(), a, id, perm)
 	if err != nil {
 		code, msg := g.liveAuthError(r, a, err)
 		if code != "" {
@@ -1191,8 +1207,26 @@ func (g *Gateway) live(w http.ResponseWriter, r *http.Request) {
 		header http.Header
 		tlsCfg *tls.Config
 	)
+	var replayStart, replayEnd time.Time
+	if replay {
+		if cam.Server.Kind == "" || cam.Server.Kind == inventory.KindFrigate {
+			reject(CodeVideoUnavailable, "this camera plays its recordings through HLS")
+			return
+		}
+		var ok bool
+		if replayStart, replayEnd, ok = replayWindow(r); !ok {
+			reject(CodeCameraOffline, "the recording range is invalid")
+			return
+		}
+	}
 	if cam.Server.Kind != "" && cam.Server.Kind != inventory.KindFrigate {
-		live, err := g.NVR.Open(r.Context(), cam, quality)
+		var live *NVRLive
+		var err error
+		if replay {
+			live, err = g.NVR.OpenReplay(r.Context(), cam, replayStart, replayEnd, quality)
+		} else {
+			live, err = g.NVR.Open(r.Context(), cam, quality)
+		}
 		if err != nil {
 			code, msg := CodeServerError, "could not open the recorder's video"
 			var ve *NVRVideoError
@@ -1206,6 +1240,16 @@ func (g *Gateway) live(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		stream, target = live.Name, live.Target
+		if replay {
+			// Every replay session has its own go2rtc stream: remove it when the session ends.
+			defer func() {
+				cctx, cancel := context.WithTimeout(context.WithoutCancel(r.Context()), 5*time.Second)
+				defer cancel()
+				if err := g.NVR.Close(cctx, live); err != nil {
+					g.Svc.Log.WarnContext(r.Context(), "live gateway", "camera", id, "error", "could not remove the replay stream")
+				}
+			}()
+		}
 	} else {
 		if code, msg, refused := liveSignalRefusal(cam); refused {
 			reject(code, msg) // Frigate gets no video from the camera: do not dial go2rtc for black frames
@@ -1251,9 +1295,14 @@ func (g *Gateway) live(w http.ResponseWriter, r *http.Request) {
 	upstream := &wsConn{c: upConn, timeout: cfg.writeTimeout()}
 	defer upConn.Close()
 
-	// One audit row per viewing session: a reconnect within the window is the same session.
+	// One audit row per viewing session: a reconnect within the window is the same session. A replay
+	// session is audited when it starts, like each HLS playlist request of a Frigate recording.
 	key := viewKey{a.UserID, cam.ID}
-	if g.views.begin(key, time.Now(), cfg.auditWindow()) {
+	if replay {
+		g.audit(r.Context(), a, cam.TenantID, ActionPlaybackViewed, "camera", cam.ID, map[string]any{
+			"start": replayStart.UTC(), "end": replayEnd.UTC(),
+		})
+	} else if g.views.begin(key, time.Now(), cfg.auditWindow()) {
 		if err := g.auditTx(r.Context(), a, cam.TenantID, ActionLiveViewed, "camera", cam.ID, map[string]any{"stream": stream}); err != nil {
 			g.Svc.Log.ErrorContext(r.Context(), "media audit", "action", ActionLiveViewed, "error", err)
 			g.views.forget(key) // do not lose a genuinely new view
@@ -1353,7 +1402,7 @@ func (g *Gateway) live(w http.ResponseWriter, r *http.Request) {
 		if g.Session != nil {
 			check = g.Session(r.Context())
 		}
-		if e := g.watchAccess(ctx, r, a, id, check, cfg.revalidateEvery()); e.code != "" {
+		if e := g.watchAccess(ctx, r, a, id, perm, check, cfg.revalidateEvery()); e.code != "" {
 			finish(e)
 		}
 	}()
@@ -1369,6 +1418,17 @@ func (g *Gateway) live(w http.ResponseWriter, r *http.Request) {
 		client.closeWith(websocket.CloseNormalClosure, "")
 	}
 	upstream.closeWith(websocket.CloseNormalClosure, "")
+}
+
+// replayWindow reads the start and end (unix seconds) of a replay from the query. It refuses a window that
+// is empty, backwards or longer than a day, and instants that are not plausible.
+func replayWindow(r *http.Request) (start, end time.Time, ok bool) {
+	s, err1 := strconv.ParseFloat(r.URL.Query().Get("start"), 64)
+	e, err2 := strconv.ParseFloat(r.URL.Query().Get("end"), 64)
+	if err1 != nil || err2 != nil || s < 1e9 || e < 1e9 || s > 4e9 || e > 4e9 || e <= s || e-s > maxReplaySpan.Seconds() {
+		return time.Time{}, time.Time{}, false
+	}
+	return time.Unix(int64(s), 0).UTC(), time.Unix(int64(e), 0).UTC(), true
 }
 
 // liveSignalRefusal refuses a live view before any upstream dial when the health poller
@@ -1455,7 +1515,7 @@ func upstreamError(data []byte) (liveEnd, bool) {
 // ctx ends and returns why the socket must close. One undecidable check is tolerated; two in
 // a row fail closed, like the realtime feed. The camera check goes through Svc.Authorize, so
 // a revoked grant takes effect within its cache TTL plus one interval.
-func (g *Gateway) watchAccess(ctx context.Context, r *http.Request, a authz.Actor, camID uuid.UUID, check func(context.Context) (bool, error), every time.Duration) liveEnd {
+func (g *Gateway) watchAccess(ctx context.Context, r *http.Request, a authz.Actor, camID uuid.UUID, perm authz.Permission, check func(context.Context) (bool, error), every time.Duration) liveEnd {
 	t := time.NewTicker(every)
 	defer t.Stop()
 	failures := 0
@@ -1480,7 +1540,7 @@ func (g *Gateway) watchAccess(ctx context.Context, r *http.Request, a authz.Acto
 				return liveEnd{code: CodeUnauthorized, msg: "session ended"}
 			}
 		}
-		_, err := g.Svc.Authorize(ctx, a, camID, authz.LiveView)
+		_, err := g.Svc.Authorize(ctx, a, camID, perm)
 		switch {
 		case ctx.Err() != nil:
 			return liveEnd{}

@@ -156,13 +156,17 @@ func run() error {
 	inv.Blobs = store
 	adapters := inventory.NewAdapters(inv)
 	mediaSvc := &media.Service{Store: st, Adapters: adapters, Log: log}
+	// Recorder cameras: the timeline needs only the recorder; playing video also needs go2rtc.
+	recordersSvc := &media.NVRVideo{Sealer: sealer}
+	mediaSvc.NVR = recordersSvc
 	var recorderVideo *media.NVRVideo
 	if cfg.Go2RTCURL != "" {
 		g2, err := go2rtc.New(cfg.Go2RTCURL)
 		if err != nil {
 			return fmt.Errorf("GO2RTC_URL: %w", err)
 		}
-		recorderVideo = &media.NVRVideo{Sealer: sealer, G2: g2}
+		recordersSvc.G2 = g2
+		recorderVideo = recordersSvc
 		log.Info("recorder video enabled (go2rtc)", "url", cfg.Go2RTCURL)
 	}
 	brandingSvc := &branding.Service{Store: st, Blobs: store, Log: log}

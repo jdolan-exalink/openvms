@@ -31,13 +31,29 @@ func newFakeG2(t *testing.T, status int) *fakeG2 {
 	t.Helper()
 	f := &fakeG2{}
 	f.srv = httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		q := r.URL.Query()
+		q.Set("_method", r.Method)
 		f.mu.Lock()
-		f.put = append(f.put, r.URL.Query())
+		f.put = append(f.put, q)
 		f.mu.Unlock()
 		w.WriteHeader(status)
 	}))
 	t.Cleanup(f.srv.Close)
 	return f
+}
+
+// sourceOf returns the source registered under name.
+func (f *fakeG2) sourceOf(t *testing.T, name string) string {
+	t.Helper()
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	for _, q := range f.put {
+		if q.Get("_method") == "PUT" && q.Get("name") == name {
+			return q.Get("src")
+		}
+	}
+	t.Fatalf("go2rtc has no stream named %q", name)
+	return ""
 }
 
 func (f *fakeG2) puts() []url.Values {

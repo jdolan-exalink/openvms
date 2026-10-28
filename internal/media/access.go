@@ -24,6 +24,8 @@ type Service struct {
 	Store    *store.Store
 	Adapters *inventory.Adapters
 	Log      *slog.Logger
+	// NVR serves the recordings of Provision-ISR recorders. Nil leaves them unavailable.
+	NVR *NVRVideo
 
 	mu    sync.Mutex
 	cache map[cacheKey]cacheEntry
