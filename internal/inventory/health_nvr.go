@@ -23,6 +23,7 @@ const nvrLockedRetry = 10 * time.Minute
 type nvrSession struct {
 	sealed  []byte
 	base    string
+	user    string
 	client  *provisionnvr.Client
 	blocked bool
 	// retryAt is when a locked account may be tried again; zero for a rejected password, which is not
@@ -36,7 +37,7 @@ func (p *HealthPoller) nvrSessionFor(srv db.FrigateServer) (*nvrSession, error) 
 	if p.nvr == nil {
 		p.nvr = map[uuid.UUID]*nvrSession{}
 	}
-	if s, ok := p.nvr[srv.ID]; ok && bytes.Equal(s.sealed, srv.PasswordSealed) && s.base == srv.BaseUrl {
+	if s, ok := p.nvr[srv.ID]; ok && bytes.Equal(s.sealed, srv.PasswordSealed) && s.base == srv.BaseUrl && s.user == srv.Username {
 		return s, nil
 	}
 	pw, err := p.Svc.Sealer.Open(srv.PasswordSealed, srv.ID[:])
@@ -47,7 +48,7 @@ func (p *HealthPoller) nvrSessionFor(srv db.FrigateServer) (*nvrSession, error) 
 	if err != nil {
 		return nil, err
 	}
-	s := &nvrSession{sealed: srv.PasswordSealed, base: srv.BaseUrl, client: client}
+	s := &nvrSession{sealed: srv.PasswordSealed, base: srv.BaseUrl, user: srv.Username, client: client}
 	p.nvr[srv.ID] = s
 	return s, nil
 }

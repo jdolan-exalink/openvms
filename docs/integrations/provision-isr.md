@@ -8,7 +8,7 @@ move PTZ cameras, receive events or play back recordings yet (see [What works to
 recorder.
 
 Tested on: `NVR8-16400AN(1U)`, hardware `TD-3116H2-B1`, firmware `1.4.7.61583B230726`, TVT NVMS-9000 platform, 16 IP channels.
-See `docs/plans/provision-isr-integration.md` for the design and `ROADMAP271026.md` for the status.
+See `docs/plans/provision-isr-integration.md` for the design, `ROADMAP271026.md` for the status and `docs/integrations/reference/tvt-provision-ports.md` for the owner-supplied port reference (native SDK on 6036 for recorders, 9008 for cameras) with what our unit confirmed.
 
 ## Before you add a recorder
 
@@ -56,8 +56,14 @@ OpenVMS polls each recorder with one cached login: per-channel online state and 
 | The account is locked | like `auth_failed`; tried again after 10 minutes | `unknown` |
 | The device is not an NVMS-9000 recorder | `offline`, `last_error` starts with `unsupported:` | `unknown` |
 
-The recorder's connection (address, account, password) cannot be edited yet. Renaming and moving it to another site works; to change anything
-else, remove the recorder and add it again.
+## Edit a recorder
+
+Edit the server, tab **Conexión**: name, site, address, web port, HTTPS, account and password. A blank password keeps the stored one (changing
+the account requires typing its password). When the address, the account or the password changes, OpenVMS first connects with the new
+settings and saves only if the recorder answers **and** it is still the same recorder, meaning at least one imported channel exists on it. A
+wrong password is refused after one attempt and nothing is saved. Entering the right password after a rejection restores the polling.
+
+The authentication mode, the certificate switch and event alarm modes of Frigate servers do not exist for recorders; the API refuses them.
 
 ## What works today
 

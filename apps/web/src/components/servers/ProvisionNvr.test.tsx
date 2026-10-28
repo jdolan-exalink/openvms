@@ -150,15 +150,30 @@ describe("ProvisionNvrModal", () => {
     expect(sent.find((s) => s.method === "POST")!.body).toEqual({ channel_ids: ["9"] });
   });
 
-  it("renames the recorder but shows its address and account read-only", async () => {
+  it("sends only what changed: a rename sends just the name and never the stored password", async () => {
     const sent = stub({ "PATCH /api/v1/servers/srv": () => json({ id: "srv" }) });
     wrap(<ProvisionNvrModal server={server} sites={sites} onDone={() => {}} onDelete={() => {}} />);
     fireEvent.click(screen.getByRole("tab", { name: "Conexión" }));
-    expect(screen.getByLabelText("Dirección")).toHaveAttribute("readonly");
-    expect(screen.getByLabelText("Usuario")).toHaveAttribute("readonly");
+    expect(screen.getByLabelText("Dirección del NVR")).toHaveValue("192.168.1.50");
+    expect(screen.getByLabelText("Puerto web")).toHaveValue(80);
+    expect(screen.getByLabelText(/^Contraseña/)).toHaveValue("");
     fireEvent.change(screen.getByLabelText("Nombre"), { target: { value: "NVR renombrado" } });
     fireEvent.click(screen.getByRole("button", { name: "Guardar" }));
     await waitFor(() => expect(sent.some((s) => s.method === "PATCH")).toBe(true));
     expect(sent.find((s) => s.method === "PATCH")!.body).toEqual({ name: "NVR renombrado" });
+  });
+
+  it("changes the address, the account and the password, and shows the recorder's refusal", async () => {
+    const sent = stub({ "PATCH /api/v1/servers/srv": () => json({ code: "nvr_auth_failed", message: "the recorder rejected the username or password" }, 502) });
+    wrap(<ProvisionNvrModal server={server} sites={sites} onDone={() => {}} onDelete={() => {}} />);
+    fireEvent.click(screen.getByRole("tab", { name: "Conexión" }));
+    fireEvent.change(screen.getByLabelText("Dirección del NVR"), { target: { value: "10.0.0.9" } });
+    fireEvent.change(screen.getByLabelText("Puerto web"), { target: { value: "8080" } });
+    fireEvent.click(screen.getByRole("switch", { name: "Usar HTTPS" }));
+    fireEvent.change(screen.getByLabelText("Usuario del NVR"), { target: { value: "operator" } });
+    fireEvent.change(screen.getByLabelText(/^Contraseña/), { target: { value: "n3w-pass" } });
+    fireEvent.click(screen.getByRole("button", { name: "Guardar" }));
+    expect(await screen.findByText(/rejected the username or password/)).toBeInTheDocument();
+    expect(sent.find((s) => s.method === "PATCH")!.body).toEqual({ base_url: "https://10.0.0.9:8080", username: "operator", password: "n3w-pass" });
   });
 });

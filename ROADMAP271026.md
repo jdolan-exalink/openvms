@@ -1,6 +1,7 @@
 # Provision-ISR NVR support: status and roadmap (2026-10-28)
 
-Branch: `feat/provision-nvr-phase1` (not pushed, no PR). Feature doc: `odd/tasks/provision-isr-nvr.md`. Plan: `docs/plans/provision-isr-integration.md`.
+Phase 1 is merged (PR #274, merge commit `00ed808`) and deployed on this host (migration 84 to 85; web answers on 8000 and 8443). Editing the recorder's connection is on branch `feat/provision-nvr-edit`.
+Original branch: `feat/provision-nvr-phase1`. Feature doc: `odd/tasks/provision-isr-nvr.md`. Plan: `docs/plans/provision-isr-integration.md`.
 Test unit: a Provision-ISR `NVR8-16400AN(1U)` (TVT NVMS-9000 platform) on the local network. Its credentials are never stored in the repository.
 
 ## What the unit taught us
@@ -42,8 +43,9 @@ Verified: Go unit tests, the full integration suites of `internal/inventory`, `i
 - Native review of the newest slices: those that include regenerated `api.gen.go` exceed the reviewer's context budget (`lens_context_budget_exceeded`).
 
 ### Open questions
-1. Editing a recorder's connection (address, password) is not supported yet. Is that acceptable for Phase 1?
-2. `auth_failed` is reported through `last_error` with status `offline`, because the server status column keeps its four values. Do we want a real `auth_failed` status?
+1. `auth_failed` is reported through `last_error` with status `offline`, because the server status column keeps its four values. Do we want a real `auth_failed` status?
+
+Answered since: editing a recorder's connection (address, port, HTTPS, account, password) is supported on branch `feat/provision-nvr-edit` (see `docs/integrations/provision-isr.md`).
 
 ### Later phases (blocked on evidence)
 | Phase | Item | Blocker |
@@ -52,7 +54,7 @@ Verified: Go unit tests, the full integration suites of `internal/inventory`, `i
 | 1b | PTZ | The unit has no PTZ camera; ONVIF PTZ service is advertised, `ptz` is `unsupported` for its profiles |
 | 2 | Events (HTTP POST, ONVIF events) | Needs a payload sample from the recorder; the existing Provision LPR receiver is the pattern to extend |
 | 3 | Analytics | `REQUIRES PAYLOAD SAMPLE` |
-| 4 | Native API (port 6036 / API Server) | `REQUIRES SDK DOCUMENTATION`; the API Server switch is off |
+| 4 | Native SDK on port 6036 (TVT `NET_SDK`) and the API Server | `REQUIRES SDK DOCUMENTATION`. The owner's reference `docs/integrations/reference/tvt-provision-ports.md` says 6036 offers login, channels, RTSP URLs, playback, events and PTZ; the port is confirmed on our unit but the protocol was not spoken. The API Server switch is off |
 | 5 | Playback of recordings | ONVIF Recording/Replay/Search are advertised, not exercised (`REQUIRES REAL DEVICE TEST`) |
 | 6 | Metadata | Depends on 2 to 4 |
 | - | Agent route (`/v1/provision-nvr/*`) for recorders behind firewalls | Planned together with Phase 2; the client already takes an `http.RoundTripper` |

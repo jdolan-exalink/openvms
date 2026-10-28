@@ -471,3 +471,131 @@ func TestChannelsCanBeChosenAndAddedLater(t *testing.T) {
 		t.Fatalf("a Frigate server has no recorder channels, got %v", err)
 	}
 }
+
+func baseURLOf(t *testing.T, env *demofix.Env, id uuid.UUID) (base, user string, sealed []byte) {
+	t.Helper()
+	err := env.Store.TxRaw(context.Background(), store.AllTenants, func(tx pgx.Tx) error {
+		return tx.QueryRow(context.Background(), `SELECT base_url, username, password_sealed FROM frigate_servers WHERE id = $1`, id).Scan(&base, &user, &sealed)
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	return base, user, sealed
+}
+
+func TestUpdateProvisionNVRConnection(t *testing.T) {
+	env, nvr, srv, poller := newPolledNVR(t)
+	ctx := context.Background()
+	var ve *inventory.ValidationError
+	var ne *inventory.NVRError
+
+	t.Run("a rename keeps the stored login and never contacts the recorder", func(t *testing.T) {
+		before := len(nvr.Calls())
+		if _, err := env.Svc.UpdateServer(ctx, env.Admin, srv.ID, inventory.UpdateServerInput{Name: strp("Renamed")}); err != nil {
+			t.Fatal(err)
+		}
+		if got := len(nvr.Calls()); got != before {
+			t.Fatalf("a rename sent %d requests to the recorder", got-before)
+		}
+	})
+
+	t.Run("an option that does not exist for a recorder is refused", func(t *testing.T) {
+		skip := true
+		if _, err := env.Svc.UpdateServer(ctx, env.Admin, srv.ID, inventory.UpdateServerInput{TLSSkipVerify: &skip}); !errors.As(err, &ve) {
+			t.Fatalf("tls_skip_verify on a recorder = %v, want a validation error", err)
+		}
+	})
+
+	t.Run("a wrong new password is refused after one attempt and nothing changes", func(t *testing.T) {
+		_, _, sealedBefore := baseURLOf(t, env, srv.ID)
+		failed := nvr.FailedLogins()
+		_, err := env.Svc.UpdateServer(ctx, env.Admin, srv.ID, inventory.UpdateServerInput{Password: strp("not-the-password")})
+		if !errors.As(err, &ne) {
+			t.Fatalf("wrong password = %v, want an NVRError", err)
+		}
+		if nvr.FailedLogins() != failed+1 {
+			t.Fatalf("failed logins %d -> %d, want exactly one more", failed, nvr.FailedLogins())
+		}
+		if _, _, sealedAfter := baseURLOf(t, env, srv.ID); string(sealedAfter) != string(sealedBefore) {
+			t.Fatal("the stored password changed although the new one was rejected")
+		}
+	})
+
+	t.Run("a new account needs its password", func(t *testing.T) {
+		if _, err := env.Svc.UpdateServer(ctx, env.Admin, srv.ID, inventory.UpdateServerInput{Username: strp("operator")}); !errors.As(err, &ve) {
+			t.Fatalf("username without password = %v, want a validation error", err)
+		}
+	})
+
+	t.Run("after the password changes on the recorder, entering it restores the polling", func(t *testing.T) {
+		nvr.SetPassword("New-Device-Pass-1")
+		nvr.ExpireSession()
+		poller.PollOnce(ctx)
+		if status, lastErr, _ := healthOf(t, env, srv.ID); status != "offline" || !strings.HasPrefix(lastErr, "auth_failed:") {
+			t.Fatalf("health = %q %q, want auth_failed", status, lastErr)
+		}
+		if _, err := env.Svc.UpdateServer(ctx, env.Admin, srv.ID, inventory.UpdateServerInput{Password: strp("New-Device-Pass-1")}); err != nil {
+			t.Fatalf("saving the new password: %v", err)
+		}
+		poller.PollOnce(ctx)
+		if status, lastErr, _ := healthOf(t, env, srv.ID); status != "online" || lastErr != "" {
+			t.Fatalf("health after the fix = %q %q, want online", status, lastErr)
+		}
+	})
+
+	t.Run("a new address that is the same recorder is accepted and the capabilities are refreshed", func(t *testing.T) {
+		moved := nvmstest.New(t, "admin", "New-Device-Pass-1")
+		u := nvrConn(t, moved, "x")
+		newBase := "http://" + u.Host + ":" + strconv.Itoa(u.Port)
+		if _, err := env.Svc.UpdateServer(ctx, env.Admin, srv.ID, inventory.UpdateServerInput{BaseURL: &newBase}); err != nil {
+			t.Fatalf("moving to the same recorder at a new address: %v", err)
+		}
+		if base, _, _ := baseURLOf(t, env, srv.ID); base != newBase {
+			t.Fatalf("base_url = %q, want %q", base, newBase)
+		}
+	})
+
+	t.Run("a new address that answers as another recorder is refused and nothing changes", func(t *testing.T) {
+		other := nvmstest.New(t, "admin", "New-Device-Pass-1")
+		other.Override["queryNodeList"] = strings.NewReplacer("{0000000", "{9999999").Replace(mustFixture(t, "queryNodeList"))
+		u := nvrConn(t, other, "x")
+		otherBase := "http://" + u.Host + ":" + strconv.Itoa(u.Port)
+		before, _, _ := baseURLOf(t, env, srv.ID)
+		if _, err := env.Svc.UpdateServer(ctx, env.Admin, srv.ID, inventory.UpdateServerInput{BaseURL: &otherBase}); !errors.As(err, &ve) {
+			t.Fatalf("a different recorder = %v, want a validation error", err)
+		}
+		if after, _, _ := baseURLOf(t, env, srv.ID); after != before {
+			t.Fatalf("base_url changed to %q although the recorder is different", after)
+		}
+	})
+
+	t.Run("an address another server already uses is a duplicate", func(t *testing.T) {
+		site := env.Cameras["frigate-h01/plaza"].SiteID
+		second := nvmstest.New(t, "admin", nvrPass)
+		other, err := env.Svc.CreateProvisionNVR(ctx, env.Admin, inventory.CreateNVRInput{SiteID: site, Name: "Second", Conn: nvrConn(t, second, nvrPass)})
+		if err != nil {
+			t.Fatal(err)
+		}
+		taken := other.BaseUrl
+		if _, err := env.Svc.UpdateServer(ctx, env.Admin, srv.ID, inventory.UpdateServerInput{BaseURL: &taken}); !errors.Is(err, inventory.ErrDuplicateServer) {
+			t.Fatalf("a taken address = %v, want ErrDuplicateServer", err)
+		}
+	})
+
+	t.Run("a malformed address is a validation error", func(t *testing.T) {
+		for _, bad := range []string{"", "ftp://x", "192.168.1.5", "http://u:p@host", "http://host/path"} {
+			if _, err := env.Svc.UpdateServer(ctx, env.Admin, srv.ID, inventory.UpdateServerInput{BaseURL: strp(bad)}); !errors.As(err, &ve) {
+				t.Fatalf("address %q = %v, want a validation error", bad, err)
+			}
+		}
+	})
+}
+
+func mustFixture(t *testing.T, name string) string {
+	t.Helper()
+	s, err := nvmstest.Fixture(name)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return s
+}

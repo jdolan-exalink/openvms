@@ -181,12 +181,25 @@ func TestProvisionNvrServerLifecycleOverHTTP(t *testing.T) {
 		}
 	})
 
-	t.Run("rename works and the connection cannot be edited", func(t *testing.T) {
+	t.Run("rename works and the connection can be edited once the recorder accepts it", func(t *testing.T) {
 		if status, _, out := te.request(http.MethodPatch, idPath, te.AdminToken, nil, map[string]any{"name": "NVR renamed"}); status != http.StatusOK {
 			t.Fatalf("rename = %d, want 200: %s", status, out)
 		}
-		if status, _, out := te.request(http.MethodPatch, idPath, te.AdminToken, nil, map[string]any{"password": "another-password"}); status != http.StatusBadRequest {
-			t.Fatalf("password change = %d, want 400: %s", status, out)
+		status, _, out := te.request(http.MethodPatch, idPath, te.AdminToken, nil, map[string]any{"password": "another-password"})
+		var e gen.Error
+		_ = json.Unmarshal(out, &e)
+		if status != http.StatusBadGateway || e.Code != "nvr_auth_failed" {
+			t.Fatalf("a password the recorder rejects = %d %q, want 502 nvr_auth_failed: %s", status, e.Code, out)
+		}
+		if strings.Contains(string(out), "another-password") {
+			t.Fatal("the response echoes the password")
+		}
+		nvr.SetPassword("another-password")
+		if status, _, out := te.request(http.MethodPatch, idPath, te.AdminToken, nil, map[string]any{"password": "another-password"}); status != http.StatusOK {
+			t.Fatalf("the password the recorder accepts = %d, want 200: %s", status, out)
+		}
+		if status, _, out := te.request(http.MethodPatch, idPath, te.AdminToken, nil, map[string]any{"tls_skip_verify": true}); status != http.StatusBadRequest {
+			t.Fatalf("tls_skip_verify on a recorder = %d, want 400: %s", status, out)
 		}
 	})
 
