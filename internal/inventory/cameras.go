@@ -579,6 +579,7 @@ func (s *Service) GetCameraFrigateConfig(ctx context.Context, actor authz.Actor,
 
 	info, err := s.connInfo(db.FrigateServer{
 		ID:             srv.ID,
+		Kind:           srv.Kind,
 		BaseUrl:        srv.BaseUrl,
 		AuthMode:       srv.AuthMode,
 		Username:       srv.Username,
@@ -631,6 +632,7 @@ func (s *Service) UpdateCameraFrigateConfig(ctx context.Context, actor authz.Act
 
 	info, err := s.connInfo(db.FrigateServer{
 		ID:             srv.ID,
+		Kind:           srv.Kind,
 		BaseUrl:        srv.BaseUrl,
 		AuthMode:       srv.AuthMode,
 		Username:       srv.Username,

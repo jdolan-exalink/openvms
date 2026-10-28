@@ -44,6 +44,14 @@ describe("DeleteCameraDialog", () => {
     expect(sent).toEqual([{ method: "DELETE", path: "/api/v1/cameras/c1" }]);
   });
 
+  it("says the recorder keeps recording when the camera is a recorder channel", () => {
+    stub({});
+    wrap(<DeleteCameraDialog cameraId="c1" name="Cámara IP 01" recorder onClose={() => {}} onDeleted={() => {}} />);
+    const message = screen.getByText(/Se eliminará "Cámara IP 01" de OpenVMS/);
+    expect(message).toHaveTextContent("El NVR no se toca: sigue grabando este canal");
+    expect(message).not.toHaveTextContent("Frigate");
+  });
+
   it("sends nothing when cancelled", () => {
     const sent = stub({});
     const onClose = vi.fn();

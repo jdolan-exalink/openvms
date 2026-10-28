@@ -539,6 +539,55 @@ paths:
         "401": { $ref: "#/components/responses/Unauthorized" }
         "403": { $ref: "#/components/responses/Forbidden" }
         "502": { $ref: "#/components/responses/FrigateUnreachable" }
+  /api/v1/servers/provision-nvr:
+    post:
+      tags: [servers]
+      operationId: createProvisionNvrServer
+      summary: Register a Provision-ISR recorder and import its channels as cameras
+      description: |
+        Logs in to the recorder once, reads it (read-only) and stores it as a server of kind provision_nvr with the chosen channels as cameras.
+        The password is stored encrypted and never returned. Requires servers.manage on the target site. Phase 1 imports channels, health and
+        capabilities; video, PTZ, events and playback are not wired yet.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/ProvisionNvrCreate" }
+      responses:
+        "201":
+          description: Registered
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Server" }
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "409": { $ref: "#/components/responses/Conflict" }
+        "502": { $ref: "#/components/responses/NvrUnreachable" }
+  /api/v1/servers/provision-nvr/detect:
+    post:
+      tags: [servers]
+      operationId: detectProvisionNvr
+      summary: Detect a Provision-ISR recorder without saving it
+      description: |
+        Read-only. Logs in to the recorder once, reads its identity, channels, storage and services, and returns what it can do as a
+        capability matrix. Nothing is stored and the password is not echoed. Requires servers.manage on the target site.
+        A rejected password is not retried: every wrong attempt counts toward the recorder's account lockout.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/ProvisionNvrDetectRequest" }
+      responses:
+        "200":
+          description: The recorder was recognised
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ProvisionNvrDetection" }
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "502": { $ref: "#/components/responses/NvrUnreachable" }
   /api/v1/servers/provision:
     post:
       tags: [servers]
@@ -691,6 +740,47 @@ paths:
         "403": { $ref: "#/components/responses/Forbidden" }
         "404": { $ref: "#/components/responses/NotFound" }
         "502": { $ref: "#/components/responses/FrigateUnreachable" }
+  /api/v1/servers/{serverId}/provision-nvr/channels:
+    parameters:
+      - { name: serverId, in: path, required: true, schema: { type: string, format: uuid } }
+    get:
+      tags: [servers]
+      operationId: listProvisionNvrChannels
+      summary: Read the channels a Provision-ISR recorder has now
+      description: Read-only. Each channel says whether it already is a camera. Requires servers.manage on the server; only for servers of kind provision_nvr.
+      responses:
+        "200":
+          description: The recorder's channels
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ProvisionNvrChannelList" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { $ref: "#/components/responses/NotFound" }
+        "409": { $ref: "#/components/responses/Conflict" }
+        "502": { $ref: "#/components/responses/NvrUnreachable" }
+    post:
+      tags: [servers]
+      operationId: importProvisionNvrChannels
+      summary: Import channels of a Provision-ISR recorder as cameras
+      description: Adds the chosen channels as cameras. Channels already imported are left as they are; channels deleted here earlier are skipped. Nothing is written to the recorder. Requires servers.manage on the server.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/ProvisionNvrImportRequest" }
+      responses:
+        "200":
+          description: Imported
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ProvisionNvrImportResult" }
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { $ref: "#/components/responses/NotFound" }
+        "409": { $ref: "#/components/responses/Conflict" }
+        "502": { $ref: "#/components/responses/NvrUnreachable" }
   /api/v1/servers/{serverId}/agent/tls:
     parameters:
       - { name: serverId, in: path, required: true, schema: { type: string, format: uuid } }
@@ -5660,6 +5750,11 @@ components:
       content:
         application/json:
           schema: { $ref: "#/components/schemas/Error" }
+    NvrUnreachable:
+      description: The recorder could not be reached, rejected the credentials, or is not a supported model; the code says which (nvr_unreachable, nvr_auth_failed, nvr_locked, nvr_unsupported)
+      content:
+        application/json:
+          schema: { $ref: "#/components/schemas/Error" }
     AgentConnectFailed:
       description: The agent could not be reached (502) or did not accept the connection (422); the code says which
       content:
@@ -5885,11 +5980,125 @@ components:
         cameras:
           type: array
           items: { $ref: "#/components/schemas/DiscoveredCamera" }
+    ProvisionNvrDetectRequest:
+      type: object
+      required: [site_id, host, username, password]
+      properties:
+        site_id: { type: string, format: uuid }
+        host: { type: string, example: 192.168.1.50, description: Host name or IP address of the recorder, without scheme or port. }
+        port: { type: integer, minimum: 1, maximum: 65535, description: Web port. Defaults to 80, or 443 with https. }
+        https: { type: boolean, default: false, description: Use HTTPS. Certificates are always verified. }
+        username: { type: string }
+        password: { type: string, format: password }
+    ProvisionNvrCreate:
+      allOf:
+        - $ref: "#/components/schemas/ProvisionNvrDetectRequest"
+        - type: object
+          required: [name]
+          properties:
+            name: { type: string, minLength: 1, maxLength: 200, example: NVR-Feedlot }
+            channel_ids:
+              type: array
+              items: { type: string }
+              description: Channel ids (from detect) to import as cameras. Omit to import every channel.
+    ProvisionNvrInfo:
+      type: object
+      required: [model, hardware_model, firmware, channel_capacity, capabilities]
+      description: What a Provision-ISR recorder reported the last time it was read. Present only on servers of kind provision_nvr.
+      properties:
+        model: { type: string }
+        hardware_model: { type: string }
+        firmware: { type: string }
+        channel_capacity: { type: integer }
+        capabilities: { type: array, items: { $ref: "#/components/schemas/ProvisionNvrCapability" } }
+    ProvisionNvrCapabilityState:
+      type: string
+      enum: [confirmed, unknown, unsupported]
+      description: confirmed was observed working; unknown is claimed or advertised but not exercised and must not be shown as available; unsupported is reported off or absent.
+    ProvisionNvrCapability:
+      type: object
+      required: [name, state, source, detail]
+      properties:
+        name: { type: string, example: onvif }
+        state: { $ref: "#/components/schemas/ProvisionNvrCapabilityState" }
+        source: { type: string, description: The command or protocol that produced the state., example: queryOnvifCfg }
+        detail: { type: string }
+    ProvisionNvrDevice:
+      type: object
+      required: [name, model, hardware_model, firmware]
+      properties:
+        name: { type: string }
+        model: { type: string, example: NVR8-16400AN(1U) }
+        hardware_model: { type: string }
+        firmware: { type: string }
+        launch_date: { type: string }
+    ProvisionNvrChannel:
+      type: object
+      required: [id, name]
+      properties:
+        id: { type: string, description: Channel GUID without braces. Stable; a camera is keyed on it. }
+        name: { type: string }
+        address: { type: string, description: Address of the camera behind the channel. }
+        port: { type: integer }
+        model: { type: string }
+        protocol: { type: string }
+        online: { type: boolean, nullable: true, description: Absent when the recorder did not report channel status. }
+        recording: { type: string, description: recording, noRecording, off or recordingAbnormal when reported. }
+        motion: { type: string }
+        imported: { type: boolean, description: Only on the channel list of a registered recorder; true when the channel already is a camera. }
+    ProvisionNvrChannelList:
+      type: object
+      required: [items]
+      properties:
+        items: { type: array, items: { $ref: "#/components/schemas/ProvisionNvrChannel" } }
+    ProvisionNvrImportRequest:
+      type: object
+      required: [channel_ids]
+      properties:
+        channel_ids: { type: array, minItems: 1, items: { type: string }, description: Channel ids from the channel list. }
+    ProvisionNvrImportResult:
+      type: object
+      required: [added, skipped]
+      properties:
+        added: { type: integer, description: Channels that became new cameras. }
+        skipped: { type: integer, description: Channels deleted here earlier; restore them from the deleted cameras instead. }
+    ProvisionNvrDisk:
+      type: object
+      required: [id, model, size_mb, free_mb]
+      properties:
+        id: { type: string }
+        slot: { type: integer }
+        model: { type: string }
+        status: { type: string, description: read/write, read or bad when reported. }
+        size_mb: { type: integer, format: int64 }
+        free_mb: { type: integer, format: int64 }
+        record_start: { type: string }
+        record_end: { type: string }
+    ProvisionNvrOnvif:
+      type: object
+      required: [services, profiles, ptz_profiles, stream_uris_ok]
+      properties:
+        services: { type: array, items: { type: string } }
+        profiles: { type: integer }
+        ptz_profiles: { type: integer }
+        stream_uris_ok: { type: boolean }
+        sample_stream_path: { type: string, description: Path of one stream URL, without host or credentials. }
+    ProvisionNvrDetection:
+      type: object
+      required: [device, channel_capacity, channels, disks, cycle_record, capabilities]
+      properties:
+        device: { $ref: "#/components/schemas/ProvisionNvrDevice" }
+        channel_capacity: { type: integer, description: Number of IP channels the recorder supports. }
+        channels: { type: array, items: { $ref: "#/components/schemas/ProvisionNvrChannel" } }
+        disks: { type: array, items: { $ref: "#/components/schemas/ProvisionNvrDisk" } }
+        cycle_record: { type: boolean, description: The recorder overwrites its oldest recordings when the disks are full. }
+        onvif: { allOf: [{ $ref: "#/components/schemas/ProvisionNvrOnvif" }], nullable: true }
+        capabilities: { type: array, items: { $ref: "#/components/schemas/ProvisionNvrCapability" } }
     ServerProblem:
       type: object
       required: [code]
       properties:
-        code: { type: string, enum: [cameras_offline, storage_high, detection_stalled] }
+        code: { type: string, enum: [cameras_offline, storage_high, detection_stalled, recorder_disk_bad] }
         cameras: { type: array, items: { type: string }, description: Names of the enabled cameras without signal (cameras_offline). }
         used_percent: { type: integer, description: Share of the recordings disk in use (storage_high). }
     ServerStorage:
@@ -5899,11 +6108,16 @@ components:
         total_mb: { type: number }
         used_mb: { type: number }
         free_mb: { type: number }
+    ServerKind:
+      type: string
+      enum: [frigate, provision_nvr]
+      description: What the server is. frigate is a Frigate NVR; provision_nvr is a Provision-ISR recorder.
     Server:
       type: object
-      required: [id, tenant_id, site_id, name, base_url, auth_mode, username, tls_skip_verify, frigate_version, capabilities, status, last_error, camera_count, created_at, updated_at]
+      required: [id, kind, tenant_id, site_id, name, base_url, auth_mode, username, tls_skip_verify, frigate_version, capabilities, status, last_error, camera_count, created_at, updated_at]
       properties:
         id: { type: string, format: uuid }
+        kind: { $ref: "#/components/schemas/ServerKind" }
         tenant_id: { type: string, format: uuid }
         site_id: { type: string, format: uuid }
         name: { type: string }
@@ -5914,6 +6128,7 @@ components:
         frigate_version: { type: string }
         capabilities: { $ref: "#/components/schemas/Capabilities" }
         event_alarm_mode: { $ref: "#/components/schemas/EventAlarmMode" }
+        provision: { $ref: "#/components/schemas/ProvisionNvrInfo" }
         status: { $ref: "#/components/schemas/HealthStatus" }
         last_seen_at: { type: string, format: date-time, nullable: true }
         last_checked_at: { type: string, format: date-time, nullable: true }

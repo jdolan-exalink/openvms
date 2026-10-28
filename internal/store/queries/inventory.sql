@@ -66,6 +66,13 @@ ORDER BY fs.name;
 -- name: ListAllActiveServers :many
 SELECT * FROM frigate_servers WHERE deleted_at IS NULL ORDER BY id;
 
+-- name: ListAllActiveFrigateServers :many
+-- The servers the Frigate pollers (events, health) talk to; other kinds have their own clients.
+SELECT * FROM frigate_servers WHERE deleted_at IS NULL AND kind = 'frigate' ORDER BY id;
+
+-- name: ListAllActiveProvisionNvrServers :many
+SELECT * FROM frigate_servers WHERE deleted_at IS NULL AND kind = 'provision_nvr' ORDER BY id;
+
 -- name: GetServer :one
 SELECT fs.*,
     (SELECT count(*) FROM cameras c WHERE c.server_id = fs.id AND c.deleted_at IS NULL)::int AS camera_count,
@@ -98,8 +105,8 @@ WHERE fs.id = @id AND fs.deleted_at IS NULL
 FOR UPDATE OF fs;
 
 -- name: CreateServer :exec
-INSERT INTO frigate_servers (id, tenant_id, site_id, name, base_url, auth_mode, username, password_sealed, tls_skip_verify, frigate_version, capabilities, event_alarm_mode)
-VALUES (@id, @tenant_id, @site_id, @name, @base_url, @auth_mode, @username, @password_sealed, @tls_skip_verify, @frigate_version, @capabilities, coalesce(sqlc.narg('event_alarm_mode')::text, 'rules_only'));
+INSERT INTO frigate_servers (id, tenant_id, site_id, name, base_url, auth_mode, username, password_sealed, tls_skip_verify, frigate_version, capabilities, event_alarm_mode, kind)
+VALUES (@id, @tenant_id, @site_id, @name, @base_url, @auth_mode, @username, @password_sealed, @tls_skip_verify, @frigate_version, @capabilities, coalesce(sqlc.narg('event_alarm_mode')::text, 'rules_only'), coalesce(sqlc.narg('kind')::text, 'frigate'));
 
 -- name: UpdateServer :exec
 UPDATE frigate_servers SET

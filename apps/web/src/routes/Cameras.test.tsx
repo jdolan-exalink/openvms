@@ -34,6 +34,29 @@ const inventory = (cameras: object[]) => ({
 });
 
 describe("Cameras", () => {
+  it("shows a recorder channel with a delete action instead of Frigate settings, and deletes it on confirm", async () => {
+    const calls: string[] = [];
+    vi.stubGlobal("fetch", vi.fn(async (input: Request) => {
+      calls.push(`${input.method} ${new URL(input.url).pathname}`);
+      return stubApi({
+        "/api/v1/cameras": () => json({ items: [camera("c1", "Cámara IP 01")] }),
+        "/api/v1/sites": () => json({ items: [{ id: "s1", name: "Helvecia" }] }),
+        "/api/v1/servers": () => json({ items: [{ id: "srv1", name: "nvr-feedlot", kind: "provision_nvr" }] }),
+        "/api/v1/me": () => json({ id: "u", tenant_id: "t", grants: [{ id: "g", permission: "servers.manage", effect: "allow", scope_type: "server", scope_id: "srv1" }] }),
+        "DELETE /api/v1/cameras/c1": () => new Response(null, { status: 204 }),
+      })(input);
+    }));
+    renderPage(Cameras);
+
+    const row = (await screen.findByText("Cámara IP 01")).closest("tr")!;
+    expect(within(row).queryByText("Configurar Frigate")).not.toBeInTheDocument();
+    fireEvent.click(await within(row).findByRole("button", { name: "Eliminar Cámara IP 01" }));
+    expect(screen.getByText(/El NVR no se toca/)).toBeInTheDocument();
+    expect(calls).not.toContain("DELETE /api/v1/cameras/c1");
+    fireEvent.click(screen.getByRole("button", { name: "Eliminar" }));
+    await waitFor(() => expect(calls).toContain("DELETE /api/v1/cameras/c1"));
+  });
+
   it("discovers credential-free endpoints only for the chosen managed server and interface", async () => {
     const fetchMock = vi.fn(stubApi({
       ...inventory([]),

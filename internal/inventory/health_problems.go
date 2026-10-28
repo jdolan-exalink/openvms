@@ -12,6 +12,8 @@ const (
 	ProblemCamerasOffline   = "cameras_offline"
 	ProblemStorageHigh      = "storage_high"
 	ProblemDetectionStalled = "detection_stalled"
+	// ProblemRecorderDisk: a Provision recorder reports a disk as bad.
+	ProblemRecorderDisk = "recorder_disk_bad"
 )
 
 // HealthProblem is one reason a server is degraded.

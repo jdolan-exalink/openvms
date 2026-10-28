@@ -343,7 +343,7 @@ func (q *Queries) GetFaceServerSync(ctx context.Context, arg GetFaceServerSyncPa
 }
 
 const getFaceSyncServer = `-- name: GetFaceSyncServer :one
-SELECT id, tenant_id, site_id, name, base_url, username, password_sealed, tls_skip_verify, frigate_version, capabilities, status, last_seen_at, last_checked_at, last_error, stats, created_at, updated_at, deleted_at, deleted_by, auth_mode, event_alarm_mode FROM frigate_servers WHERE id = $1 AND deleted_at IS NULL
+SELECT id, tenant_id, site_id, name, base_url, username, password_sealed, tls_skip_verify, frigate_version, capabilities, status, last_seen_at, last_checked_at, last_error, stats, created_at, updated_at, deleted_at, deleted_by, auth_mode, event_alarm_mode, kind FROM frigate_servers WHERE id = $1 AND deleted_at IS NULL
 `
 
 func (q *Queries) GetFaceSyncServer(ctx context.Context, id uuid.UUID) (FrigateServer, error) {
@@ -371,6 +371,7 @@ func (q *Queries) GetFaceSyncServer(ctx context.Context, id uuid.UUID) (FrigateS
 		&i.DeletedBy,
 		&i.AuthMode,
 		&i.EventAlarmMode,
+		&i.Kind,
 	)
 	return i, err
 }

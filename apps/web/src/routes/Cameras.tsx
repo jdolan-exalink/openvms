@@ -8,6 +8,7 @@ import { api, unwrap, ApiError } from "@/api/client";
 import { BodyClassifySwitch } from "@/components/BodyClassifySwitch";
 import { BulkConfigureDialog } from "@/components/camera/bulk/BulkConfigureDialog";
 import { DeletedCameras } from "@/components/camera/DeletedCameras";
+import { DeleteCameraDialog } from "@/components/camera/MoreActions";
 import { can, canCamera } from "@/lib/perm";
 import { Icon } from "@/components/Icon";
 import { Button, Empty, ErrorNote, LinkButton, PageHeader, Select, StatusBadge, Summary, Table, TextInput, Th } from "@/components/ui";
@@ -124,6 +125,8 @@ export function Cameras() {
   const cameraOn = new Map(policy.data?.cameras.map((c) => [c.id, c]));
   const siteName = new Map(sites.data?.map((s) => [s.id, s.name]));
   const serverName = new Map(servers.data?.map((s) => [s.id, s.name]));
+  const recorderIds = new Set(servers.data?.filter((s) => s.kind === "provision_nvr").map((s) => s.id));
+  const [deletingCamera, setDeletingCamera] = useState<{ id: string; name: string } | null>(null);
   const qc = useQueryClient();
   const navigate = useNavigate();
   const [checkResult, setCheckResult] = useState<string | null>(null);
@@ -720,7 +723,7 @@ export function Cameras() {
                     )}
                   </div>
                   {c.display_name !== c.remote_name && <div className="font-mono text-xs text-muted">{c.remote_name}</div>}
-                  {c.missing_since && <div role="status" className="text-xs text-warn">Ya no aparece en Frigate</div>}
+                  {c.missing_since && <div role="status" className="text-xs text-warn">{recorderIds.has(c.server_id) ? "Ya no aparece en el NVR" : "Ya no aparece en Frigate"}</div>}
                 </td>
                 <td>{siteName.get(c.site_id) ?? "—"}</td>
                 <td>
@@ -736,15 +739,24 @@ export function Cameras() {
                 <td className="text-right font-mono text-xs tabular-nums">{c.fps != null ? c.fps.toFixed(1) : "—"}</td>
                 <td className="text-xs text-muted">{c.zones.join(", ") || "—"}</td>
                 <td>
-                  <BodyClassifySwitch
-                    scope="camera"
-                    id={c.id}
-                    enabled={cameraOn.get(c.id)?.enabled ?? true}
-                    disabled={!can(me.data, "cameras.manage")}
-                    label={cameraOn.get(c.id)?.effective === false && (cameraOn.get(c.id)?.enabled ?? true) ? "Apagada en el servidor" : "Clasificación fina"}
-                  />
+                  {!recorderIds.has(c.server_id) && (
+                    <BodyClassifySwitch
+                      scope="camera"
+                      id={c.id}
+                      enabled={cameraOn.get(c.id)?.enabled ?? true}
+                      disabled={!can(me.data, "cameras.manage")}
+                      label={cameraOn.get(c.id)?.effective === false && (cameraOn.get(c.id)?.enabled ?? true) ? "Apagada en el servidor" : "Clasificación fina"}
+                    />
+                  )}
                 </td>
                 <td className="text-right">
+                  {recorderIds.has(c.server_id) ? (
+                    can(me.data, "servers.manage") && (
+                      <Button variant="tonal" size="sm" aria-label={`Eliminar ${c.display_name}`} onClick={() => setDeletingCamera({ id: c.id, name: c.display_name })}>
+                        Eliminar
+                      </Button>
+                    )
+                  ) : (
                   <LinkButton
                     variant="tonal"
                     to="/cameras/$cameraId/frigate"
@@ -756,11 +768,21 @@ export function Cameras() {
                     <Icon icon={Settings} size="xs" />
                     <span>Configurar Frigate</span>
                   </LinkButton>
+                  )}
                 </td>
               </tr>
             ))}
           </tbody>
         </Table>
+      )}
+      {deletingCamera && (
+        <DeleteCameraDialog
+          cameraId={deletingCamera.id}
+          name={deletingCamera.name}
+          recorder
+          onClose={() => setDeletingCamera(null)}
+          onDeleted={() => setDeletingCamera(null)}
+        />
       )}
       <IaViewModal open={iaViewOpen} onClose={() => setIaViewOpen(false)} />
     </div>

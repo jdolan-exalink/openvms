@@ -11,6 +11,8 @@ import { ConfirmDialog } from "@/components/ConfirmDialog";
 import { Icon } from "@/components/Icon";
 import { Modal } from "@/components/Modal";
 import { AgentUpdateButton } from "@/components/servers/AgentUpdateButton";
+import { NewProvisionNvr } from "@/components/servers/NewProvisionNvr";
+import { ProvisionNvrModal } from "@/components/servers/ProvisionNvrModal";
 import { ServerActionsPanel } from "@/components/servers/ServerActionsPanel";
 import { ServerDetailTabs } from "@/components/servers/ServerDetailTabs";
 import { ServerFrigateTab } from "@/components/servers/ServerFrigateTab";
@@ -70,7 +72,18 @@ export function Servers() {
           ) : null
         }
       />
-      {editing && (
+      {editing && editing.kind === "provision_nvr" && (
+        <ProvisionNvrModal
+          server={editing}
+          sites={sites.data ?? []}
+          onDone={() => setEditing(null)}
+          onDelete={(target) => {
+            setEditing(null);
+            setDeleting(target);
+          }}
+        />
+      )}
+      {editing && editing.kind !== "provision_nvr" && (
         <EditServerModal
           server={editing}
           sites={sites.data ?? []}
@@ -121,12 +134,14 @@ export function Servers() {
                 <div className="min-w-0">
                   <div className="flex flex-wrap items-center gap-3">
                     <span className="text-lg font-bold">{s.name}</span>
-                    <BodyClassifySwitch
-                      scope="server"
-                      id={s.id}
-                      enabled={serverOn.get(s.id) ?? true}
-                      disabled={!can(me.data, "servers.manage")}
-                    />
+                    {s.kind !== "provision_nvr" && (
+                      <BodyClassifySwitch
+                        scope="server"
+                        id={s.id}
+                        enabled={serverOn.get(s.id) ?? true}
+                        disabled={!can(me.data, "servers.manage")}
+                      />
+                    )}
                   </div>
                   <div className="font-mono text-xs break-all text-muted">{s.base_url}</div>
                 </div>
@@ -159,23 +174,34 @@ export function Servers() {
                 <Fact label="Almacenamiento">
                   <StorageBar storage={s.storage} serverId={s.id} cameraCount={s.camera_count} />
                 </Fact>
-                <Fact label="Eventos">
-                  <span className="text-xs">
-                    <SyncCell status={syncOf.get(s.id)} />
-                  </span>
-                </Fact>
-                <Fact label="Frigate & Agente" className="col-span-2 md:col-span-2">
-                  <div className="font-mono text-xs whitespace-nowrap">
-                    <div>{s.frigate_version || "—"}</div>
-                    <AgentMonitor serverId={s.id} />
-                  </div>
-                </Fact>
-                <Fact label="Red" className="col-span-2 md:col-span-2">
-                  <ServerNetworkFact serverId={s.id} />
-                </Fact>
+                {s.kind === "provision_nvr" ? (
+                  <Fact label="NVR Provision-ISR" className="col-span-2 md:col-span-3">
+                    <div className="font-mono text-xs break-all">
+                      <div>{s.provision?.model || "—"}</div>
+                      <div className="text-muted">{s.provision?.firmware || ""}</div>
+                    </div>
+                  </Fact>
+                ) : (
+                  <>
+                    <Fact label="Eventos">
+                      <span className="text-xs">
+                        <SyncCell status={syncOf.get(s.id)} />
+                      </span>
+                    </Fact>
+                    <Fact label="Frigate & Agente" className="col-span-2 md:col-span-2">
+                      <div className="font-mono text-xs whitespace-nowrap">
+                        <div>{s.frigate_version || "—"}</div>
+                        <AgentMonitor serverId={s.id} />
+                      </div>
+                    </Fact>
+                    <Fact label="Red" className="col-span-2 md:col-span-2">
+                      <ServerNetworkFact serverId={s.id} />
+                    </Fact>
+                  </>
+                )}
               </dl>
               <div className="flex flex-wrap items-start justify-end gap-2">
-                {canInstallAgent(me.data, s) && <AgentSSHControls key={s.id} server={s} mode="row" />}
+                {s.kind !== "provision_nvr" && canInstallAgent(me.data, s) && <AgentSSHControls key={s.id} server={s} mode="row" />}
                 {can(me.data, "servers.manage") ? (
                   <Button size="sm" onClick={() => setEditing(s)} title="Editar servidor">
                     <Icon icon={Pencil} size="xs" />
@@ -2240,7 +2266,7 @@ function useDirtyReport(dirty: boolean, report: (dirty: boolean) => void) {
   useEffect(() => () => report(false), [report]);
 }
 
-function ServerKindPicker({ onPick, onCancel }: { onPick: (kind: "new" | "existing") => void; onCancel: () => void }) {
+function ServerKindPicker({ onPick, onCancel }: { onPick: (kind: "new" | "existing" | "provision") => void; onCancel: () => void }) {
   const t = useT();
   return (
     <section aria-label="Tipo de servidor" className="flex flex-col gap-4">
@@ -2248,7 +2274,7 @@ function ServerKindPicker({ onPick, onCancel }: { onPick: (kind: "new" | "existi
         <h2 className="text-base font-semibold">¿Qué servidor vas a agregar?</h2>
         <p className="mt-1 text-sm text-muted">Elegí si vas a instalar un servidor nuevo o importar una instalación Frigate que ya existe.</p>
       </div>
-      <div className="grid gap-3 md:grid-cols-2">
+      <div className="grid gap-3 md:grid-cols-3">
         <button type="button" onClick={() => onPick("new")} className="m3-press min-h-11 rounded-m3-lg bg-surface-2 p-4 text-left hover:bg-surface-3 focus-visible:outline-2 focus-visible:outline-primary">
           <span className="block font-bold">{t("servers.freshFrigateTitle")}</span>
           <span className="mt-1 block text-sm text-muted">{t("servers.freshFrigateDescription")}</span>
@@ -2256,6 +2282,10 @@ function ServerKindPicker({ onPick, onCancel }: { onPick: (kind: "new" | "existi
         <button type="button" onClick={() => onPick("existing")} className="m3-press min-h-11 rounded-m3-lg bg-surface-2 p-4 text-left hover:bg-surface-3 focus-visible:outline-2 focus-visible:outline-primary">
           <span className="block font-bold">{t("servers.existingFrigateTitle")}</span>
           <span className="mt-1 block text-sm text-muted">{t("servers.existingFrigateDescription")}</span>
+        </button>
+        <button type="button" onClick={() => onPick("provision")} className="m3-press min-h-11 rounded-m3-lg bg-surface-2 p-4 text-left hover:bg-surface-3 focus-visible:outline-2 focus-visible:outline-primary">
+          <span className="block font-bold">{t("servers.provisionKindTitle")}</span>
+          <span className="mt-1 block text-sm text-muted">{t("servers.provisionKindDescription")}</span>
         </button>
       </div>
       <div>
@@ -2400,7 +2430,7 @@ function NewFrigateHost({ sites, onBack, onDone, onCancel, onDirtyChange }: { si
 // agent path and does not use this probe.
 function RegisterServer({ sites, onDone }: { sites: Schemas["Site"][]; onDone: () => void }) {
   const t = useT();
-  const [kind, setKind] = useState<"new" | "existing" | null>(null);
+  const [kind, setKind] = useState<"new" | "existing" | "provision" | null>(null);
   // The active form reports whether it holds typed data; closing then needs a confirmation so a
   // stray Escape or backdrop click does not lose it. The values stay in the form component (the
   // SSH password never leaves it) and only this boolean is lifted.
@@ -2419,6 +2449,8 @@ function RegisterServer({ sites, onDone }: { sites: Schemas["Site"][]; onDone: (
           <ServerKindPicker onPick={setKind} onCancel={onDone} />
         ) : kind === "existing" ? (
           <NewFrigateServer sites={sites} onBack={() => setKind(null)} onDone={onDone} onCancel={requestClose} onDirtyChange={setDirty} />
+        ) : kind === "provision" ? (
+          <NewProvisionNvr sites={sites} onBack={() => setKind(null)} onDone={onDone} onCancel={requestClose} onDirtyChange={setDirty} />
         ) : (
           <NewFrigateHost sites={sites} onBack={() => setKind(null)} onDone={onDone} onCancel={requestClose} onDirtyChange={setDirty} />
         )}

@@ -1084,6 +1084,37 @@ describe("Servers", () => {
       expect(paths).not.toContain("/api/v1/servers/provision");
     });
 
+    it("offers the Provision-ISR recorder as a third kind of server and opens its form", async () => {
+      vi.stubGlobal("fetch", vi.fn(stubApi({
+        "/api/v1/servers": () => json({ items: [] }),
+        "/api/v1/sites": () => json({ items: [{ id: "s2", name: "Exalink" }] }),
+        "/api/v1/me": () => json(manager),
+      })));
+      renderPage(Servers);
+      fireEvent.click(await screen.findByRole("button", { name: "Registrar servidor" }));
+      fireEvent.click(screen.getByRole("button", { name: /Registrar un NVR Provision-ISR/ }));
+      const form = screen.getByRole("form", { name: "Registrar un NVR Provision-ISR" });
+      expect(within(form).getByRole("button", { name: "Detectar" })).toBeInTheDocument();
+      expect(within(form).getByLabelText("Dirección del NVR")).toBeInTheDocument();
+    });
+
+    it("shows a Provision recorder without the Frigate, agent and network parts", async () => {
+      vi.stubGlobal("fetch", vi.fn(stubApi({
+        "/api/v1/servers": () => json({ items: [server("n", "nvr-feedlot", "s1", { kind: "provision_nvr", base_url: "http://192.168.1.50:80", provision: { model: "NVR8-16400AN(1U)", firmware: "1.4.7", hardware_model: "TD", channel_capacity: 16, capabilities: [] } })] }),
+        "/api/v1/sites": () => json({ items: [{ id: "s1", name: "Helvecia" }] }),
+        "/api/v1/me": () => json(manager),
+      })));
+      renderPage(Servers);
+      const row = (await screen.findByText("nvr-feedlot")).closest("li")!;
+      expect(within(row).getByText("NVR8-16400AN(1U)")).toBeInTheDocument();
+      expect(within(row).queryByText("Frigate & Agente")).not.toBeInTheDocument();
+      expect(within(row).queryByText("Red")).not.toBeInTheDocument();
+      fireEvent.click(within(row).getByRole("button", { name: "Editar" }));
+      const dialog = await screen.findByRole("dialog", { name: /Editar servidor nvr-feedlot/ });
+      expect(within(dialog).queryByRole("tab", { name: "Frigate" })).not.toBeInTheDocument();
+      expect(within(dialog).getByRole("tab", { name: "Canales a importar" })).toBeInTheDocument();
+    });
+
     it("shows the minimum-version error when the probe rejects an unsupported Frigate", async () => {
       const message = "Frigate 0.16.1 is not supported, OpenVMS requires Frigate 0.17 or later";
       const fetchMock = vi.fn(stubApi({

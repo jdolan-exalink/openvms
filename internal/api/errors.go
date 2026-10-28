@@ -18,6 +18,7 @@ import (
 	"github.com/jdolan-exalink/openvms/internal/maps"
 	"github.com/jdolan-exalink/openvms/internal/notify"
 	"github.com/jdolan-exalink/openvms/internal/provision"
+	"github.com/jdolan-exalink/openvms/internal/provisionnvr"
 	"github.com/jdolan-exalink/openvms/internal/rules"
 	"github.com/jdolan-exalink/openvms/internal/search"
 	"github.com/jdolan-exalink/openvms/internal/store"
@@ -41,9 +42,15 @@ func statusFor(err error) (int, string, string) {
 	var sf *inventory.SectionsForbiddenError
 	var mce *inventory.ManagedConflictError
 	var fe *inventory.FrigateError
+	var nvr *inventory.NVRError
+	var uke *inventory.UnsupportedKindError
 	var fve *faces.ValidationError
 	var fre *faces.RemoteError
 	switch {
+	case errors.As(err, &nvr):
+		return nvrStatus(nvr)
+	case errors.As(err, &uke):
+		return http.StatusConflict, "unsupported_for_server_kind", uke.Error()
 	case errors.As(err, &ve):
 		return http.StatusBadRequest, "invalid", ve.Msg
 	case errors.As(err, &be):
@@ -151,4 +158,19 @@ func statusFor(err error) (int, string, string) {
 		return http.StatusBadGateway, "frigate_unreachable", msg + ": " + fe.Err.Error()
 	}
 	return http.StatusInternalServerError, "internal", "internal server error"
+}
+
+// nvrStatus maps a Provision-ISR recorder failure to a 502 whose code tells the user what to fix. It
+// never answers 401: that would sign the user out of OpenVMS because the recorder rejected a password.
+func nvrStatus(e *inventory.NVRError) (int, string, string) {
+	switch e.Class {
+	case provisionnvr.ClassAuthFailed:
+		return http.StatusBadGateway, "nvr_auth_failed", "the recorder rejected the username or password"
+	case provisionnvr.ClassLocked:
+		return http.StatusBadGateway, "nvr_locked", "the recorder locked the account after failed logins; wait before trying again"
+	case provisionnvr.ClassUnsupported:
+		return http.StatusBadGateway, "nvr_unsupported", "the device did not answer like a supported Provision-ISR recorder"
+	default:
+		return http.StatusBadGateway, "nvr_unreachable", "could not reach the recorder"
+	}
 }
