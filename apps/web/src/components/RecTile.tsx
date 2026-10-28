@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { HlsPlayer } from "@/components/HlsPlayer";
+import { RecordingPlayer } from "@/components/RecordingPlayer";
 import { REC_LIMIT_NOTICE } from "@/lib/liveRec";
 import type { RecTransport } from "@/lib/useRecPlayback";
 
@@ -53,7 +53,8 @@ export function RecTile({
   return (
     <div className="absolute inset-0 z-[2] bg-black" data-rec-tile={cameraId}>
       {state === "player" ? (
-        <HlsPlayer
+        <RecordingPlayer
+          quality="sub"
           ref={transport.bindPlayer(cameraId)}
           key={`${cameraId}-${transport.win.start}`}
           cameraId={cameraId}

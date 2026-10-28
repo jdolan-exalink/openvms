@@ -80,7 +80,7 @@ The authentication mode, the certificate switch and event alarm modes of Frigate
 | PTZ | unsupported on the tested unit (no profile has PTZ); not wired | ONVIF profiles |
 | Events (HTTP POST, ONVIF events) | unknown | `REQUIRES PAYLOAD SAMPLE` |
 | Analytics | unknown | `REQUIRES PAYLOAD SAMPLE` |
-| Playback of recordings | unknown (ONVIF Recording, Replay and Search are advertised) | `REQUIRES REAL DEVICE TEST` |
+| Playback of recordings | **confirmed** through the recorder's own replay URL (see [Recorded video](#recorded-video)): the timeline comes from the recorder's record log, the video plays through go2rtc at normal speed | real run against the unit: 26 segments in 6 hours, a 35 s motion segment replayed in H.264 (main) and converted H.265 (sub) |
 | Native API (port 6036 / API Server) | unsupported: the API Server switch is off and the protocol is undocumented | `REQUIRES SDK DOCUMENTATION` |
 | SNMP, plate matching, face matching | unknown: declared by the recorder, not exercised | `querySystemCaps` |
 
@@ -110,6 +110,19 @@ The live viewer plays the cameras of a recorder through a `go2rtc` container tha
 - The stream sources live in memory: go2rtc saves them to its config file, which is a tmpfs seeded from `deploy/go2rtc/go2rtc.yaml`, so they vanish when the container restarts
   and the API registers them again on the next view.
 - Its RTSP and WebRTC servers are not exposed: RTSP listens on the container's loopback (go2rtc needs the module as a client) and WebRTC is off.
+
+## Recorded video
+
+The playback screen (and the recordings panel and the REC grid of the live view) play what the recorder itself has stored, for the cameras of a registered recorder.
+
+- **Timeline.** It comes from the recorder's record log (`queryChlRecLog`), through the same `listCameraRecordings` answer Frigate cameras use, so the timeline looks and behaves the same. On the tested unit the log holds **motion segments** (about 35 seconds each, 67 to 214 a day per camera); a recorder set to record all the time would show long segments instead. History goes back as far as the recorder's disk does (7 months on the tested unit).
+- **Playing.** Choosing an instant starts a replay on the recorder (its own RTSP replay URL: channel, local date, local time and length) and shows it through go2rtc, like the live view. The first picture takes 2 to 5 seconds.
+- **Time zones.** The record log is in UTC, but the replay URL takes the recorder's own local time. OpenVMS reads the offset from the recorder's clock (and remembers it for 10 minutes); it never assumes one. Tested with a recorder at UTC-3: asking for the UTC time plays nothing, asking for the local time plays the right moment.
+- **Streams.** A single camera replays the main stream; a grid of cameras replays the sub streams. H.265 is converted to H.264, as in the live view.
+- **Sessions.** Every replay has its own go2rtc stream, removed when the session ends, so two people watching the same camera at different times do not interfere. Closing the page stops the replay on the recorder.
+- **Access.** Needs `recordings.view` on the camera; the timeline needs `recordings.seek`. Every replay is audited (`PLAYBACK_VIEWED`) with its start and end.
+
+Limits: the recorder replays at normal speed and cannot play backwards, so there is no speed control and no reverse; jumping to another instant (timeline or "go to") starts a new session. Cameras of a recorder are not kept in step with each other in the multi-camera view: each replays from the instant chosen. Pausing from the REC grid's shared controls does not reach a recorder camera (the player's own controls do). Exporting or downloading a clip from a recorder camera is not available yet.
 
 ## Channel numbers
 
@@ -164,6 +177,8 @@ for a recorder and never contact it.
 | ONVIF shows "No disponible" | The ONVIF switch is off or was not saved on the recorder |
 | The camera says the video is not available | The `go2rtc` container is not running or `GO2RTC_URL` is empty; check `docker compose ps go2rtc` |
 | The camera says the recorder rejected the credentials | The stored password is outdated: edit the server's connection tab |
+| The timeline is empty but the recorder has video | The recorder is not reachable, or the recording is not within the day shown; check the server's status |
+| A replay shows nothing or starts at the wrong moment | The recorder's clock or time zone changed; sync the server (the clock offset is read again within 10 minutes) |
 
 ## Next phases
 
