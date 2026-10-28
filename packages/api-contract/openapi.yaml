@@ -539,6 +539,31 @@ paths:
         "401": { $ref: "#/components/responses/Unauthorized" }
         "403": { $ref: "#/components/responses/Forbidden" }
         "502": { $ref: "#/components/responses/FrigateUnreachable" }
+  /api/v1/servers/provision-nvr:
+    post:
+      tags: [servers]
+      operationId: createProvisionNvrServer
+      summary: Register a Provision-ISR recorder and import its channels as cameras
+      description: |
+        Logs in to the recorder once, reads it (read-only) and stores it as a server of kind provision_nvr with the chosen channels as cameras.
+        The password is stored encrypted and never returned. Requires servers.manage on the target site. Phase 1 imports channels, health and
+        capabilities; video, PTZ, events and playback are not wired yet.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/ProvisionNvrCreate" }
+      responses:
+        "201":
+          description: Registered
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Server" }
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "409": { $ref: "#/components/responses/Conflict" }
+        "502": { $ref: "#/components/responses/NvrUnreachable" }
   /api/v1/servers/provision-nvr/detect:
     post:
       tags: [servers]
@@ -5924,6 +5949,27 @@ components:
         https: { type: boolean, default: false, description: Use HTTPS. Certificates are always verified. }
         username: { type: string }
         password: { type: string, format: password }
+    ProvisionNvrCreate:
+      allOf:
+        - $ref: "#/components/schemas/ProvisionNvrDetectRequest"
+        - type: object
+          required: [name]
+          properties:
+            name: { type: string, minLength: 1, maxLength: 200, example: NVR-Feedlot }
+            channel_ids:
+              type: array
+              items: { type: string }
+              description: Channel ids (from detect) to import as cameras. Omit to import every channel.
+    ProvisionNvrInfo:
+      type: object
+      required: [model, hardware_model, firmware, channel_capacity, capabilities]
+      description: What a Provision-ISR recorder reported the last time it was read. Present only on servers of kind provision_nvr.
+      properties:
+        model: { type: string }
+        hardware_model: { type: string }
+        firmware: { type: string }
+        channel_capacity: { type: integer }
+        capabilities: { type: array, items: { $ref: "#/components/schemas/ProvisionNvrCapability" } }
     ProvisionNvrCapabilityState:
       type: string
       enum: [confirmed, unknown, unsupported]
@@ -6024,6 +6070,7 @@ components:
         frigate_version: { type: string }
         capabilities: { $ref: "#/components/schemas/Capabilities" }
         event_alarm_mode: { $ref: "#/components/schemas/EventAlarmMode" }
+        provision: { $ref: "#/components/schemas/ProvisionNvrInfo" }
         status: { $ref: "#/components/schemas/HealthStatus" }
         last_seen_at: { type: string, format: date-time, nullable: true }
         last_checked_at: { type: string, format: date-time, nullable: true }

@@ -16,7 +16,8 @@ import (
 	"github.com/jdolan-exalink/openvms/internal/store/db"
 )
 
-// RemoveCamera deletes a camera from OpenVMS and from Frigate's config.yml. Frigate goes first and a
+// RemoveCamera deletes a camera from OpenVMS and from Frigate's config.yml. A channel of a Provision
+// recorder is deleted from OpenVMS only. Frigate goes first and a
 // failure there leaves everything as it was; a camera already absent from the config is not an error,
 // so a retry after a partial failure finishes the job. The camera's history stays (see DeleteCamera).
 // It needs servers.manage on the camera's server; the configuration is read and written by this
@@ -38,6 +39,11 @@ func (s *Service) RemoveCamera(ctx context.Context, actor authz.Actor, id uuid.U
 	})
 	if err != nil {
 		return err
+	}
+	if srv.Kind == KindProvisionNVR {
+		// A recorder's channel is only forgotten here: the recorder keeps it and keeps recording. There
+		// is no configuration to edit and no recording window known, so the history purge skips it.
+		return s.DeleteCamera(ctx, actor, id, nil, nil)
 	}
 	a, err := s.frigateAdapter(ctx, srv)
 	if err != nil {

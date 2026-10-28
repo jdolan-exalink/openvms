@@ -71,3 +71,41 @@ func toNvrDetection(d *provisionnvr.Detection) gen.ProvisionNvrDetection {
 	}
 	return out
 }
+
+func (h *Handlers) CreateProvisionNvrServer(ctx context.Context, r gen.CreateProvisionNvrServerRequestObject) (gen.CreateProvisionNvrServerResponseObject, error) {
+	a, err := actor(ctx)
+	if err != nil {
+		return nil, err
+	}
+	b := r.Body
+	conn := inventory.NVRConnInput{Host: b.Host, Username: b.Username, Password: b.Password}
+	if b.Port != nil {
+		conn.Port = *b.Port
+	}
+	if b.Https != nil {
+		conn.HTTPS = *b.Https
+	}
+	var ids []string
+	if b.ChannelIds != nil {
+		ids = *b.ChannelIds
+	}
+	srv, err := h.Inv.CreateProvisionNVR(ctx, a, inventory.CreateNVRInput{SiteID: b.SiteId, Name: b.Name, Conn: conn, ChannelIDs: ids})
+	if err != nil {
+		return nil, err
+	}
+	return gen.CreateProvisionNvrServer201JSONResponse(toServer(srv)), nil
+}
+
+func toNvrInfo(i *inventory.NVRInfo) *gen.ProvisionNvrInfo {
+	if i == nil {
+		return nil
+	}
+	out := &gen.ProvisionNvrInfo{
+		Model: i.Model, HardwareModel: i.HardwareModel, Firmware: i.Firmware, ChannelCapacity: i.ChannelCapacity,
+		Capabilities: make([]gen.ProvisionNvrCapability, 0, len(i.Capabilities)),
+	}
+	for _, c := range i.Capabilities {
+		out.Capabilities = append(out.Capabilities, gen.ProvisionNvrCapability{Name: c.Name, State: gen.ProvisionNvrCapabilityState(c.State), Source: c.Source, Detail: c.Detail})
+	}
+	return out
+}

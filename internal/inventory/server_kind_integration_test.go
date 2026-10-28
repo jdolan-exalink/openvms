@@ -4,6 +4,7 @@ package inventory_test
 
 import (
 	"context"
+	"strings"
 	"testing"
 	"time"
 
@@ -58,4 +59,13 @@ func TestFrigateHealthPollerSkipsProvisionRecorders(t *testing.T) {
 	if status, checked := serverHealth(t, env, cam.ServerID); status != "online" || checked == nil {
 		t.Fatalf("Frigate server health = %q checked=%v, want online and checked", status, checked)
 	}
+}
+
+func dropFirstItem(xml string) string {
+	start := strings.Index(xml, "<item ")
+	end := strings.Index(xml, "</item>")
+	if start < 0 || end < 0 {
+		return xml
+	}
+	return xml[:start] + xml[end+len("</item>"):]
 }

@@ -125,3 +125,81 @@ func TestDetectProvisionNvrOverHTTP(t *testing.T) {
 		}
 	})
 }
+
+func TestProvisionNvrServerLifecycleOverHTTP(t *testing.T) {
+	te := setupMapsTest(t, false)
+	site := te.Cameras["frigate-h01/plaza"].SiteID.String()
+	const pass = "Lifecycle-Pass-3"
+	nvr := nvmstest.New(t, "admin", pass)
+	operator := te.Demo.Tokens["operador"]
+	createPath := "/api/v1/servers/provision-nvr"
+
+	body := nvrBody(t, site, nvr.URL, pass)
+	body["name"] = "NVR Feedlot"
+
+	if status, _, out := te.request(http.MethodPost, createPath, operator, nil, body); status != http.StatusForbidden {
+		t.Fatalf("operator create = %d, want 403: %s", status, out)
+	}
+	if got := len(nvr.Calls()); got != 0 {
+		t.Fatalf("a refused create reached the recorder %d times", got)
+	}
+
+	status, _, out := te.request(http.MethodPost, createPath, te.AdminToken, nil, body)
+	if status != http.StatusCreated {
+		t.Fatalf("create = %d, want 201: %s", status, out)
+	}
+	var srv gen.Server
+	if err := json.Unmarshal(out, &srv); err != nil {
+		t.Fatal(err)
+	}
+	if srv.Kind != gen.ServerKindProvisionNvr || srv.CameraCount != 7 || srv.Provision == nil || srv.Provision.Model != "NVR8-16400AN(1U)" {
+		t.Fatalf("server = kind %q cameras %d provision %+v", srv.Kind, srv.CameraCount, srv.Provision)
+	}
+	for _, secret := range []string{pass, "SERIAL", "test-session-token"} {
+		if strings.Contains(string(out), secret) {
+			t.Fatalf("response carries %q", secret)
+		}
+	}
+	idPath := "/api/v1/servers/" + srv.Id.String()
+
+	t.Run("the same recorder twice is a 409", func(t *testing.T) {
+		body["name"] = "Again"
+		if status, _, out := te.request(http.MethodPost, createPath, te.AdminToken, nil, body); status != http.StatusConflict {
+			t.Fatalf("duplicate = %d, want 409: %s", status, out)
+		}
+	})
+
+	t.Run("sync re-reads the recorder", func(t *testing.T) {
+		status, _, out := te.request(http.MethodPost, idPath+"/sync", te.AdminToken, nil, nil)
+		if status != http.StatusOK {
+			t.Fatalf("sync = %d, want 200: %s", status, out)
+		}
+		var res gen.SyncServer200JSONResponse
+		_ = json.Unmarshal(out, &res)
+		if res.Updated != 7 || res.Added != 0 || res.Server.Kind != gen.ServerKindProvisionNvr {
+			t.Fatalf("sync = %+v", res)
+		}
+	})
+
+	t.Run("rename works and the connection cannot be edited", func(t *testing.T) {
+		if status, _, out := te.request(http.MethodPatch, idPath, te.AdminToken, nil, map[string]any{"name": "NVR renamed"}); status != http.StatusOK {
+			t.Fatalf("rename = %d, want 200: %s", status, out)
+		}
+		if status, _, out := te.request(http.MethodPatch, idPath, te.AdminToken, nil, map[string]any{"password": "another-password"}); status != http.StatusBadRequest {
+			t.Fatalf("password change = %d, want 400: %s", status, out)
+		}
+	})
+
+	t.Run("Frigate-only operations are refused with 409 and never reach the recorder", func(t *testing.T) {
+		before := len(nvr.Calls())
+		status, _, out := te.request(http.MethodPost, idPath+"/restart", te.AdminToken, nil, nil)
+		var e gen.Error
+		_ = json.Unmarshal(out, &e)
+		if status != http.StatusConflict || e.Code != "unsupported_for_server_kind" {
+			t.Fatalf("restart = %d %q, want 409 unsupported_for_server_kind: %s", status, e.Code, out)
+		}
+		if got := len(nvr.Calls()); got != before {
+			t.Fatalf("restart sent %d requests to the recorder", got-before)
+		}
+	})
+}

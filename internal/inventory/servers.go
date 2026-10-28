@@ -379,7 +379,10 @@ func (s *Service) UpdateServer(ctx context.Context, actor authz.Actor, id uuid.U
 		return ServerView{}, err
 	}
 
-	stored, err := s.connInfo(db.FrigateServer{ID: id, BaseUrl: current.BaseUrl, AuthMode: current.AuthMode, Username: current.Username, PasswordSealed: current.PasswordSealed, TlsSkipVerify: current.TlsSkipVerify})
+	if current.Kind == KindProvisionNVR {
+		return s.updateProvisionNVR(ctx, actor, current, in)
+	}
+	stored, err := s.connInfo(db.FrigateServer{ID: id, Kind: current.Kind, BaseUrl: current.BaseUrl, AuthMode: current.AuthMode, Username: current.Username, PasswordSealed: current.PasswordSealed, TlsSkipVerify: current.TlsSkipVerify})
 	if err != nil {
 		return ServerView{}, err
 	}
@@ -610,7 +613,10 @@ func (s *Service) SyncServer(ctx context.Context, actor authz.Actor, id uuid.UUI
 	if err != nil {
 		return SyncResult{}, err
 	}
-	info, err := s.connInfo(db.FrigateServer{ID: srv.ID, BaseUrl: srv.BaseUrl, AuthMode: srv.AuthMode, Username: srv.Username, PasswordSealed: srv.PasswordSealed, TlsSkipVerify: srv.TlsSkipVerify})
+	if srv.Kind == KindProvisionNVR {
+		return s.syncProvisionNVR(ctx, actor, srv)
+	}
+	info, err := s.connInfo(db.FrigateServer{ID: srv.ID, Kind: srv.Kind, BaseUrl: srv.BaseUrl, AuthMode: srv.AuthMode, Username: srv.Username, PasswordSealed: srv.PasswordSealed, TlsSkipVerify: srv.TlsSkipVerify})
 	if err != nil {
 		return SyncResult{}, err
 	}
@@ -682,6 +688,7 @@ func (s *Service) GetServerCredentials(ctx context.Context, actor authz.Actor, i
 	}
 	info, err := s.connInfo(db.FrigateServer{
 		ID:             srv.ID,
+		Kind:           srv.Kind,
 		BaseUrl:        srv.BaseUrl,
 		AuthMode:       srv.AuthMode,
 		Username:       srv.Username,
@@ -695,6 +702,9 @@ func (s *Service) GetServerCredentials(ctx context.Context, actor authz.Actor, i
 }
 
 func (s *Service) connInfo(srv db.FrigateServer) (frigate.ConnInfo, error) {
+	if err := requireFrigate(srv.Kind); err != nil {
+		return frigate.ConnInfo{}, err
+	}
 	info := frigate.ConnInfo{BaseURL: srv.BaseUrl, AuthMode: frigate.AuthMode(srv.AuthMode), TLSSkipVerify: srv.TlsSkipVerify}
 	if info.Mode() == frigate.AuthNone {
 		info.AuthMode = frigate.AuthNone
@@ -735,6 +745,7 @@ func (s *Service) RestartServer(ctx context.Context, actor authz.Actor, id uuid.
 
 	info, err := s.connInfo(db.FrigateServer{
 		ID:             srv.ID,
+		Kind:           srv.Kind,
 		BaseUrl:        srv.BaseUrl,
 		AuthMode:       srv.AuthMode,
 		Username:       srv.Username,
@@ -782,6 +793,7 @@ func (s *Service) GetServerCameraStreamHosts(ctx context.Context, actor authz.Ac
 	}
 	info, err := s.connInfo(db.FrigateServer{
 		ID:             srv.ID,
+		Kind:           srv.Kind,
 		BaseUrl:        srv.BaseUrl,
 		AuthMode:       srv.AuthMode,
 		Username:       srv.Username,

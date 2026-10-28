@@ -2,16 +2,19 @@ package inventory
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"net"
 	"strconv"
 	"strings"
 
 	"github.com/google/uuid"
+	"github.com/jackc/pgx/v5"
 
 	"github.com/jdolan-exalink/openvms/internal/access"
 	"github.com/jdolan-exalink/openvms/internal/authz"
 	"github.com/jdolan-exalink/openvms/internal/provisionnvr"
+	"github.com/jdolan-exalink/openvms/internal/store"
 	"github.com/jdolan-exalink/openvms/internal/store/db"
 )
 
@@ -90,6 +93,21 @@ func (in NVRConnInput) baseURL() string {
 	return scheme + "://" + net.JoinHostPort(host, strconv.Itoa(port))
 }
 
+// detectNVR reads a recorder and maps its failures to errors the API can answer with.
+func detectNVR(ctx context.Context, baseURL, username, password string) (*provisionnvr.Detection, error) {
+	det, err := provisionnvr.Detect(ctx, provisionnvr.DetectInput{BaseURL: baseURL, Username: username, Password: password})
+	if err == nil {
+		return det, nil
+	}
+	if class, ok := provisionnvr.ClassOf(err); ok {
+		return nil, &NVRError{Class: class, Err: err}
+	}
+	if errors.Is(err, provisionnvr.ErrInvalidEndpoint) {
+		return nil, invalid("host or port is not valid")
+	}
+	return nil, &NVRError{Class: provisionnvr.ClassOffline, Err: err}
+}
+
 // DetectProvisionNvr reads a recorder's identity, channels, storage and capabilities without saving
 // anything. Needs servers.manage on the site. The password is used for this call and not kept.
 func (s *Service) DetectProvisionNvr(ctx context.Context, actor authz.Actor, siteID uuid.UUID, conn NVRConnInput) (*provisionnvr.Detection, error) {
@@ -103,19 +121,275 @@ func (s *Service) DetectProvisionNvr(ctx context.Context, actor authz.Actor, sit
 	if err != nil {
 		return nil, err
 	}
-	det, err := provisionnvr.Detect(ctx, provisionnvr.DetectInput{BaseURL: conn.baseURL(), Username: conn.Username, Password: conn.Password})
-	if err != nil {
-		var ne *NVRError
-		if errors.As(err, &ne) {
-			return nil, err
-		}
-		if class, ok := provisionnvr.ClassOf(err); ok {
-			return nil, &NVRError{Class: class, Err: err}
-		}
-		if errors.Is(err, provisionnvr.ErrInvalidEndpoint) {
-			return nil, invalid("host or port is not valid")
-		}
-		return nil, &NVRError{Class: provisionnvr.ClassOffline, Err: err}
+	return detectNVR(ctx, conn.baseURL(), conn.Username, conn.Password)
+}
+
+// NVRInfo is what a recorder reported the last time it was read; it lives in the server's capabilities
+// column under its own key, so the Frigate capability flags of that column stay untouched.
+type NVRInfo struct {
+	Model           string                    `json:"model"`
+	HardwareModel   string                    `json:"hardware_model"`
+	Firmware        string                    `json:"firmware"`
+	ChannelCapacity int                       `json:"channel_capacity"`
+	Capabilities    []provisionnvr.Capability `json:"capabilities"`
+}
+
+const nvrCapabilitiesKey = "provision_nvr"
+
+func nvrInfoOf(d *provisionnvr.Detection) NVRInfo {
+	return NVRInfo{Model: d.Device.Model, HardwareModel: d.Device.HardwareModel, Firmware: d.Device.SoftwareVersion,
+		ChannelCapacity: d.SystemCaps.IPChannelMax, Capabilities: d.Capabilities}
+}
+
+func nvrCapabilitiesJSON(d *provisionnvr.Detection) ([]byte, error) {
+	return json.Marshal(map[string]any{nvrCapabilitiesKey: nvrInfoOf(d)})
+}
+
+// Provision returns what the recorder reported, nil for a server that is not a Provision recorder.
+func (v ServerView) Provision() *NVRInfo {
+	if v.Kind != KindProvisionNVR {
+		return nil
 	}
-	return det, nil
+	var raw map[string]json.RawMessage
+	if json.Unmarshal(v.Capabilities, &raw) != nil || raw[nvrCapabilitiesKey] == nil {
+		return &NVRInfo{}
+	}
+	var info NVRInfo
+	_ = json.Unmarshal(raw[nvrCapabilitiesKey], &info)
+	return &info
+}
+
+// CreateNVRInput registers a Provision recorder and says which of its channels become cameras.
+type CreateNVRInput struct {
+	SiteID uuid.UUID
+	Name   string
+	Conn   NVRConnInput
+	// ChannelIDs are the channels to import; empty imports every channel the recorder lists.
+	ChannelIDs []string
+}
+
+// CreateProvisionNVR registers a Provision-ISR recorder after proving the credentials work, and imports
+// the chosen channels as cameras. Needs servers.manage on the site. Nothing is written to the recorder.
+func (s *Service) CreateProvisionNVR(ctx context.Context, actor authz.Actor, in CreateNVRInput) (ServerView, error) {
+	in.Name = strings.TrimSpace(in.Name)
+	if in.Name == "" {
+		return ServerView{}, invalid("name is required")
+	}
+	if err := in.Conn.validate(); err != nil {
+		return ServerView{}, err
+	}
+	// Authorize before contacting the recorder so an unauthorized caller cannot use the VMS to probe hosts.
+	var site db.GetSiteRow
+	err := s.tx(ctx, actor, func(q *db.Queries, c *access.Checker) error {
+		var err error
+		site, err = requireSite(ctx, q, c, authz.ServersManage, in.SiteID)
+		return err
+	})
+	if err != nil {
+		return ServerView{}, err
+	}
+	baseURL := in.Conn.baseURL()
+	det, err := detectNVR(ctx, baseURL, in.Conn.Username, in.Conn.Password)
+	if err != nil {
+		return ServerView{}, err
+	}
+	channels, err := selectChannels(det, in.ChannelIDs)
+	if err != nil {
+		return ServerView{}, err
+	}
+	id := uuid.New()
+	sealed, err := s.Sealer.Seal([]byte(in.Conn.Password), id[:])
+	if err != nil {
+		return ServerView{}, err
+	}
+	caps, err := nvrCapabilitiesJSON(det)
+	if err != nil {
+		return ServerView{}, err
+	}
+	kind := KindProvisionNVR
+	err = s.tx(ctx, actor, func(q *db.Queries, c *access.Checker) error {
+		if _, err := requireSite(ctx, q, c, authz.ServersManage, in.SiteID); err != nil {
+			return err
+		}
+		if err := requireFreeAddress(ctx, q, site.TenantID, id, baseURL); err != nil {
+			return err
+		}
+		if err := q.CreateServer(ctx, db.CreateServerParams{
+			ID: id, TenantID: site.TenantID, SiteID: site.ID, Name: in.Name, BaseUrl: baseURL,
+			AuthMode: "credentials", Username: in.Conn.Username, PasswordSealed: sealed,
+			Capabilities: caps, Kind: &kind,
+		}); err != nil {
+			return store.Classify(err)
+		}
+		for _, ch := range channels {
+			if _, err := upsertNVRChannel(ctx, q, site.TenantID, site.ID, id, ch); err != nil {
+				return err
+			}
+		}
+		return audit(ctx, q, actor, &site.TenantID, ActionServerAdded, "server", id, map[string]any{
+			"name": in.Name, "kind": kind, "base_url": baseURL, "model": det.Device.Model, "cameras_imported": len(channels),
+		})
+	})
+	if err != nil {
+		return ServerView{}, err
+	}
+	return s.GetServer(ctx, actor, id)
+}
+
+func selectChannels(det *provisionnvr.Detection, ids []string) ([]provisionnvr.Channel, error) {
+	all := make([]provisionnvr.Channel, 0, len(det.Channels))
+	byID := map[string]provisionnvr.Channel{}
+	for _, c := range det.Channels {
+		all = append(all, c.Channel)
+		byID[c.ID] = c.Channel
+	}
+	if len(ids) == 0 {
+		return all, nil
+	}
+	seen := map[string]bool{}
+	out := make([]provisionnvr.Channel, 0, len(ids))
+	for _, id := range ids {
+		ch, ok := byID[id]
+		if !ok {
+			return nil, invalid("channel %q is not on the recorder", id)
+		}
+		if !seen[id] {
+			seen[id] = true
+			out = append(out, ch)
+		}
+	}
+	return out, nil
+}
+
+// upsertNVRChannel stores one recorder channel as a camera: its remote name is the channel id, which
+// stays the same when the channel is renamed. Phase 1 has no video, so the stream fields stay empty.
+// It reports whether a row was inserted; a tombstoned (deleted) channel is skipped and reports false.
+func upsertNVRChannel(ctx context.Context, q *db.Queries, tenantID, siteID, serverID uuid.UUID, ch provisionnvr.Channel) (bool, error) {
+	name := strings.TrimSpace(ch.Name)
+	if name == "" {
+		name = ch.ID
+	}
+	inserted, err := q.UpsertCamera(ctx, db.UpsertCameraParams{
+		TenantID: tenantID, SiteID: siteID, ServerID: serverID, RemoteName: ch.ID, DisplayName: name,
+		Enabled: true, Zones: []string{},
+	})
+	if errors.Is(err, pgx.ErrNoRows) {
+		return false, nil
+	}
+	if err != nil || !inserted {
+		return inserted, err
+	}
+	return true, q.RematerializeDynamicGroups(ctx, db.RematerializeDynamicGroupsParams{TenantID: tenantID})
+}
+
+// syncProvisionNVR re-reads a recorder: it refreshes the stored capabilities and the cameras it already
+// has, and marks the ones whose channel is gone. It does not add channels (see the plan: adding a channel
+// later is an open question), and it writes nothing to the recorder.
+func (s *Service) syncProvisionNVR(ctx context.Context, actor authz.Actor, srv db.GetServerRow) (SyncResult, error) {
+	pw, err := s.Sealer.Open(srv.PasswordSealed, srv.ID[:])
+	if err != nil {
+		return SyncResult{}, err
+	}
+	det, err := detectNVR(ctx, srv.BaseUrl, srv.Username, string(pw))
+	if err != nil {
+		return SyncResult{}, err
+	}
+	caps, err := nvrCapabilitiesJSON(det)
+	if err != nil {
+		return SyncResult{}, err
+	}
+	onRecorder := map[string]provisionnvr.Channel{}
+	present := make([]string, 0, len(det.Channels))
+	for _, c := range det.Channels {
+		onRecorder[c.ID] = c.Channel
+		present = append(present, c.ID)
+	}
+	var res SyncResult
+	err = s.tx(ctx, actor, func(q *db.Queries, c *access.Checker) error {
+		if err := c.Require(authz.ServersManage, access.Server(srv.TenantID, srv.SiteID, srv.ID)); err != nil {
+			return err
+		}
+		if err := q.UpdateServerDiscovery(ctx, db.UpdateServerDiscoveryParams{ID: srv.ID, FrigateVersion: srv.FrigateVersion, Capabilities: caps}); err != nil {
+			return err
+		}
+		cams, err := q.ListServerCameras(ctx, srv.ID)
+		if err != nil {
+			return err
+		}
+		for _, cam := range cams {
+			ch, ok := onRecorder[cam.RemoteName]
+			if !ok {
+				continue
+			}
+			if _, err := upsertNVRChannel(ctx, q, srv.TenantID, srv.SiteID, srv.ID, ch); err != nil {
+				return err
+			}
+			res.Updated++
+		}
+		missing, err := q.MarkMissingCameras(ctx, db.MarkMissingCamerasParams{ServerID: srv.ID, Present: present})
+		if err != nil {
+			return err
+		}
+		res.Missing = int(missing)
+		return audit(ctx, q, actor, &srv.TenantID, ActionServerSynced, "server", srv.ID, map[string]any{
+			"kind": KindProvisionNVR, "updated": res.Updated, "missing": res.Missing,
+		})
+	})
+	if err != nil {
+		return SyncResult{}, err
+	}
+	res.Server, err = s.GetServer(ctx, actor, srv.ID)
+	return res, err
+}
+
+// updateProvisionNVR renames a recorder or moves it to another site. Its connection (address, account,
+// password) cannot be edited yet: remove the recorder and add it again.
+func (s *Service) updateProvisionNVR(ctx context.Context, actor authz.Actor, current db.GetServerRow, in UpdateServerInput) (ServerView, error) {
+	if in.BaseURL != nil || in.AuthMode != nil || in.Username != nil || in.Password != nil || in.TLSSkipVerify != nil || in.EventAlarmMode != nil {
+		return ServerView{}, invalid("the connection of a Provision recorder cannot be edited yet; remove it and add it again")
+	}
+	name, siteID := current.Name, current.SiteID
+	if in.Name != nil {
+		if name = strings.TrimSpace(*in.Name); name == "" {
+			return ServerView{}, invalid("name cannot be empty")
+		}
+	}
+	if in.SiteID != nil {
+		siteID = *in.SiteID
+	}
+	err := s.tx(ctx, actor, func(q *db.Queries, c *access.Checker) error {
+		if err := c.Require(authz.ServersManage, access.Server(current.TenantID, current.SiteID, current.ID)); err != nil {
+			return err
+		}
+		if siteID != current.SiteID {
+			site, err := requireSite(ctx, q, c, authz.ServersManage, siteID)
+			if err != nil {
+				return err
+			}
+			if site.TenantID != current.TenantID {
+				return invalid("a server cannot move to another tenant")
+			}
+		}
+		if err := q.UpdateServer(ctx, db.UpdateServerParams{
+			ID: current.ID, Name: name, SiteID: siteID, BaseUrl: current.BaseUrl, AuthMode: current.AuthMode, Username: current.Username,
+			PasswordSealed: current.PasswordSealed, TlsSkipVerify: current.TlsSkipVerify,
+		}); err != nil {
+			return store.Classify(err)
+		}
+		if siteID != current.SiteID {
+			if err := q.MoveServerCameras(ctx, db.MoveServerCamerasParams{ServerID: current.ID, SiteID: siteID}); err != nil {
+				return err
+			}
+			if err := q.RematerializeDynamicGroups(ctx, db.RematerializeDynamicGroupsParams{TenantID: current.TenantID}); err != nil {
+				return err
+			}
+		}
+		return audit(ctx, q, actor, &current.TenantID, ActionServerUpdated, "server", current.ID, map[string]any{
+			"kind": KindProvisionNVR, "renamed": name != current.Name, "moved": siteID != current.SiteID,
+		})
+	})
+	if err != nil {
+		return ServerView{}, err
+	}
+	return s.GetServer(ctx, actor, current.ID)
 }

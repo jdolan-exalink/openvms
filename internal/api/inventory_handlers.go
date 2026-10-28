@@ -229,8 +229,8 @@ func toServer(s inventory.ServerView) gen.Server {
 	out := gen.Server{
 		Id: s.ID, Kind: gen.ServerKind(s.Kind), TenantId: s.TenantID, SiteId: s.SiteID, Name: s.Name, BaseUrl: s.BaseUrl, AuthMode: gen.AuthMode(s.AuthMode), Username: s.Username,
 		TlsSkipVerify: s.TlsSkipVerify, FrigateVersion: s.FrigateVersion, Capabilities: toCaps(s),
-		EventAlarmMode: &mode,
-		Status:         gen.HealthStatus(s.Status), LastSeenAt: s.LastSeenAt, LastCheckedAt: s.LastCheckedAt,
+		EventAlarmMode: &mode, Provision: toNvrInfo(s.Provision()),
+		Status: gen.HealthStatus(s.Status), LastSeenAt: s.LastSeenAt, LastCheckedAt: s.LastCheckedAt,
 		LastError: s.LastError, CameraCount: int(s.CameraCount), CreatedAt: s.CreatedAt, UpdatedAt: s.UpdatedAt,
 	}
 	out.AgentLastSeenAt, out.AgentVersion = s.AgentLastSeenAt, s.AgentVersion
@@ -388,9 +388,11 @@ func (h *Handlers) SyncServer(ctx context.Context, r gen.SyncServerRequestObject
 	if err != nil {
 		return nil, err
 	}
-	sweepCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 25*time.Second)
-	defer cancel()
-	_, _ = h.SweepServerCamerasOnvif(sweepCtx, a, r.ServerId, nil)
+	if res.Server.Kind != inventory.KindProvisionNVR { // a recorder's channels have no ONVIF address of their own to sweep
+		sweepCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 25*time.Second)
+		defer cancel()
+		_, _ = h.SweepServerCamerasOnvif(sweepCtx, a, r.ServerId, nil)
+	}
 
 	return gen.SyncServer200JSONResponse{Server: toServer(res.Server), Added: res.Added, Updated: res.Updated, Missing: res.Missing}, nil
 }

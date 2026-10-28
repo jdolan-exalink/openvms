@@ -410,6 +410,28 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/servers/provision-nvr": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Register a Provision-ISR recorder and import its channels as cameras
+         * @description Logs in to the recorder once, reads it (read-only) and stores it as a server of kind provision_nvr with the chosen channels as cameras.
+         *     The password is stored encrypted and never returned. Requires servers.manage on the target site. Phase 1 imports channels, health and
+         *     capabilities; video, PTZ, events and playback are not wired yet.
+         */
+        post: operations["createProvisionNvrServer"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/servers/provision-nvr/detect": {
         parameters: {
             query?: never;
@@ -4597,6 +4619,20 @@ export interface components {
             /** Format: password */
             password: string;
         };
+        ProvisionNvrCreate: components["schemas"]["ProvisionNvrDetectRequest"] & {
+            /** @example NVR-Feedlot */
+            name: string;
+            /** @description Channel ids (from detect) to import as cameras. Omit to import every channel. */
+            channel_ids?: string[];
+        };
+        /** @description What a Provision-ISR recorder reported the last time it was read. Present only on servers of kind provision_nvr. */
+        ProvisionNvrInfo: {
+            model: string;
+            hardware_model: string;
+            firmware: string;
+            channel_capacity: number;
+            capabilities: components["schemas"]["ProvisionNvrCapability"][];
+        };
         /**
          * @description confirmed was observed working; unknown is claimed or advertised but not exercised and must not be shown as available; unsupported is reported off or absent.
          * @enum {string}
@@ -4702,6 +4738,7 @@ export interface components {
             frigate_version: string;
             capabilities: components["schemas"]["Capabilities"];
             event_alarm_mode?: components["schemas"]["EventAlarmMode"];
+            provision?: components["schemas"]["ProvisionNvrInfo"];
             status: components["schemas"]["HealthStatus"];
             /** Format: date-time */
             last_seen_at?: string | null;
@@ -8995,6 +9032,35 @@ export interface operations {
             401: components["responses"]["Unauthorized"];
             403: components["responses"]["Forbidden"];
             502: components["responses"]["FrigateUnreachable"];
+        };
+    };
+    createProvisionNvrServer: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ProvisionNvrCreate"];
+            };
+        };
+        responses: {
+            /** @description Registered */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Server"];
+                };
+            };
+            400: components["responses"]["BadRequest"];
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            409: components["responses"]["Conflict"];
+            502: components["responses"]["NvrUnreachable"];
         };
     };
     detectProvisionNvr: {

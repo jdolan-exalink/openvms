@@ -125,6 +125,7 @@ func (s *CameraServer) GetCameraSnapshot(ctx context.Context, req *openvmsv1.Get
 
 	info, err := s.Inv.ConnInfo(db.FrigateServer{
 		ID:             srv.ID,
+		Kind:           srv.Kind,
 		BaseUrl:        srv.BaseUrl,
 		AuthMode:       srv.AuthMode,
 		Username:       srv.Username,

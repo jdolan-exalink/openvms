@@ -228,8 +228,8 @@ func (q *Queries) CreateCameraGroup(ctx context.Context, arg CreateCameraGroupPa
 }
 
 const createServer = `-- name: CreateServer :exec
-INSERT INTO frigate_servers (id, tenant_id, site_id, name, base_url, auth_mode, username, password_sealed, tls_skip_verify, frigate_version, capabilities, event_alarm_mode)
-VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, coalesce($12::text, 'rules_only'))
+INSERT INTO frigate_servers (id, tenant_id, site_id, name, base_url, auth_mode, username, password_sealed, tls_skip_verify, frigate_version, capabilities, event_alarm_mode, kind)
+VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, coalesce($12::text, 'rules_only'), coalesce($13::text, 'frigate'))
 `
 
 type CreateServerParams struct {
@@ -245,6 +245,7 @@ type CreateServerParams struct {
 	FrigateVersion string
 	Capabilities   json.RawMessage
 	EventAlarmMode *string
+	Kind           *string
 }
 
 func (q *Queries) CreateServer(ctx context.Context, arg CreateServerParams) error {
@@ -261,6 +262,7 @@ func (q *Queries) CreateServer(ctx context.Context, arg CreateServerParams) erro
 		arg.FrigateVersion,
 		arg.Capabilities,
 		arg.EventAlarmMode,
+		arg.Kind,
 	)
 	return err
 }
