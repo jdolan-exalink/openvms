@@ -133,18 +133,20 @@ func (s *Service) DetectProvisionNvr(ctx context.Context, actor authz.Actor, sit
 // NVRInfo is what a recorder reported the last time it was read; it lives in the server's capabilities
 // column under its own key, so the Frigate capability flags of that column stay untouched.
 type NVRInfo struct {
-	Model           string                    `json:"model"`
-	HardwareModel   string                    `json:"hardware_model"`
-	Firmware        string                    `json:"firmware"`
-	ChannelCapacity int                       `json:"channel_capacity"`
-	Capabilities    []provisionnvr.Capability `json:"capabilities"`
+	Model           string `json:"model"`
+	HardwareModel   string `json:"hardware_model"`
+	Firmware        string `json:"firmware"`
+	ChannelCapacity int    `json:"channel_capacity"`
+	// RTSPPort is the port of the recorder's RTSP server as it reported it; zero when unknown.
+	RTSPPort     int                       `json:"rtsp_port,omitempty"`
+	Capabilities []provisionnvr.Capability `json:"capabilities"`
 }
 
 const nvrCapabilitiesKey = "provision_nvr"
 
 func nvrInfoOf(d *provisionnvr.Detection) NVRInfo {
 	return NVRInfo{Model: d.Device.Model, HardwareModel: d.Device.HardwareModel, Firmware: d.Device.SoftwareVersion,
-		ChannelCapacity: d.SystemCaps.IPChannelMax, Capabilities: d.Capabilities}
+		ChannelCapacity: d.SystemCaps.IPChannelMax, RTSPPort: d.Services.RTSPPort, Capabilities: d.Capabilities}
 }
 
 func nvrCapabilitiesJSON(d *provisionnvr.Detection) ([]byte, error) {
@@ -156,8 +158,14 @@ func (v ServerView) Provision() *NVRInfo {
 	if v.Kind != KindProvisionNVR {
 		return nil
 	}
+	return NVRInfoFromCapabilities(v.Capabilities)
+}
+
+// NVRInfoFromCapabilities reads what a recorder reported from a server's capabilities column; an empty
+// NVRInfo when nothing was stored.
+func NVRInfoFromCapabilities(capabilities []byte) *NVRInfo {
 	var raw map[string]json.RawMessage
-	if json.Unmarshal(v.Capabilities, &raw) != nil || raw[nvrCapabilitiesKey] == nil {
+	if json.Unmarshal(capabilities, &raw) != nil || raw[nvrCapabilitiesKey] == nil {
 		return &NVRInfo{}
 	}
 	var info NVRInfo

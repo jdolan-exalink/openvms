@@ -1,0 +1,16 @@
+# Seed configuration of the go2rtc container that plays Provision-ISR recorder cameras
+# (docs/integrations/provision-isr.md). It is copied into a tmpfs at start-up, so the streams the API
+# registers (their sources carry the recorder's credentials) live in memory only and vanish on restart.
+api:
+  listen: ":1984"   # reachable only on the private "media" network; never published
+  origin: ""        # no CORS: the browser talks to the OpenVMS API, never to go2rtc
+rtsp:
+  # go2rtc's RTSP module is also its RTSP client and the ffmpeg sources need it, so it cannot be
+  # switched off. Loopback inside the container serves nobody.
+  listen: "127.0.0.1:8554"
+webrtc:
+  listen: ""
+srtp:
+  listen: ""
+log:
+  level: info

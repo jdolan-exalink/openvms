@@ -4,6 +4,7 @@ import (
 	"archive/zip"
 	"bytes"
 	"context"
+	"crypto/tls"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -86,6 +87,9 @@ type Gateway struct {
 	// live socket ends when its session or token is revoked. Nil skips the credential check
 	// (the camera permission is still rechecked).
 	Session func(ctx context.Context) func(context.Context) (bool, error)
+	// NVR plays the cameras of Provision-ISR recorders through a go2rtc container. Nil means recorder
+	// video is not available and the viewer says so.
+	NVR *NVRVideo
 
 	views viewTracker
 }
@@ -1176,32 +1180,55 @@ func (g *Gateway) live(w http.ResponseWriter, r *http.Request) {
 		}
 		return
 	}
-	if code, msg, refused := liveKindRefusal(cam); refused {
-		reject(code, msg) // a recorder that is not Frigate has no go2rtc to dial
-		return
-	}
-	if code, msg, refused := liveSignalRefusal(cam); refused {
-		reject(code, msg) // Frigate gets no video from the camera: do not dial go2rtc for black frames
-		return
-	}
-	ad, err := g.Svc.Adapters.Get(r.Context(), cam.Server)
-	if err != nil {
-		g.Svc.Log.WarnContext(r.Context(), "live gateway", "camera", id, "error", err)
-		reject(CodeUpstreamUnreachable, "could not reach the camera's Frigate server")
+	if code, msg, refused := liveKindRefusal(cam, g.NVR != nil); refused {
+		reject(code, msg) // a recorder that is not Frigate and no video gateway configured for it
 		return
 	}
 	quality := qualityLabel(r.URL.Query().Get("quality"))
-	stream, err := liveStream(cam, quality)
-	if err != nil {
-		g.Svc.Log.WarnContext(r.Context(), "live gateway", "camera", id, "quality", quality, "error", err)
-		reject(CodeCameraOffline, "the camera has no live stream available")
-		return
-	}
-	target, header, tlsCfg, err := ad.Media().WebSocket(r.Context(), "/live/mse/api/ws", url.Values{"src": {stream}})
-	if err != nil {
-		g.Svc.Log.WarnContext(r.Context(), "live gateway", "camera", id, "error", err)
-		reject(CodeUpstreamUnreachable, "could not reach the camera's Frigate server")
-		return
+	var (
+		stream string
+		target string
+		header http.Header
+		tlsCfg *tls.Config
+	)
+	if cam.Server.Kind != "" && cam.Server.Kind != inventory.KindFrigate {
+		live, err := g.NVR.Open(r.Context(), cam, quality)
+		if err != nil {
+			code, msg := CodeServerError, "could not open the recorder's video"
+			var ve *NVRVideoError
+			if errors.As(err, &ve) {
+				code, msg = ve.Code, ve.Msg
+			}
+			if r.Context().Err() == nil {
+				g.Svc.Log.WarnContext(r.Context(), "live gateway", "camera", id, "code", code, "error", msg)
+			}
+			reject(code, msg)
+			return
+		}
+		stream, target = live.Name, live.Target
+	} else {
+		if code, msg, refused := liveSignalRefusal(cam); refused {
+			reject(code, msg) // Frigate gets no video from the camera: do not dial go2rtc for black frames
+			return
+		}
+		ad, err := g.Svc.Adapters.Get(r.Context(), cam.Server)
+		if err != nil {
+			g.Svc.Log.WarnContext(r.Context(), "live gateway", "camera", id, "error", err)
+			reject(CodeUpstreamUnreachable, "could not reach the camera's Frigate server")
+			return
+		}
+		stream, err = liveStream(cam, quality)
+		if err != nil {
+			g.Svc.Log.WarnContext(r.Context(), "live gateway", "camera", id, "quality", quality, "error", err)
+			reject(CodeCameraOffline, "the camera has no live stream available")
+			return
+		}
+		target, header, tlsCfg, err = ad.Media().WebSocket(r.Context(), "/live/mse/api/ws", url.Values{"src": {stream}})
+		if err != nil {
+			g.Svc.Log.WarnContext(r.Context(), "live gateway", "camera", id, "error", err)
+			reject(CodeUpstreamUnreachable, "could not reach the camera's Frigate server")
+			return
+		}
 	}
 	dialer := websocket.Dialer{HandshakeTimeout: 10 * time.Second, TLSClientConfig: tlsCfg, ReadBufferSize: 64 << 10}
 	upConn, resp, err := dialer.DialContext(r.Context(), target, header)
@@ -1353,11 +1380,11 @@ func liveSignalRefusal(cam Camera) (code, msg string, refused bool) {
 	return "", "", false
 }
 
-// liveKindRefusal refuses live view for a camera whose server is not a Frigate server. A Provision
-// recorder has no go2rtc restream to dial; saying so is better than a generic "server unavailable"
-// that the player would retry forever.
-func liveKindRefusal(cam Camera) (code, msg string, refused bool) {
-	if cam.Server.Kind != "" && cam.Server.Kind != inventory.KindFrigate {
+// liveKindRefusal refuses live view for a camera whose server is not a Frigate server and for which
+// there is no video gateway (hasRecorderVideo is false): saying so is better than a generic "server
+// unavailable" that the player would retry forever.
+func liveKindRefusal(cam Camera, hasRecorderVideo bool) (code, msg string, refused bool) {
+	if cam.Server.Kind != "" && cam.Server.Kind != inventory.KindFrigate && !hasRecorderVideo {
 		return CodeVideoUnavailable, "live video from this kind of recorder is not available yet", true
 	}
 	return "", "", false

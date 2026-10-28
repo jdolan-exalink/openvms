@@ -75,6 +75,9 @@ type Config struct {
 	LiveRevalidateInterval time.Duration
 	LivePingInterval       time.Duration
 	LivePongWait           time.Duration
+	// Go2RTCURL is the go2rtc container that plays Provision-ISR recorder cameras (for example
+	// http://go2rtc:1984, reachable only on a private network). Empty leaves recorder video unavailable.
+	Go2RTCURL string
 
 	ShutdownTimeout time.Duration
 
@@ -174,6 +177,7 @@ func Load(service string) (Config, error) {
 		LiveRevalidateInterval:      duration("LIVE_REVALIDATE_INTERVAL", 30*time.Second),
 		LivePingInterval:            duration("LIVE_PING_INTERVAL", 20*time.Second),
 		LivePongWait:                duration("LIVE_PONG_WAIT", 60*time.Second),
+		Go2RTCURL:                   str("GO2RTC_URL", ""),
 		NotifyDeliveryRetention:     duration("NOTIFY_DELIVERY_RETENTION", 30*24*time.Hour),
 		NotifyReadRetention:         duration("NOTIFY_READ_RETENTION", 90*24*time.Hour),
 		ExportStoragePath:           str("EXPORT_STORAGE_PATH", "/mnt/openvms/exports"),

@@ -55,7 +55,7 @@ and a recorder has none. It now says "El video de este NVR todavía no está dis
 **What was verified on the real unit (read-only).** RTSP works with Digest: all 14 streams (7 channels, main and sub) answered `DESCRIBE`. Main streams are H.264 1920x1080 at 25 fps
 (channel 1 is H.265); **sub streams are H.265 704x576 at 6 fps**. H.265 does not play in every browser through Media Source Extensions, so the grid (sub) needs a transcode or must use main.
 
-**Proposal (needs the owner's go-ahead: it adds a container to the deployment).** Add a `go2rtc` service to the Compose stack and let the live gateway use it for recorder cameras the way
+**Built (branch `feat/nvr-live-video`, owner approved the container: "crea la go2rtc").** Add a `go2rtc` service to the Compose stack and let the live gateway use it for recorder cameras the way
 it uses Frigate's go2rtc today:
 1. The gateway builds the RTSP URL on the server (credentials unsealed from the stored password, never sent to the browser), registers the stream in go2rtc through its HTTP API and
    dials the same MSE websocket it already proxies. The browser protocol and the player do not change.
@@ -63,7 +63,9 @@ it uses Frigate's go2rtc today:
 3. go2rtc listens only on the internal network, runs as a non-root user and its image is pinned by digest. The password lives in go2rtc's memory, so its API must not be reachable from outside.
 4. Cost to decide: CPU for the H.265 to H.264 transcode of the grid (6 fps at 704x576 is light), one more container, and a pinned third-party image.
 
-Alternative: put ffmpeg in the API image (distroless today). It has no new container but a larger blast radius for the process that holds every session, so it is not recommended.
+Result on the real unit: through the Compose container, main (copied) and sub (H.265 converted) both play, first picture in about 4.7 s, about 1 % CPU with one viewer and none when nobody watches. Posters for recorder cameras and recorded video are still open.
+
+Alternative that was not chosen: put ffmpeg in the API image (distroless today). It has no new container but a larger blast radius for the process that holds every session, so it is not recommended.
 
 Not part of this proposal: recorded video (playback), which depends on Phase 4, and audio.
 

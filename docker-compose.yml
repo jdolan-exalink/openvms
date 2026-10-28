@@ -133,6 +133,9 @@ services:
       HOST_DRM: /host/drm
       HOST_DISK: /hostfs
       WORKER_URL: http://worker:8081
+      # Plays the cameras of Provision-ISR recorders (docs/integrations/provision-isr.md). Empty
+      # leaves recorder video unavailable.
+      GO2RTC_URL: ${GO2RTC_URL:-http://go2rtc:1984}
     volumes:
       - /proc:/host/proc:ro
       - /sys/class/drm:/host/drm:ro
@@ -160,8 +163,40 @@ services:
       seaweedfs: { condition: service_healthy }
     networks:
       default: {}
+      media: {}
       onvif-agent:
         ipv4_address: ${OPENVMS_AGENT_API_IPV4:-172.29.240.2}
+    restart: unless-stopped
+
+  # Plays the cameras of Provision-ISR recorders: the API registers the recorder's RTSP stream here
+  # (the source carries the recorder's credentials, kept in memory only) and proxies this container's
+  # MSE websocket to the browser. H.265 is converted to H.264. It has no published port and sits on the
+  # "media" network that only the API shares: anyone who can reach its API can read the sources.
+  # Pinned by digest (go2rtc 1.9.9); change it deliberately.
+  go2rtc:
+    image: alexxit/go2rtc@sha256:7d31dcb73633310e80497c431f4534c81ed55ec0708db3262bc56918e654bba5
+    user: "65532:65532"
+    read_only: true
+    cap_drop: [ALL]
+    security_opt: ["no-new-privileges:true"]
+    mem_limit: 1g
+    cpus: 2.0
+    pids_limit: 256
+    tmpfs:
+      - /config:rw,size=4m,uid=65532,gid=65532,mode=0700
+    volumes:
+      - ./deploy/go2rtc/go2rtc.yaml:/seed/go2rtc.yaml:ro
+    # The stream sources are written to go2rtc's config file when they are registered; the file lives in
+    # the tmpfs above, so they disappear with the container.
+    command: ["sh", "-c", "cp /seed/go2rtc.yaml /config/go2rtc.yaml && exec go2rtc -config /config/go2rtc.yaml"]
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://127.0.0.1:1984/api"]
+      interval: 15s
+      timeout: 5s
+      retries: 3
+      start_period: 5s
+    networks:
+      media: {}
     restart: unless-stopped
 
   # Optional local agent runtime. Credentials are accepted only on its verified HTTPS
@@ -277,6 +312,8 @@ services:
     restart: unless-stopped
 
 networks:
+  # Shared only by the API and go2rtc.
+  media: {}
   onvif-agent:
     ipam:
       config:

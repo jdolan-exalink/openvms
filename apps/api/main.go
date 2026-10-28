@@ -43,6 +43,7 @@ import (
 	"github.com/jdolan-exalink/openvms/internal/control"
 	"github.com/jdolan-exalink/openvms/internal/events"
 	"github.com/jdolan-exalink/openvms/internal/faces"
+	"github.com/jdolan-exalink/openvms/internal/go2rtc"
 	"github.com/jdolan-exalink/openvms/internal/health"
 	"github.com/jdolan-exalink/openvms/internal/identity"
 	"github.com/jdolan-exalink/openvms/internal/inventory"
@@ -155,6 +156,15 @@ func run() error {
 	inv.Blobs = store
 	adapters := inventory.NewAdapters(inv)
 	mediaSvc := &media.Service{Store: st, Adapters: adapters, Log: log}
+	var recorderVideo *media.NVRVideo
+	if cfg.Go2RTCURL != "" {
+		g2, err := go2rtc.New(cfg.Go2RTCURL)
+		if err != nil {
+			return fmt.Errorf("GO2RTC_URL: %w", err)
+		}
+		recorderVideo = &media.NVRVideo{Sealer: sealer, G2: g2}
+		log.Info("recorder video enabled (go2rtc)", "url", cfg.Go2RTCURL)
+	}
 	brandingSvc := &branding.Service{Store: st, Blobs: store, Log: log}
 	clipWatermarkSvc := &clipwatermark.Service{Store: st, Media: mediaSvc, Branding: brandingSvc, Blobs: store, Log: log}
 	alarmsSvc := &alarms.Service{Store: st, Pub: &jetstreamPublisher{js: js}, Log: log}
@@ -307,7 +317,7 @@ func run() error {
 		SessionIdle:                 cfg.SessionIdle,
 		Media: (&media.Gateway{
 			Svc: mediaSvc, Actor: api.ActorFrom, Branding: brandingSvc, Session: api.RevalidatorFrom,
-			Blobs: store,
+			Blobs: store, NVR: recorderVideo,
 			Live: media.LiveConfig{
 				AuditWindow: cfg.LiveAuditWindow, RevalidateInterval: cfg.LiveRevalidateInterval,
 				PingInterval: cfg.LivePingInterval, PongWait: cfg.LivePongWait,
