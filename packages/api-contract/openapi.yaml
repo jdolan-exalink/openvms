@@ -539,6 +539,30 @@ paths:
         "401": { $ref: "#/components/responses/Unauthorized" }
         "403": { $ref: "#/components/responses/Forbidden" }
         "502": { $ref: "#/components/responses/FrigateUnreachable" }
+  /api/v1/servers/provision-nvr/detect:
+    post:
+      tags: [servers]
+      operationId: detectProvisionNvr
+      summary: Detect a Provision-ISR recorder without saving it
+      description: |
+        Read-only. Logs in to the recorder once, reads its identity, channels, storage and services, and returns what it can do as a
+        capability matrix. Nothing is stored and the password is not echoed. Requires servers.manage on the target site.
+        A rejected password is not retried: every wrong attempt counts toward the recorder's account lockout.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/ProvisionNvrDetectRequest" }
+      responses:
+        "200":
+          description: The recorder was recognised
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ProvisionNvrDetection" }
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "502": { $ref: "#/components/responses/NvrUnreachable" }
   /api/v1/servers/provision:
     post:
       tags: [servers]
@@ -5660,6 +5684,11 @@ components:
       content:
         application/json:
           schema: { $ref: "#/components/schemas/Error" }
+    NvrUnreachable:
+      description: The recorder could not be reached, rejected the credentials, or is not a supported model; the code says which (nvr_unreachable, nvr_auth_failed, nvr_locked, nvr_unsupported)
+      content:
+        application/json:
+          schema: { $ref: "#/components/schemas/Error" }
     AgentConnectFailed:
       description: The agent could not be reached (502) or did not accept the connection (422); the code says which
       content:
@@ -5885,6 +5914,82 @@ components:
         cameras:
           type: array
           items: { $ref: "#/components/schemas/DiscoveredCamera" }
+    ProvisionNvrDetectRequest:
+      type: object
+      required: [site_id, host, username, password]
+      properties:
+        site_id: { type: string, format: uuid }
+        host: { type: string, example: 192.168.1.50, description: Host name or IP address of the recorder, without scheme or port. }
+        port: { type: integer, minimum: 1, maximum: 65535, description: Web port. Defaults to 80, or 443 with https. }
+        https: { type: boolean, default: false, description: Use HTTPS. Certificates are always verified. }
+        username: { type: string }
+        password: { type: string, format: password }
+    ProvisionNvrCapabilityState:
+      type: string
+      enum: [confirmed, unknown, unsupported]
+      description: confirmed was observed working; unknown is claimed or advertised but not exercised and must not be shown as available; unsupported is reported off or absent.
+    ProvisionNvrCapability:
+      type: object
+      required: [name, state, source, detail]
+      properties:
+        name: { type: string, example: onvif }
+        state: { $ref: "#/components/schemas/ProvisionNvrCapabilityState" }
+        source: { type: string, description: The command or protocol that produced the state., example: queryOnvifCfg }
+        detail: { type: string }
+    ProvisionNvrDevice:
+      type: object
+      required: [name, model, hardware_model, firmware]
+      properties:
+        name: { type: string }
+        model: { type: string, example: NVR8-16400AN(1U) }
+        hardware_model: { type: string }
+        firmware: { type: string }
+        launch_date: { type: string }
+    ProvisionNvrChannel:
+      type: object
+      required: [id, name]
+      properties:
+        id: { type: string, description: Channel GUID without braces. Stable; a camera is keyed on it. }
+        name: { type: string }
+        address: { type: string, description: Address of the camera behind the channel. }
+        port: { type: integer }
+        model: { type: string }
+        protocol: { type: string }
+        online: { type: boolean, nullable: true, description: Absent when the recorder did not report channel status. }
+        recording: { type: string, description: recording, noRecording, off or recordingAbnormal when reported. }
+        motion: { type: string }
+    ProvisionNvrDisk:
+      type: object
+      required: [id, model, size_mb, free_mb]
+      properties:
+        id: { type: string }
+        slot: { type: integer }
+        model: { type: string }
+        status: { type: string, description: read/write, read or bad when reported. }
+        size_mb: { type: integer, format: int64 }
+        free_mb: { type: integer, format: int64 }
+        record_start: { type: string }
+        record_end: { type: string }
+    ProvisionNvrOnvif:
+      type: object
+      required: [services, profiles, ptz_profiles, stream_uris_ok]
+      properties:
+        services: { type: array, items: { type: string } }
+        profiles: { type: integer }
+        ptz_profiles: { type: integer }
+        stream_uris_ok: { type: boolean }
+        sample_stream_path: { type: string, description: Path of one stream URL, without host or credentials. }
+    ProvisionNvrDetection:
+      type: object
+      required: [device, channel_capacity, channels, disks, cycle_record, capabilities]
+      properties:
+        device: { $ref: "#/components/schemas/ProvisionNvrDevice" }
+        channel_capacity: { type: integer, description: Number of IP channels the recorder supports. }
+        channels: { type: array, items: { $ref: "#/components/schemas/ProvisionNvrChannel" } }
+        disks: { type: array, items: { $ref: "#/components/schemas/ProvisionNvrDisk" } }
+        cycle_record: { type: boolean, description: The recorder overwrites its oldest recordings when the disks are full. }
+        onvif: { allOf: [{ $ref: "#/components/schemas/ProvisionNvrOnvif" }], nullable: true }
+        capabilities: { type: array, items: { $ref: "#/components/schemas/ProvisionNvrCapability" } }
     ServerProblem:
       type: object
       required: [code]

@@ -1,0 +1,127 @@
+//go:build integration
+
+package api_test
+
+import (
+	"encoding/json"
+	"net/http"
+	"net/url"
+	"strconv"
+	"strings"
+	"testing"
+
+	"github.com/jdolan-exalink/openvms/internal/api/gen"
+	"github.com/jdolan-exalink/openvms/internal/provisionnvr/nvmstest"
+)
+
+const detectPath = "/api/v1/servers/provision-nvr/detect"
+
+func nvrBody(t *testing.T, siteID, nvrURL, password string) map[string]any {
+	t.Helper()
+	u, err := url.Parse(nvrURL)
+	if err != nil {
+		t.Fatal(err)
+	}
+	port, _ := strconv.Atoi(u.Port())
+	return map[string]any{"site_id": siteID, "host": u.Hostname(), "port": port, "username": "admin", "password": password}
+}
+
+func TestDetectProvisionNvrOverHTTP(t *testing.T) {
+	te := setupMapsTest(t, false)
+	site := te.Cameras["frigate-h01/plaza"].SiteID.String()
+	const pass = "Correct-Horse-9"
+	nvr := nvmstest.New(t, "admin", pass)
+	operator := te.Demo.Tokens["operador"]
+
+	t.Run("a user without servers.manage is refused and the recorder is never contacted", func(t *testing.T) {
+		status, _, body := te.request(http.MethodPost, detectPath, operator, nil, nvrBody(t, site, nvr.URL, pass))
+		if status != http.StatusForbidden {
+			t.Fatalf("status = %d, want 403: %s", status, body)
+		}
+		if got := len(nvr.Calls()); got != 0 {
+			t.Fatalf("a refused detect reached the recorder %d times", got)
+		}
+	})
+
+	t.Run("an unknown site is 404", func(t *testing.T) {
+		status, _, body := te.request(http.MethodPost, detectPath, te.AdminToken, nil, nvrBody(t, "00000000-0000-0000-0000-000000000001", nvr.URL, pass))
+		if status != http.StatusNotFound {
+			t.Fatalf("status = %d, want 404: %s", status, body)
+		}
+	})
+
+	t.Run("a host with a scheme or a port is 400", func(t *testing.T) {
+		for _, host := range []string{"http://192.0.2.1", "192.0.2.1:80", "", "a b"} {
+			b := nvrBody(t, site, nvr.URL, pass)
+			b["host"] = host
+			if status, _, body := te.request(http.MethodPost, detectPath, te.AdminToken, nil, b); status != http.StatusBadRequest {
+				t.Fatalf("host %q: status = %d, want 400: %s", host, status, body)
+			}
+		}
+	})
+
+	t.Run("detect returns the matrix and keeps the secrets out", func(t *testing.T) {
+		status, _, body := te.request(http.MethodPost, detectPath, te.AdminToken, nil, nvrBody(t, site, nvr.URL, pass))
+		if status != http.StatusOK {
+			t.Fatalf("status = %d, want 200: %s", status, body)
+		}
+		var det gen.ProvisionNvrDetection
+		if err := json.Unmarshal(body, &det); err != nil {
+			t.Fatal(err)
+		}
+		if det.Device.Model != "NVR8-16400AN(1U)" || len(det.Channels) != 7 || len(det.Disks) != 1 || det.ChannelCapacity != 16 {
+			t.Fatalf("detection = %+v", det)
+		}
+		states := map[string]gen.ProvisionNvrCapabilityState{}
+		for _, c := range det.Capabilities {
+			states[c.Name] = c.State
+		}
+		if states["channels"] != gen.ProvisionNvrCapabilityStateConfirmed || states["onvif"] != gen.ProvisionNvrCapabilityStateUnsupported || states["ptz"] != gen.ProvisionNvrCapabilityStateUnknown {
+			t.Fatalf("capability states = %v", states)
+		}
+		for _, secret := range []string{pass, "SERIAL", "DIGEST", "test-session-token"} {
+			if strings.Contains(string(body), secret) {
+				t.Fatalf("response carries %q", secret)
+			}
+		}
+	})
+
+	t.Run("a rejected password is a 502 nvr_auth_failed, not a 401", func(t *testing.T) {
+		before := nvr.FailedLogins()
+		status, _, body := te.request(http.MethodPost, detectPath, te.AdminToken, nil, nvrBody(t, site, nvr.URL, "Wrong-Password-1"))
+		if status != http.StatusBadGateway {
+			t.Fatalf("status = %d, want 502: %s", status, body)
+		}
+		var e gen.Error
+		_ = json.Unmarshal(body, &e)
+		if e.Code != "nvr_auth_failed" {
+			t.Fatalf("code = %q: %s", e.Code, body)
+		}
+		if strings.Contains(string(body), "Wrong-Password-1") || nvr.FailedLogins() != before+1 {
+			t.Fatalf("password echoed or retried: failed logins %d -> %d", before, nvr.FailedLogins())
+		}
+	})
+
+	t.Run("an unreachable recorder is a 502 nvr_unreachable", func(t *testing.T) {
+		dead := nvmstest.New(t, "admin", pass)
+		deadURL := dead.URL
+		dead.Close()
+		status, _, body := te.request(http.MethodPost, detectPath, te.AdminToken, nil, nvrBody(t, site, deadURL, pass))
+		var e gen.Error
+		_ = json.Unmarshal(body, &e)
+		if status != http.StatusBadGateway || e.Code != "nvr_unreachable" {
+			t.Fatalf("status = %d code = %q: %s", status, e.Code, body)
+		}
+	})
+
+	t.Run("a device that is not an NVMS recorder is nvr_unsupported", func(t *testing.T) {
+		other := nvmstest.New(t, "admin", pass)
+		other.Override["queryActivationStatus"] = "<html>router</html>"
+		status, _, body := te.request(http.MethodPost, detectPath, te.AdminToken, nil, nvrBody(t, site, other.URL, pass))
+		var e gen.Error
+		_ = json.Unmarshal(body, &e)
+		if status != http.StatusBadGateway || e.Code != "nvr_unsupported" {
+			t.Fatalf("status = %d code = %q: %s", status, e.Code, body)
+		}
+	})
+}

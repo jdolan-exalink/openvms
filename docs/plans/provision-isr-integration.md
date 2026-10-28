@@ -159,7 +159,7 @@ The UI shows only what is `confirmed`; `unknown` is shown as "sin verificar", ne
 
 ### 3.4 API (additive)
 
-- `POST /api/v1/servers/provision/detect` (read-only): host, port, https flag, username, password; returns
+- `POST /api/v1/servers/provision-nvr/detect` (read-only; `/servers/provision` is already the SSH provisioning route): host, port, https flag, username, password; returns
   the detection (model, firmware, channels, capabilities, storage). Needs `servers.manage`. The password is
   not stored and not echoed.
 - `POST /api/v1/servers` accepts `kind: "provision_nvr"` and the channel ids to import; `kind` absent means
@@ -242,3 +242,13 @@ for non-Frigate sources), PTZ (not called yet), events, native playback.
 | NVR8-16400AN(1U) (TD-3116H2-B1) | web client 20220914.01 | unknown | unknown | unknown | unknown | unknown | unknown | confirmed (read-only) | experimental |
 
 No row is "confirmed" for a capability until it has been exercised on the device.
+
+## Update 2026-10-28: ONVIF is on
+
+After the owner switched ONVIF on, the recorder answers ONVIF on its web port (`/onvif/device_service`, WS-UsernameToken).
+Observed: Media 1 and 2, PTZ, Events, Analytics, Recording, Replay, Search, deviceIO, imaging, receiver; 14 fixed profiles
+(main and sub of 7 channels); stream URL `rtsp://host:554/chID=<n>&streamType=main|sub&linkType=tcp`. `Detect` now runs an ONVIF probe
+when `queryOnvifCfg` reports the switch on, keeps every ONVIF address on the recorder's own host, and derives `onvif`, `rtsp`, `ptz`,
+`playback`, `events` and `analytics` from it. A capability is `confirmed` only when it was exercised: `rtsp` stays `unknown` until a stream is
+played, and `playback`, `events` and `analytics` stay `unknown` ("advertised, REQUIRES REAL DEVICE TEST"). The capability table in section 3.2
+is superseded by the matrix `Detect` returns.

@@ -51,7 +51,7 @@ func New(t testing.TB, username, password string) *Server {
 	t.Helper()
 	s := &Server{username: username, password: password, Override: map[string]string{}}
 	s.Server = httptest.NewServer(http.HandlerFunc(s.handle))
-	t.Cleanup(s.Server.Close)
+	t.Cleanup(s.Close)
 	return s
 }
 

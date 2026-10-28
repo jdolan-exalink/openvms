@@ -2,7 +2,7 @@
 
 Objective: add Provision-ISR NVRs to OpenVMS as an alternative to Frigate servers. Plan: `docs/plans/provision-isr-integration.md`.
 Branch: `feat/provision-nvr-phase1`. Delivery strategy: `ask-on-risk`. Runner: `go test ./internal/...`, `go test -tags integration`, `pnpm --dir apps/web test`.
-Status: plan written, evidence gathered from a real unit, implementation not started.
+Status: T1-T3 done; T4 (create/sync, health) is next.
 
 ## Specs
 
@@ -22,9 +22,9 @@ Status: plan written, evidence gathered from a real unit, implementation not sta
 ## Tasks
 
 - [x] T0 (S11) Plan document written from the real code and a read-only probe of the unit. Route: inline (one read-only explorer for the code map). Commit: -
-- [ ] T1 (S4, S5) Migration: `frigate_servers.kind` (`frigate` default, `provision_nvr`), sqlc, `ServerView.Kind`, OpenAPI `Server.kind` (additive). Existing behavior unchanged. Risk: item 1 (migration). Route: inline.
-- [ ] T2 (S2, S3, S6, S8) `internal/provisionnvr`: NVMS web API client (login, session, redacted errors, safe XML, size cap), typed read-only queries, sanitized fixtures from the real unit, fake NVMS server for tests. Route: inline.
-- [ ] T3 (S2, S4) Capability model and `Detect`, API `POST /servers/provision/detect` (read-only, `servers.manage`). Risk: item 2 (credentials, new endpoint taking a password). Route: inline.
+- [x] T1 (S4, S5) Migration: `frigate_servers.kind` (`frigate` default, `provision_nvr`), sqlc, `ServerView.Kind`, OpenAPI `Server.kind` (additive). Existing behavior unchanged. Risk: item 1 (migration). Route: inline. Commit: 9ef992e
+- [x] T2 (S2, S3, S6, S8) `internal/provisionnvr`: NVMS web API client (login, session, redacted errors, safe XML, size cap), typed read-only queries, sanitized fixtures from the real unit, fake NVMS server for tests. Route: inline. Commit: 71ee23c
+- [x] T3 (S2, S4) Capability model and `Detect` (NVMS plus an ONVIF probe), API `POST /servers/provision-nvr/detect` (read-only, `servers.manage`; `/servers/provision` already exists for SSH provisioning). Risk: item 2 (credentials, new endpoint taking a password). Route: inline. Commit: see git log (feat(provisionnvr): detect).
 - [ ] T4 (S2, S7, S8) Create/sync a `provision_nvr` server with channel selection; channels as cameras; kind-aware health; kind-aware camera removal. Risk: item 1/4 (shared sync and health paths). Route: inline.
 - [ ] T5 (S2, S4) Web: add-device flow, capability rendering, channel selection, Provision panel. Route: inline.
 - [ ] T6 (S10, S12) `docs/integrations/provision-isr.md`, compatibility table, read-only run against the real unit recorded. Route: inline.
@@ -33,4 +33,6 @@ Status: plan written, evidence gathered from a real unit, implementation not sta
 
 - L1 (2026-10-27, owner): "quiero que arranquemos con el soporte a NVRs Provision-ISR como opcion a servidores frigate o NVRs, te paso un promt completo para que tomes de referencia" (the full prompt, 44 sections, is the reference), and "y te aparte te paso para que hagas test http://192.168.68.200 usuario admin pass [given in the session, not recorded here] para que testes el funcionamiento de la misma".
 - L2 (2026-10-27): evidence changed the premise of Phase 1. The test unit is a TVT NVMS-9000 platform recorder (`NVR8-16400AN(1U)`, web client 20220914.01). ONVIF did not answer (device reports `switch=false`; enabling it is a settings change, not done), the RTSP server (Digest) rejected four candidate paths with 401 (format UNKNOWN), port 6036 speaks an undocumented binary protocol, the API Server feature is switched off. What does work and is documented by the device's own web client is the NVMS XML web API on port 80. Phase 1 is therefore built on that read-only API instead of ONVIF/RTSP, and video, PTZ and events are deferred with their blockers in the plan. Login: `sha512_hex(MD5_hex_UPPERCASE(password) + "#" + nonce)`; the first attempt with a lowercase digest failed, one corrected attempt succeeded; no further failed logins were made.
-- Next step: T1.
+- L3 (2026-10-28, owner): "dale, yo habilito ONVIF en el NVR mismo usuaior y mismoo pass ya esta activo" and "puerto 80" and "proba ahora". The first two checks still showed `switch=false` (the change was not saved yet); after the owner's third message `queryOnvifCfg` reported `switch=true` and ONVIF answered on port 80 at `/onvif/device_service` (401 without WS-UsernameToken). Services: device, events, deviceIO, imaging, media 1 and 2, PTZ, recording, replay, search, analytics, receiver (ONVIF 19.6). 14 fixed profiles (`Profile_<ch>_<0|1>`, main and sub of 7 cameras); `GetStreamUri` returns `rtsp://host:554/chID=<n>&streamType=main|sub&linkType=tcp`. The earlier RTSP 401s were on `chID=1`, which does not exist. RTSP playback itself is still not exercised (no ffprobe on the host), so `rtsp` stays `unknown` in the matrix. Detect therefore combines NVMS and ONVIF; video and PTZ remain later phases.
+- L4 (2026-10-28, owner): "pasame uun resumen de tareas y arranca con T1, T2, T3". Done and verified: migration test up/down, 12 client tests against a fake NVMS recorder, 7 detect tests, ONVIF probe test (same-host rule), API integration test (403/404/400/200/502 and no secrets in the body), and one read-only run of the client and of Detect against the real unit (7 channels, 14 profiles, matrix as expected).
+- Next step: T4.
