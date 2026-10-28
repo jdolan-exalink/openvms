@@ -22,6 +22,21 @@ import (
 // at least the length of its clip, and a recorder serves only a few at once.
 const maxRecorderCaptures = 2
 
+// offerLatest puts v in a one-slot channel without ever waiting, replacing a value nobody took yet.
+func offerLatest(ch chan float32, v float32) {
+	for {
+		select {
+		case ch <- v:
+			return
+		default:
+		}
+		select {
+		case <-ch:
+		default:
+		}
+	}
+}
+
 // recorderSlot waits for one of the recorder's capture slots and returns the function that frees it.
 func (m *ExportJobManager) recorderSlot(ctx context.Context, server uuid.UUID) (func(), error) {
 	m.mu.Lock()
@@ -72,11 +87,11 @@ func (m *ExportJobManager) captureRecorderItem(ctx context.Context, j activeJobR
 	}
 	defer release()
 	cam := Camera{ID: it.cameraID, RemoteName: it.remoteName, Server: it.serverRow}
-	has, err := m.NVR.HasRecording(ctx, cam, j.start, j.end)
+	footage, err := m.NVR.RecordedWithin(ctx, cam, j.start, j.end)
 	if err != nil {
 		return fmt.Errorf("the recorder could not be read: %w", err)
 	}
-	if !has {
+	if footage <= 0 {
 		return ErrNoRecording
 	}
 	rtsp, err := m.NVR.ReplayURL(ctx, cam, j.start, j.end, "main")
@@ -121,23 +136,12 @@ func (m *ExportJobManager) captureRecorderItem(ctx context.Context, j activeJobR
 			}
 		}
 	}()
-	err = captureReplay(ctx, ffmpeg, rtsp, partPath, total, func(done time.Duration) {
+	err = captureReplay(ctx, ffmpeg, rtsp, partPath, total, footage, func(done time.Duration) {
 		prog := float32(done) / float32(total) * 100
 		if prog > 99 {
 			prog = 99
 		}
-		select { // keep only the latest value; never wait
-		case progress <- prog:
-		default:
-			select {
-			case <-progress:
-			default:
-			}
-			select {
-			case progress <- prog:
-			default:
-			}
-		}
+		offerLatest(progress, prog)
 	})
 	close(progress)
 	<-writerDone

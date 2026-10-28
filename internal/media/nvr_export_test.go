@@ -38,17 +38,23 @@ func TestReplayURLUsesTheRecordersLocalTimeAndKeepsCredentialsOutOfTheError(t *t
 	}
 }
 
-func TestHasRecordingTellsWhetherTheRecorderHoldsVideo(t *testing.T) {
+func TestRecordedWithinSumsTheFootageClippedToTheRange(t *testing.T) {
 	srv := nvmstest.New(t, "admin", recorderPass)
 	n, sealer := playbackVideo(t, newFakeG2(t, 200))
 	cam := recorderAt(t, sealer, srv)
-	from := time.Date(2026, 10, 28, 8, 0, 0, 0, time.UTC)
-	if ok, err := n.HasRecording(context.Background(), cam, from, from.Add(4*time.Hour)); err != nil || !ok {
-		t.Fatalf("HasRecording = %v, %v; want true for the fixture's segments", ok, err)
+	srv.Override["queryChlRecLog"] = `<response><status>success</status><content><recList timeZone="UTC">` +
+		`<item><recType>MOTION</recType><startTime>2026-10-28 09:59:30</startTime><endTime>2026-10-28 10:00:30</endTime></item>` +
+		`<item><recType>MOTION</recType><startTime>2026-10-28 10:05:00</startTime><endTime>2026-10-28 10:05:40</endTime></item>` +
+		`</recList></content></response>`
+	from := time.Date(2026, 10, 28, 10, 0, 0, 0, time.UTC)
+	got, err := n.RecordedWithin(context.Background(), cam, from, from.Add(time.Hour))
+	// 30 s of the first stretch fall inside the range, plus the whole 40 s of the second.
+	if err != nil || got != 70*time.Second {
+		t.Fatalf("RecordedWithin = %v, %v; want 70s", got, err)
 	}
 	srv.Override["queryChlRecLog"] = `<response><status>success</status><content><recList timeZone="UTC"></recList></content></response>`
-	if ok, err := n.HasRecording(context.Background(), cam, from, from.Add(4*time.Hour)); err != nil || ok {
-		t.Fatalf("HasRecording on an empty log = %v, %v; want false", ok, err)
+	if got, err := n.RecordedWithin(context.Background(), cam, from, from.Add(time.Hour)); err != nil || got != 0 {
+		t.Fatalf("RecordedWithin on an empty log = %v, %v; want 0", got, err)
 	}
 }
 
@@ -91,7 +97,7 @@ echo out_time_us=12000000
 echo data > "$last"`)
 	out := filepath.Join(t.TempDir(), "o.mp4")
 	var seen []time.Duration
-	err := captureReplay(context.Background(), bin, "rtsp://u:p@h/x", out, 30*time.Second, func(d time.Duration) { seen = append(seen, d) })
+	err := captureReplay(context.Background(), bin, "rtsp://u:p@h/x", out, 30*time.Second, 30*time.Second, func(d time.Duration) { seen = append(seen, d) })
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -111,7 +117,7 @@ read line
 echo data > "$last"`)
 	out := filepath.Join(t.TempDir(), "o.mp4")
 	start := time.Now()
-	if err := captureReplay(context.Background(), bin, "rtsp://u:p@h/x", out, 40*time.Second, nil); err != nil {
+	if err := captureReplay(context.Background(), bin, "rtsp://u:p@h/x", out, 40*time.Second, 40*time.Second, nil); err != nil {
 		t.Fatal(err)
 	}
 	if time.Since(start) > 5*time.Second {
@@ -130,15 +136,20 @@ echo data > "$last"
 echo "rtsp://u:p@h/x: Connection timed out" >&2
 exit 1`)
 	out := filepath.Join(t.TempDir(), "o.mp4")
-	if err := captureReplay(context.Background(), bin, "rtsp://u:p@h/x", out, time.Minute, nil); err != nil {
-		t.Fatalf("a capture that ended on the stall timeout after writing video must succeed: %v", err)
+	// The recorder holds only 12 s in the range (it runs past the footage): the capture is complete.
+	if err := captureReplay(context.Background(), bin, "rtsp://u:p@h/x", out, time.Minute, 12*time.Second, nil); err != nil {
+		t.Fatalf("a capture that ended on the stall timeout after all the footage must succeed: %v", err)
+	}
+	// The recorder holds a minute of video: stopping at 12 s is a stall in the middle of the clip.
+	if err := captureReplay(context.Background(), bin, "rtsp://u:p@h/x", out, time.Minute, time.Minute, nil); err == nil {
+		t.Fatal("a stall before the recorded footage is complete must fail the capture")
 	}
 }
 
 func TestCaptureReplayFailsWhenTheStallHappenedBeforeAnyVideo(t *testing.T) {
 	bin := fakeFFmpeg(t, `echo "rtsp://u:p@h/x: Connection timed out" >&2
 exit 1`)
-	err := captureReplay(context.Background(), bin, "rtsp://u:p@h/x", filepath.Join(t.TempDir(), "o.mp4"), time.Minute, nil)
+	err := captureReplay(context.Background(), bin, "rtsp://u:p@h/x", filepath.Join(t.TempDir(), "o.mp4"), time.Minute, time.Minute, nil)
 	if err == nil {
 		t.Fatal("a timeout with no video written is a failure")
 	}
@@ -146,7 +157,7 @@ exit 1`)
 
 func TestCaptureReplayFailureNeverLeaksTheRecordersPassword(t *testing.T) {
 	bin := fakeFFmpeg(t, `echo "rtsp://admin:topsecret@192.0.2.9:554/x: Server returned 401 Unauthorized" >&2; exit 1`)
-	err := captureReplay(context.Background(), bin, "rtsp://admin:topsecret@192.0.2.9:554/x", filepath.Join(t.TempDir(), "o.mp4"), time.Minute, nil)
+	err := captureReplay(context.Background(), bin, "rtsp://admin:topsecret@192.0.2.9:554/x", filepath.Join(t.TempDir(), "o.mp4"), time.Minute, time.Minute, nil)
 	if err == nil {
 		t.Fatal("a failing ffmpeg must fail the capture")
 	}
@@ -163,7 +174,7 @@ func TestCaptureReplayStopsWhenItsContextEnds(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 100*time.Millisecond)
 	defer cancel()
 	start := time.Now()
-	err := captureReplay(ctx, bin, "rtsp://u:p@h/x", filepath.Join(t.TempDir(), "o.mp4"), time.Minute, nil)
+	err := captureReplay(ctx, bin, "rtsp://u:p@h/x", filepath.Join(t.TempDir(), "o.mp4"), time.Minute, time.Minute, nil)
 	if !errors.Is(err, context.DeadlineExceeded) {
 		t.Fatalf("error = %v, want the context error", err)
 	}

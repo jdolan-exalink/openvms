@@ -60,13 +60,27 @@ func (n *NVRVideo) ReplayURL(ctx context.Context, cam Camera, start, end time.Ti
 	return "rtsp://" + url.UserPassword(cam.Server.Username, pw).String() + "@" + net.JoinHostPort(base.Hostname(), strconv.Itoa(port)) + path, nil
 }
 
-// HasRecording reports whether the recorder holds any video between from and to.
-func (n *NVRVideo) HasRecording(ctx context.Context, cam Camera, from, to time.Time) (bool, error) {
+// RecordedWithin returns how much video the recorder holds between from and to: the total length of its
+// recorded stretches clipped to that range (zero when it holds none).
+func (n *NVRVideo) RecordedWithin(ctx context.Context, cam Camera, from, to time.Time) (time.Duration, error) {
 	spans, err := n.Recordings(ctx, cam, from, to)
 	if err != nil {
-		return false, err
+		return 0, err
 	}
-	return len(spans) > 0, nil
+	var total time.Duration
+	for _, sp := range spans {
+		s, e := sp.Start, sp.End
+		if s.Before(from) {
+			s = from
+		}
+		if e.After(to) {
+			e = to
+		}
+		if e.After(s) {
+			total += e.Sub(s)
+		}
+	}
+	return total, nil
 }
 
 const (
@@ -78,6 +92,11 @@ const (
 	replayFinishMargin = time.Second
 	// ffmpegMessageMax bounds the ffmpeg message kept in an error.
 	ffmpegMessageMax = 300
+	// ffmpegStallMarker is the text ffmpeg prints (in lower case here) when the recorder's stream stalled past the
+	// timeout. If a future ffmpeg words it differently a capture that ended this way fails instead of succeeding.
+	ffmpegStallMarker = "timed out"
+	// footageTolerance is how much shorter than the recorded footage a stalled capture may be and still count.
+	footageTolerance = 3 * time.Second
 )
 
 // ffmpegReplayArgs copies the recorder's replay into an MP4 without re-encoding. Audio is dropped: recorders
@@ -139,8 +158,10 @@ func (w *progressWriter) Write(p []byte) (int, error) {
 }
 
 // captureReplay runs ffmpeg to write the replay to outPath. onProgress receives how much video is written so far.
-// The recorder plays at normal speed, so this takes about as long as the clip.
-func captureReplay(ctx context.Context, ffmpegPath, rtspURL, outPath string, d time.Duration, onProgress func(done time.Duration)) error {
+// The recorder plays at normal speed, so this takes about as long as the clip. footage is how much video the
+// recorder holds in the range: a capture that ends on the stall timeout counts as complete only when at least that
+// much was written (the range ran past the last recording); a shorter one is a stall in the middle of the clip.
+func captureReplay(ctx context.Context, ffmpegPath, rtspURL, outPath string, d, footage time.Duration, onProgress func(done time.Duration)) error {
 	cmd := exec.CommandContext(ctx, ffmpegPath, ffmpegReplayArgs(rtspURL, outPath, d)...) // #nosec G204 -- fixed binary, argv only, no shell
 	var stderr bytes.Buffer
 	cmd.Stderr = &stderr
@@ -179,7 +200,7 @@ func captureReplay(ctx context.Context, ffmpegPath, rtspURL, outPath string, d t
 		msg := strings.TrimSpace(redactRTSP(stderr.String(), rtspURL))
 		// The range may run past the last recording: the recorder then sends nothing more and keeps the stream
 		// open, so ffmpeg ends on its stall timeout. What was written up to there is the footage that exists.
-		if written.Load() > 0 && strings.Contains(strings.ToLower(msg), "timed out") {
+		if w := time.Duration(written.Load()); w > 0 && w >= footage-footageTolerance && strings.Contains(strings.ToLower(msg), ffmpegStallMarker) {
 			if fi, serr := os.Stat(outPath); serr == nil && fi.Size() > 0 {
 				return nil
 			}
@@ -187,8 +208,8 @@ func captureReplay(ctx context.Context, ffmpegPath, rtspURL, outPath string, d t
 		if msg == "" {
 			msg = err.Error()
 		}
-		if len(msg) > ffmpegMessageMax {
-			msg = msg[:ffmpegMessageMax]
+		if r := []rune(msg); len(r) > ffmpegMessageMax {
+			msg = string(r[:ffmpegMessageMax])
 		}
 		return fmt.Errorf("the recorder's video could not be copied: %s", msg)
 	}
