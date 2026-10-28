@@ -10,6 +10,9 @@ export const REC_LIMIT_NOTICE = `Reproducción limitada a ${REC_MAX_PLAYERS} cá
 export const REC_SPEEDS = [0.5, 1, 2, 4, 8] as const;
 /** Recordings are addressable this far behind now; closer than this the file may not exist yet. */
 export const REC_LIVE_EDGE_S = 30;
+
+/** "Ahora" in REC opens today this long before the current time, so there is video to show right away. */
+export const REC_NOW_BACK_S = 15 * 60;
 /** Entering GRABADO starts playback this far before the current time and plays from there. */
 export const REC_ENTRY_OFFSET_S = 5 * 60;
 

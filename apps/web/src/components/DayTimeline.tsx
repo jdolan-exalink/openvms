@@ -37,6 +37,10 @@ const RULER_H = 20;
 export const ROW_H = 24;
 const LABEL_W = 132;
 const BAR_H = 8;
+/** A recorded stretch at least this long is taken as continuous recording; motion-only recording comes in short pieces. */
+export const CONTINUOUS_MIN_S = 10 * 60;
+export const isContinuous = (s: { start: number; end: number }) => s.end - s.start >= CONTINUOUS_MIN_S;
+const CONTINUOUS_LINE = "#ef4444";
 const MARK_H = 14;
 const CLICK_SLOP_PX = 4;
 const HANDLE_PX = 7;
@@ -444,6 +448,14 @@ export function DayTimeline({
         ctx.fillRect(x0, top + (ROW_H - BAR_H) / 2, Math.max(1, x1 - x0), BAR_H);
       }
       ctx.globalAlpha = 1;
+      // Continuous recording: a thin red line along the bottom of the row, on long stretches only.
+      ctx.fillStyle = CONTINUOUS_LINE;
+      for (const s of growSpans(cam, liveNow)) {
+        if (!isContinuous(s) || s.end < view.start || s.start > view.end) continue;
+        const x0 = Math.max(0, x(s.start));
+        const x1 = Math.min(width, x(s.end));
+        ctx.fillRect(x0, top + ROW_H - 4, Math.max(1, x1 - x0), 2);
+      }
 
       // Detections on top, colored by category; clusters are wider pills with their count.
       for (const c of clusters) {
