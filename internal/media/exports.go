@@ -84,6 +84,10 @@ func (s *Service) CreateExport(ctx context.Context, actor authz.Actor, in Export
 	if in.Name == "" {
 		in.Name = fmt.Sprintf("%s %s", cam.RemoteName, in.Start.Local().Format("2006-01-02 15:04"))
 	}
+	if cam.Server.Kind != "" && cam.Server.Kind != inventory.KindFrigate {
+		// A recorder has no Frigate to export for it: its clips go through the export jobs of the REC dock.
+		return Export{}, &inventory.UnsupportedKindError{Kind: cam.Server.Kind}
+	}
 	a, err := s.Adapters.Get(ctx, cam.Server)
 	if err != nil {
 		return Export{}, &inventory.FrigateError{Err: err}

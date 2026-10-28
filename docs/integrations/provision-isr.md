@@ -124,6 +124,8 @@ The playback screen (and the recordings panel and the REC grid of the live view)
 - **Sessions.** Every replay has its own go2rtc stream, removed when the session ends, so two people watching the same camera at different times do not interfere. Closing the page stops the replay on the recorder.
 - **Access.** Needs `recordings.view` on the camera; the timeline needs `recordings.seek`. Every replay is audited (`PLAYBACK_VIEWED`) with its start and end.
 
+- **Export.** The Exportar button of the REC dock works for recorder cameras too: the worker copies the recorder's own replay (ffmpeg, video copied without re-encoding, audio left out) into the export job, so it needs ffmpeg in the worker image and no Frigate. The recorder serves its replay no faster than real time, so an export takes at least as long as the clip: measured on the tested unit, a 39 second clip took about 67 seconds. Progress follows the video written. A range with no recording at all fails with "the recorder has no recording in that range"; the gaps inside a range are not filled. The older single-camera export (Playback) is still not available for recorders and answers 409 `unsupported_for_server_kind`.
+
 Limits: the recorder replays at normal speed and cannot play backwards, so there is no speed control and no reverse; jumping to another instant (timeline or "go to") starts a new session. Cameras of a recorder are not kept in step with each other in the multi-camera view: each replays from the instant chosen. Pausing from the REC grid's shared controls does not reach a recorder camera (the player's own controls do). Exporting or downloading a clip from a recorder camera is not available yet.
 
 ## Channel numbers
