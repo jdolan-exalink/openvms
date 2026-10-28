@@ -86,6 +86,7 @@ export function fromLocalInput(v: string): string | undefined {
 }
 
 const objectKeys: Record<string, MessageKey> = {
+  motion: "labels.objectMotion",
   person: "labels.objectPerson",
   car: "labels.objectCar",
   motorcycle: "labels.objectMotorcycle",

@@ -7,10 +7,12 @@ import { api, unwrap } from "@/api/client";
 import { camerasQuery, eventsQuery, meQuery, recordingsQuery } from "@/api/queries";
 import { type HlsPlayerHandle } from "@/components/HlsPlayer";
 import { RecordingPlayer } from "@/components/RecordingPlayer";
+import { recorderMotionEvents } from "@/lib/recorderMotion";
+import { useRecorderCameraIds } from "@/lib/useRecorderCameras";
 import { RecordingTimeline } from "@/components/RecordingTimeline";
 import { Button, ErrorNote, Field, IconButton, PageHeader, RemovableChip, Select, TextInput } from "@/components/ui";
 import { fmtDateTime, toLocalInput } from "@/lib/format";
-import { vodWindowForInstant } from "@/lib/recordings";
+import { clampToNow, vodWindowForInstant } from "@/lib/recordings";
 import { useSyncedPlayback } from "@/lib/useSyncedPlayback";
 import { can } from "@/lib/perm";
 
@@ -85,7 +87,12 @@ export function Playback() {
     ...eventsQuery({ camera_id: primaryCameraId ? [primaryCameraId] : undefined, from, to, limit: 500 }),
     enabled: !!primaryCameraId,
   });
-  const dayEvents = events.data?.pages.flatMap((p) => p.items) ?? [];
+  const recorderIds = useRecorderCameraIds();
+  // A recorder has no analytics of its own: its motion detections are what the timeline can show.
+  const dayEvents = [
+    ...(events.data?.pages.flatMap((p) => p.items) ?? []),
+    ...(recorderIds.has(primaryCameraId) ? recorderMotionEvents(primaryCameraId, recordings.data) : []),
+  ];
 
   const { start: winStart, end: winEnd } = vodWindowForInstant(instant, day, now);
   const cameraMap = useMemo(() => new Map(cameras.data?.map((c) => [c.id, c])), [cameras.data]);
@@ -132,7 +139,8 @@ export function Playback() {
   const players = useRef(new Map<string, HlsPlayerHandle | null>());
   useSyncedPlayback(primaryCameraId, selectedCameraIds, (id) => players.current.get(id)?.video);
 
-  const jump = (t: number) => {
+  const jump = (requested: number) => {
+    const t = clampToNow(requested, now);
     setInstant(t);
     setPosition(t);
   };

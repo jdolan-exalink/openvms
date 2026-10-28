@@ -12,7 +12,7 @@ export function RecordingTimeline({
   onSeek,
 }: {
   day: number;
-  spans: { start_time: string; end_time: string }[];
+  spans: { start_time: string; end_time: string; motion?: number }[];
   events: { id: string; start_time: string; severity: string; labels: string[]; attributes?: { vehicle?: { type?: string; type_confidence?: number; color?: string; color_confidence?: number } } }[];
   position: number;
   onSeek: (time: number) => void;
@@ -42,7 +42,8 @@ export function RecordingTimeline({
         {spans.map((span) => {
           const start = new Date(span.start_time).getTime() / 1000;
           const end = new Date(span.end_time).getTime() / 1000;
-          return <div key={span.start_time} className="absolute inset-y-0 bg-accent/30" style={{ left: pct(start), width: `calc(${pct(end)} - ${pct(start)})` }} />;
+          // A stretch of half a minute is under a pixel on a day-wide bar: keep it visible.
+          return <div key={span.start_time} className="absolute inset-y-0 min-w-[2px] bg-accent/30" style={{ left: pct(start), width: `calc(${pct(end)} - ${pct(start)})` }} />;
         })}
         {events.map((item) => {
           const time = new Date(item.start_time).getTime() / 1000;

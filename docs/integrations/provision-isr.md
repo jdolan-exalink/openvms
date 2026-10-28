@@ -115,7 +115,7 @@ The live viewer plays the cameras of a recorder through a `go2rtc` container tha
 
 The playback screen (and the recordings panel and the REC grid of the live view) play what the recorder itself has stored, for the cameras of a registered recorder.
 
-- **Timeline.** It comes from the recorder's record log (`queryChlRecLog`), through the same `listCameraRecordings` answer Frigate cameras use, so the timeline looks and behaves the same. On the tested unit the log holds **motion segments** (about 35 seconds each, 67 to 214 a day per camera); a recorder set to record all the time would show long segments instead. History goes back as far as the recorder's disk does (7 months on the tested unit).
+- **Timeline.** It comes from the recorder's record log (`queryChlRecLog`), through the same `listCameraRecordings` answer Frigate cameras use, so the timeline looks and behaves the same. On the tested unit the log holds **motion segments** (about 35 seconds each, 67 to 214 a day per camera); a recorder set to record all the time would show long segments instead. Because a 35 second stretch is thinner than a pixel on a day-wide bar, every stretch is drawn at least 2 px wide, and each one also shows as a **Motion** marker (the recorder's own detection; no analytics are needed), in the Playback screen, the live recordings panel and the REC dock. Clicking in the future part of the day jumps to just before now. History goes back as far as the recorder's disk does (7 months on the tested unit).
 - **Playing.** Choosing an instant starts a replay on the recorder (its own RTSP replay URL: channel, local date, local time and length) and shows it through go2rtc, like the live view. The first picture takes 2 to 5 seconds.
 - **Time zones.** The record log is in UTC, but the replay URL takes the recorder's own local time. OpenVMS reads the offset from the recorder's configuration (and remembers it for 10 minutes): its time zone when it states one without daylight saving (`ART3` is three hours behind UTC), otherwise its current local time against ours, which is right only while its clock is within seven minutes of the real time. It never assumes one. Tested with a recorder at UTC-3: asking for the UTC time plays nothing, asking for the local time plays the right moment.
 - **Streams.** A single camera replays the main stream; a grid of cameras replays the sub streams. H.265 is converted to H.264, as in the live view.
@@ -178,6 +178,7 @@ for a recorder and never contact it.
 | The camera says the video is not available | The `go2rtc` container is not running or `GO2RTC_URL` is empty; check `docker compose ps go2rtc` |
 | The camera says the recorder rejected the credentials | The stored password is outdated: edit the server's connection tab |
 | The timeline is empty but the recorder has video | The recorder is not reachable, or the recording is not within the day shown; check the server's status |
+| The recording still shows the old player or the timeline stays empty after an update | The web app is a PWA: accept the "update available" banner (or reload twice) to load the new version |
 | A replay shows nothing or starts at the wrong moment | The recorder's clock or time zone changed; sync the server (the clock offset is read again within 10 minutes) |
 
 ## Next phases

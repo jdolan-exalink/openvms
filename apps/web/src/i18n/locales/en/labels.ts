@@ -12,6 +12,7 @@ const messages = {
   factTrailer: "Trailer",
   factUpper: "Upper",
   factLower: "Lower",
+  objectMotion: "Motion",
   objectPerson: "Person",
   objectCar: "Car",
   objectMotorcycle: "Motorcycle",
