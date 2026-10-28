@@ -76,12 +76,14 @@ type DetectedChannel struct {
 
 // Detection is everything a recorder reveals about itself, read-only.
 type Detection struct {
-	Device       DeviceInfo
-	SystemCaps   SystemCaps
-	Services     Services
-	Channels     []DetectedChannel
-	Storage      Storage
-	ONVIF        *OnvifFacts
+	Device     DeviceInfo
+	SystemCaps SystemCaps
+	Services   Services
+	Channels   []DetectedChannel
+	Storage    Storage
+	ONVIF      *OnvifFacts
+	// RTSP is what a DESCRIBE of the first channel's main stream answered; nil when it was not tried or failed.
+	RTSP         *RTSPFacts
 	Capabilities []Capability
 }
 
@@ -95,6 +97,8 @@ type DetectInput struct {
 	Transport http.RoundTripper
 	// ProbeONVIF replaces the ONVIF probe; nil uses the real one. For tests.
 	ProbeONVIF func(ctx context.Context, in DetectInput) (*OnvifFacts, error)
+	// ProbeRTSP replaces the RTSP check; nil uses ProbeRTSP. For tests.
+	ProbeRTSP func(ctx context.Context, host string, port int, user, password string, channel int, stream Stream) (*RTSPFacts, error)
 }
 
 // ErrNotActivated reports a recorder that answers but has not been set up, so it has no usable account.
@@ -157,8 +161,35 @@ func Detect(ctx context.Context, in DetectInput) (*Detection, error) {
 			d.ONVIF = facts
 		}
 	}
+	if facts, err := probeFirstStream(ctx, in, d); err != nil {
+		soft[CapRTSP] = err
+	} else {
+		d.RTSP = facts
+	}
 	d.Capabilities = deriveCapabilities(d, soft)
 	return d, nil
+}
+
+// probeFirstStream checks the recorder's RTSP server with one DESCRIBE of the main stream of the first
+// channel whose number is known. It returns nil, nil when there is nothing to try (server off, no channel).
+func probeFirstStream(ctx context.Context, in DetectInput, d *Detection) (*RTSPFacts, error) {
+	if !d.Services.RTSPOn || d.Services.RTSPPort <= 0 {
+		return nil, nil
+	}
+	u, err := url.Parse(in.BaseURL)
+	if err != nil {
+		return nil, err
+	}
+	probe := in.ProbeRTSP
+	if probe == nil {
+		probe = ProbeRTSP
+	}
+	for _, ch := range d.Channels {
+		if n, ok := ChannelNumber(ch.ID); ok {
+			return probe(ctx, u.Hostname(), d.Services.RTSPPort, in.Username, in.Password, n, StreamMain)
+		}
+	}
+	return nil, nil
 }
 
 func deriveCapabilities(d *Detection, soft map[string]error) []Capability {
@@ -201,10 +232,16 @@ func deriveCapabilities(d *Detection, soft map[string]error) []Capability {
 	}
 
 	switch {
+	case d.RTSP != nil:
+		codec := d.RTSP.Codec
+		if codec == "" {
+			codec = "codec not announced"
+		}
+		add(CapRTSP, CapConfirmed, "rtsp DESCRIBE", fmt.Sprintf("channel %d main stream answered (%s); playing it inside OpenVMS is not wired yet", d.RTSP.Channel, codec))
 	case d.ONVIF != nil && d.ONVIF.StreamURIsOK:
-		add(CapRTSP, CapUnknown, "onvif GetStreamUri", "the recorder reports the stream URL path "+d.ONVIF.SampleStreamPath+"; playback not exercised (REQUIRES REAL DEVICE TEST)")
+		add(CapRTSP, CapUnknown, "onvif GetStreamUri", "the recorder reports the stream URL path "+d.ONVIF.SampleStreamPath+"; playback not exercised (REQUIRES REAL DEVICE TEST)"+rtspFailure(soft))
 	case d.Services.RTSPOn:
-		add(CapRTSP, CapUnknown, "queryRTSPServer", fmt.Sprintf("RTSP server on port %d (%s auth); the URL format needs ONVIF or a real device test", d.Services.RTSPPort, d.Services.RTSPAuth))
+		add(CapRTSP, CapUnknown, "queryRTSPServer", fmt.Sprintf("RTSP server on port %d (%s auth); the URL format needs ONVIF or a real device test", d.Services.RTSPPort, d.Services.RTSPAuth)+rtspFailure(soft))
 	default:
 		add(CapRTSP, CapUnsupported, "queryRTSPServer", "the RTSP server is off")
 	}
@@ -259,6 +296,17 @@ func deriveCapabilities(d *Detection, soft map[string]error) []Capability {
 		claim(CapFaceMatch, d.SystemCaps.FaceMatch)
 	}
 	return out
+}
+
+// rtspFailure says why the RTSP check did not confirm anything, when it was tried and failed.
+func rtspFailure(soft map[string]error) string {
+	if err := soft[CapRTSP]; err != nil {
+		if class, ok := ClassOf(err); ok {
+			return "; the RTSP check failed: " + string(class)
+		}
+		return "; the RTSP check failed"
+	}
+	return ""
 }
 
 func has(list []string, v string) bool { return slices.Contains(list, v) }

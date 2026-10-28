@@ -15,7 +15,11 @@ import (
 const onvifOn = `<?xml version="1.0" encoding="UTF-8"?><response><status>success</status><content><enable>true</enable><switch>true</switch></content></response>`
 
 func detectInput(srv *nvmstest.Server, probe func(context.Context, provisionnvr.DetectInput) (*provisionnvr.OnvifFacts, error)) provisionnvr.DetectInput {
-	return provisionnvr.DetectInput{BaseURL: srv.URL, Username: testUser, Password: testPass, ProbeONVIF: probe}
+	return provisionnvr.DetectInput{BaseURL: srv.URL, Username: testUser, Password: testPass, ProbeONVIF: probe,
+		// No test dials a real RTSP port; the ones that care about RTSP replace this.
+		ProbeRTSP: func(context.Context, string, int, string, string, int, provisionnvr.Stream) (*provisionnvr.RTSPFacts, error) {
+			return nil, errors.New("rtsp is not available in this test")
+		}}
 }
 
 func capOf(t *testing.T, d *provisionnvr.Detection, name string) provisionnvr.Capability {
@@ -193,4 +197,62 @@ func TestDetectIsReadOnlyAndKeepsSecretsOut(t *testing.T) {
 			t.Fatalf("detection carries %q", secret)
 		}
 	}
+}
+
+func TestDetectConfirmsRTSPWhenTheRecorderAnswersDescribe(t *testing.T) {
+	srv := nvmstest.New(t, testUser, testPass)
+	in := detectInput(srv, nil)
+	var asked struct {
+		host    string
+		port    int
+		channel int
+		stream  provisionnvr.Stream
+	}
+	in.ProbeRTSP = func(_ context.Context, host string, port int, user, pass string, channel int, stream provisionnvr.Stream) (*provisionnvr.RTSPFacts, error) {
+		asked.host, asked.port, asked.channel, asked.stream = host, port, channel, stream
+		if user != testUser || pass != testPass {
+			t.Fatalf("RTSP probed with %q/%q, want the recorder's account", user, pass)
+		}
+		return &provisionnvr.RTSPFacts{Channel: channel, Stream: stream, Path: provisionnvr.RTSPPath(channel, stream), Codec: "H264"}, nil
+	}
+	d, err := provisionnvr.Detect(context.Background(), in)
+	if err != nil {
+		t.Fatal(err)
+	}
+	// The first channel of the fixture is {00000001-...}, which is channel 1; the port is the one the recorder reports.
+	if asked.channel != 1 || asked.stream != provisionnvr.StreamMain || asked.port != 554 || asked.host != "127.0.0.1" {
+		t.Fatalf("probe asked %+v", asked)
+	}
+	c := wantCap(t, d, provisionnvr.CapRTSP, provisionnvr.CapConfirmed)
+	if !strings.Contains(c.Detail, "H264") || !strings.Contains(c.Detail, "not wired yet") {
+		t.Fatalf("rtsp detail = %q", c.Detail)
+	}
+	if strings.Contains(fmt.Sprintf("%+v", d), testPass) {
+		t.Fatal("the detection carries the password")
+	}
+}
+
+func TestDetectDoesNotConfirmRTSPWhenTheCheckFails(t *testing.T) {
+	srv := nvmstest.New(t, testUser, testPass)
+	in := detectInput(srv, nil) // the stub fails
+	d, err := provisionnvr.Detect(context.Background(), in)
+	if err != nil {
+		t.Fatalf("a failed RTSP check must not fail the detection: %v", err)
+	}
+	wantCap(t, d, provisionnvr.CapRTSP, provisionnvr.CapUnknown)
+}
+
+func TestDetectSkipsRTSPWhenTheServerIsOff(t *testing.T) {
+	srv := nvmstest.New(t, testUser, testPass)
+	srv.Override["queryRTSPServer"] = `<response><status>success</status><content><rtspServerSwitch>false</rtspServerSwitch><rtspPort>554</rtspPort></content></response>`
+	in := detectInput(srv, nil)
+	in.ProbeRTSP = func(context.Context, string, int, string, string, int, provisionnvr.Stream) (*provisionnvr.RTSPFacts, error) {
+		t.Fatal("RTSP was probed although the recorder reports its RTSP server off")
+		return nil, nil
+	}
+	d, err := provisionnvr.Detect(context.Background(), in)
+	if err != nil {
+		t.Fatal(err)
+	}
+	wantCap(t, d, provisionnvr.CapRTSP, provisionnvr.CapUnsupported)
 }

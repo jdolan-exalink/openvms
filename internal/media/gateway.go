@@ -128,6 +128,8 @@ func (g *Gateway) fail(w http.ResponseWriter, r *http.Request, a authz.Actor, er
 		writeErr(w, http.StatusBadRequest, "bad_request", err.Error())
 	case errors.Is(err, errNoStream):
 		writeErr(w, http.StatusUnprocessableEntity, "no_stream", "the Frigate server has no go2rtc restream for this camera")
+	case errors.As(err, new(*inventory.UnsupportedKindError)):
+		writeErr(w, http.StatusConflict, "unsupported_for_server_kind", "this is not available for this kind of server")
 	case errors.Is(err, context.Canceled):
 	default:
 		g.Svc.Log.WarnContext(r.Context(), "media gateway", "path", r.URL.Path, "error", err)
@@ -1174,6 +1176,10 @@ func (g *Gateway) live(w http.ResponseWriter, r *http.Request) {
 		}
 		return
 	}
+	if code, msg, refused := liveKindRefusal(cam); refused {
+		reject(code, msg) // a recorder that is not Frigate has no go2rtc to dial
+		return
+	}
 	if code, msg, refused := liveSignalRefusal(cam); refused {
 		reject(code, msg) // Frigate gets no video from the camera: do not dial go2rtc for black frames
 		return
@@ -1343,6 +1349,16 @@ func (g *Gateway) live(w http.ResponseWriter, r *http.Request) {
 func liveSignalRefusal(cam Camera) (code, msg string, refused bool) {
 	if inventory.NoSignal(cam.Status, cam.FPS) {
 		return CodeCameraNoSignal, "the camera has no video signal at its Frigate server", true
+	}
+	return "", "", false
+}
+
+// liveKindRefusal refuses live view for a camera whose server is not a Frigate server. A Provision
+// recorder has no go2rtc restream to dial; saying so is better than a generic "server unavailable"
+// that the player would retry forever.
+func liveKindRefusal(cam Camera) (code, msg string, refused bool) {
+	if cam.Server.Kind != "" && cam.Server.Kind != inventory.KindFrigate {
+		return CodeVideoUnavailable, "live video from this kind of recorder is not available yet", true
 	}
 	return "", "", false
 }

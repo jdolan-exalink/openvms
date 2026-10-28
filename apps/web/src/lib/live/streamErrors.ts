@@ -10,6 +10,7 @@ export type StreamErrorCode =
   | "forbidden"
   | "codec_unsupported"
   | "server_error"
+  | "video_unavailable"
   // Client-side conditions that behave like gateway errors.
   | "handshake_rejected"
   | "mse_unsupported";
@@ -33,6 +34,8 @@ const ERRORS: Readonly<Record<StreamErrorCode, SessionError>> = {
   forbidden: { code: "forbidden", label: "Sin permiso", retryable: false },
   codec_unsupported: { code: "codec_unsupported", label: "Códec no soportado", retryable: false },
   server_error: { code: "server_error", label: "Error de stream", retryable: true },
+  // A recorder (not Frigate) whose video OpenVMS cannot play yet: retrying cannot help.
+  video_unavailable: { code: "video_unavailable", label: "El video de este NVR todavía no está disponible en OpenVMS", retryable: false },
   handshake_rejected: { code: "handshake_rejected", label: "La cámara no tiene una transmisión de video disponible.", retryable: false },
   mse_unsupported: { code: "mse_unsupported", label: "El navegador no soporta Media Source Extensions.", retryable: false },
 };

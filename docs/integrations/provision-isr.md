@@ -74,8 +74,9 @@ The authentication mode, the certificate switch and event alarm modes of Frigate
 | Channel online / motion / recording state | confirmed | real recorder |
 | Disk state, size, recording date range | confirmed | real recorder |
 | ONVIF services and 14 media profiles | confirmed | real recorder, after enabling ONVIF |
-| RTSP stream URL format | partial: the recorder reports `rtsp://host:554/chID=<n>&streamType=main\|sub&linkType=tcp`; playback not exercised | ONVIF `GetStreamUri` |
-| Live video in OpenVMS | unsupported yet | needs an RTSP-to-browser path outside Frigate |
+| RTSP server and stream URL | confirmed: `rtsp://host:554/chID=<n>&streamType=main\|sub&linkType=tcp` (Digest). A real `DESCRIBE` of all 14 streams (7 channels, main and sub) answered 200 with an SDP. Detect runs one `DESCRIBE` and shows the codec | RTSP `DESCRIBE`, ONVIF `GetStreamUri`, `ffprobe` |
+| Video codecs on the tested unit | main stream H.264 1920x1080 25 fps (channel 1 is H.265); **sub stream H.265** 704x576 6 fps on every channel | `DESCRIBE` and `ffprobe` |
+| Live video in OpenVMS | **not available yet**: the live viewer only knows Frigate's go2rtc. A recorder camera shows "El video de este NVR todavía no está disponible en OpenVMS" | needs a media path outside Frigate, see `ROADMAP271026.md` |
 | PTZ | unsupported on the tested unit (no profile has PTZ); not wired | ONVIF profiles |
 | Events (HTTP POST, ONVIF events) | unknown | `REQUIRES PAYLOAD SAMPLE` |
 | Analytics | unknown | `REQUIRES PAYLOAD SAMPLE` |
@@ -86,11 +87,19 @@ The authentication mode, the certificate switch and event alarm modes of Frigate
 The capability matrix on screen uses three states: **Confirmada** (seen working), **Sin verificar** (the recorder claims or advertises it,
 not tested) and **No disponible**. Only confirmed features are offered.
 
+## Channel numbers
+
+The recorder names channels three ways: a GUID (what OpenVMS stores as the camera's identity), the number the web client shows, and the number in RTSP and
+ONVIF (`chID=<n>`, `Profile_<n>_<stream>`). The GUID's first field carries the RTSP/ONVIF number in hexadecimal (`0000000A-...` is channel 10), so OpenVMS
+derives the number from the id. On the tested unit the ids 1, 7, 8, 9, A, B, C matched the ONVIF channels 1, 7, 8, 9, 10, 11, 12, and every one of them answered an RTSP
+`DESCRIBE`. It was not compared image by image, so it is `REQUIRES REAL DEVICE TEST` that each number shows the same camera on both sides. The numbers are not contiguous
+(channels 2 to 6 are unused slots), and the camera names ("Cámara IP 01" is channel 7) do not follow the numbers.
+
 ## Compatibility table
 
 | Model | Platform | Firmware | Web API | ONVIF | Channels and health | Video | PTZ | Events | Status |
 |---|---|---|---|---|---|---|---|---|---|
-| `NVR8-16400AN(1U)` (`TD-3116H2-B1`) | TVT NVMS-9000 | `1.4.7.61583B230726` | confirmed | confirmed | confirmed | unknown | unsupported on this unit | unknown | partial |
+| `NVR8-16400AN(1U)` (`TD-3116H2-B1`) | TVT NVMS-9000 | `1.4.7.61583B230726` | confirmed | confirmed | confirmed | stream starts confirmed (RTSP `DESCRIBE`), not played in OpenVMS yet | unsupported on this unit | unknown | partial |
 | Other Provision-ISR / Ossia models | NVMS-9000 family | - | unknown | unknown | unknown | unknown | unknown | unknown | unknown |
 
 Allowed states: `confirmed | partial | experimental | unsupported | unknown`. A model is added here only after it was read on a real unit.
