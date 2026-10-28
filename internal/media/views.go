@@ -371,6 +371,12 @@ func (s *Service) Recordings(ctx context.Context, actor authz.Actor, cameraID uu
 	if err != nil {
 		return nil, err
 	}
+	if cam.Server.Kind != "" && cam.Server.Kind != inventory.KindFrigate {
+		if s.NVR == nil {
+			return nil, &inventory.UnsupportedKindError{Kind: cam.Server.Kind}
+		}
+		return s.NVR.Recordings(ctx, cam, from, to)
+	}
 	a, err := s.Adapters.Get(ctx, cam.Server)
 	if err != nil {
 		return nil, &inventory.FrigateError{Err: err}

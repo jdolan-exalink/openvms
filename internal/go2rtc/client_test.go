@@ -55,6 +55,31 @@ func TestErrorsNeverCarryTheSource(t *testing.T) {
 	}
 }
 
+func TestDeleteRemovesTheStreamAndToleratesOneThatIsGone(t *testing.T) {
+	var gotMethod, gotSrc string
+	status := http.StatusOK
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		gotMethod, gotSrc = r.Method, r.URL.Query().Get("src")
+		w.WriteHeader(status)
+	}))
+	defer srv.Close()
+	c, _ := New(srv.URL)
+	if err := c.Delete(context.Background(), "nvr-1-rec-ab12"); err != nil || gotMethod != http.MethodDelete || gotSrc != "nvr-1-rec-ab12" {
+		t.Fatalf("Delete: %v, sent %s src=%q", err, gotMethod, gotSrc)
+	}
+	status = http.StatusNotFound
+	if err := c.Delete(context.Background(), "gone"); err != nil {
+		t.Fatalf("a stream that is already gone is not an error, got %v", err)
+	}
+	status = http.StatusInternalServerError
+	if err := c.Delete(context.Background(), "x"); !errors.Is(err, ErrUnavailable) {
+		t.Fatalf("a server error must be ErrUnavailable, got %v", err)
+	}
+	if err := c.Delete(context.Background(), "a b"); err == nil {
+		t.Fatal("an invalid name must be refused")
+	}
+}
+
 func TestPingAndWebSocketURL(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Path != "/api" {

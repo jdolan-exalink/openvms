@@ -61,6 +61,26 @@ func (c *Client) Put(ctx context.Context, name, src string) error {
 	return nil
 }
 
+// Delete removes a stream. A stream that is not there is not an error.
+func (c *Client) Delete(ctx context.Context, name string) error {
+	if !ValidName(name) {
+		return fmt.Errorf("go2rtc: invalid stream name")
+	}
+	req, err := http.NewRequestWithContext(ctx, http.MethodDelete, c.base.String()+"/api/streams?"+url.Values{"src": {name}}.Encode(), nil)
+	if err != nil {
+		return ErrUnavailable
+	}
+	resp, err := c.http.Do(req)
+	if err != nil {
+		return fmt.Errorf("%w: %s", ErrUnavailable, "the request failed")
+	}
+	_ = resp.Body.Close()
+	if resp.StatusCode/100 != 2 && resp.StatusCode != http.StatusNotFound {
+		return fmt.Errorf("%w: it answered %d", ErrUnavailable, resp.StatusCode)
+	}
+	return nil
+}
+
 // Ping checks that the API answers.
 func (c *Client) Ping(ctx context.Context) error {
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, c.base.String()+"/api", nil)
