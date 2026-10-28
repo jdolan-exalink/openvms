@@ -387,6 +387,16 @@ export const recordingsQuery = (cameraId: string, from: string, to: string) =>
     enabled: !!cameraId,
   });
 
+export const recordingDaysQuery = (cameraId: string, from: string, to: string, timezone: string) =>
+  queryOptions({
+    queryKey: ["recording-days", cameraId, from, to, timezone],
+    queryFn: async () =>
+      unwrap(await api.GET("/api/v1/cameras/{cameraId}/recording-days", { params: { path: { cameraId }, query: { from, to, timezone } } })).items,
+    enabled: !!cameraId,
+    staleTime: 5 * 60_000,
+    retry: false,
+  });
+
 export const usersQuery = queryOptions({
   queryKey: ["users"],
   queryFn: async () => unwrap(await api.GET("/api/v1/users")).items,

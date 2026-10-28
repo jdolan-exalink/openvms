@@ -110,6 +110,7 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("POST /api/restart", s.auth(s.restart))
 	mux.HandleFunc("PUT /api/config/set", s.auth(s.setConfig))
 	mux.HandleFunc("GET /exports/{file}", s.auth(s.exportFile))
+	mux.HandleFunc("GET /api/recordings/summary", s.auth(s.recordingsSummary))
 	mux.HandleFunc("GET /api/{camera}/{file}", s.auth(s.latest))
 	mux.HandleFunc("GET /clips/review/{file}", s.auth(s.thumb))
 	mux.HandleFunc("GET /clips/faces/{name}/{file}", s.auth(s.faceFile))

@@ -1,11 +1,14 @@
-import { ChevronsLeft, ChevronsRight, CircleHelp, Download, Pause, Play, SkipBack, SkipForward, StepBack, StepForward, X } from "lucide-react";
+import { ChevronsLeft, ChevronsRight, CircleHelp, Pause, Play, SkipBack, SkipForward, StepBack, StepForward } from "lucide-react";
 import { useEffect, useMemo, useState, useSyncExternalStore } from "react";
 import { DayCalendar } from "@/components/DayCalendar";
+import { useRecordingDays } from "@/lib/useRecordingDays";
 import { DayTimeline, type TimelineCamera, type TimelineEvent } from "@/components/DayTimeline";
 import { LiveExportModal } from "@/components/LiveExportModal";
+import { RangeExportBox } from "@/components/RangeExportBox";
+import { TimelineLegend } from "@/components/TimelineLegend";
 import { Button, Select } from "@/components/ui";
 import { fmtDateTime } from "@/lib/format";
-import { moveToDay, REC_LIVE_EDGE_S, REC_SPEEDS, stepEvent } from "@/lib/liveRec";
+import { moveToDay, REC_LIVE_EDGE_S, REC_NOW_BACK_S, REC_SPEEDS, stepEvent } from "@/lib/liveRec";
 import type { RecTransport } from "@/lib/useRecPlayback";
 
 const STEPS = [
@@ -21,13 +24,6 @@ function isTyping(target: EventTarget | null): boolean {
   if (!el?.tagName) return false;
   return el.isContentEditable || ["INPUT", "TEXTAREA", "SELECT"].includes(el.tagName) || !!el.closest("[role=dialog]");
 }
-
-const pad = (n: number) => String(n).padStart(2, "0");
-const clockTime = (t: number) => {
-  const d = new Date(t * 1000);
-  return `${pad(d.getHours())}:${pad(d.getMinutes())}:${pad(d.getSeconds())}`;
-};
-const durationLabel = (s: number) => (s < 60 ? `${Math.round(s)}s` : `${Math.floor(s / 60)}m ${Math.round(s % 60)}s`);
 
 /**
  * LiveRecDock is the transport of the Live REC mode: play/pause, speed, steps, event
@@ -56,6 +52,8 @@ export function LiveRecDock({
   const position = useSyncExternalStore(subscribePosition, getPosition);
   const eventTimes = useMemo(() => events.map((e) => e.time), [events]);
 
+  const recordingDays = useRecordingDays(selectedId ?? cameras[0]?.id, new Date(day * 1000));
+
   const [inTime, setInTime] = useState<number | undefined>();
   const [outTime, setOutTime] = useState<number | undefined>();
   const [exportOpen, setExportOpen] = useState(false);
@@ -73,12 +71,9 @@ export function LiveRecDock({
     setOutTime(undefined);
   };
 
-  const latestRecorded = useMemo(() => {
-    const ends = cameras.flatMap((c) => c.spans.map((s) => s.end));
-    return ends.length ? Math.max(...ends) : undefined;
-  }, [cameras]);
   const liveEdge = now - REC_LIVE_EDGE_S;
-  const goNow = () => seek(latestRecorded !== undefined && latestRecorded - 5 < liveEdge ? latestRecorded - 5 : liveEdge);
+  // "Ahora" goes to today, a quarter of an hour before the current time.
+  const goNow = () => seek(Math.min(now - REC_NOW_BACK_S, liveEdge));
   const step = (seconds: number) => seek(Math.min(position + seconds, liveEdge), { play: playing });
   const toEvent = (dir: 1 | -1) => {
     const t = stepEvent(eventTimes, position, dir);
@@ -139,63 +134,21 @@ export function LiveRecDock({
             </option>
           ))}
         </Select>
-        <Button onClick={goNow} title="Ir al último momento grabado">
+        <Button onClick={goNow} title="Ir a hoy, 15 minutos antes de la hora actual">
           Ahora
         </Button>
+        <DayCalendar value={new Date(day * 1000)} max={new Date(now * 1000)} marked={recordingDays.marked} onMonthChange={recordingDays.onMonthChange} onChange={(d) => seek(moveToDay(position, d, liveEdge), { play: playing })} />
 
-        {/* IN / OUT Range Selection Controls */}
-        <div className="inline-flex items-center gap-1 border-l border-line/60 pl-1.5 ml-0.5">
-          <Button
-            variant={inTime !== undefined ? "tonal" : "outlined"}
-            className="px-2 py-1 font-mono text-xs font-semibold"
-            aria-label="Marcar punto inicial IN"
-            title="Marcar punto inicial IN (tecla I)"
-            onClick={() => setInTime(position)}
-          >
-            IN
-          </Button>
-          <Button
-            variant={outTime !== undefined ? "tonal" : "outlined"}
-            className="px-2 py-1 font-mono text-xs font-semibold"
-            aria-label="Marcar punto final OUT"
-            title="Marcar punto final OUT (tecla O)"
-            onClick={() => setOutTime(position)}
-          >
-            OUT
-          </Button>
+        <RangeExportBox
+          start={inTime}
+          end={outTime}
+          selection={selection}
+          onMarkStart={() => setInTime(position)}
+          onMarkEnd={() => setOutTime(position)}
+          onClear={clearSelection}
+          onExport={() => setExportOpen(true)}
+        />
 
-          {(inTime !== undefined || outTime !== undefined) && (
-            <div className="inline-flex items-center gap-1 rounded-full bg-surface-2 px-2.5 py-1 text-xs font-mono border border-line/60">
-              {inTime !== undefined && <span>IN: {clockTime(inTime)}</span>}
-              {inTime !== undefined && outTime !== undefined && <span className="text-muted">·</span>}
-              {outTime !== undefined && <span>OUT: {clockTime(outTime)}</span>}
-              {selection && <span className="text-primary font-semibold">({durationLabel(selection.end - selection.start)})</span>}
-              <button
-                type="button"
-                onClick={clearSelection}
-                className="ml-1 rounded-full p-0.5 hover:bg-on-surface/10 text-muted hover:text-ink"
-                title="Limpiar selección (Esc)"
-                aria-label="Limpiar selección"
-              >
-                <X className="size-3" />
-              </button>
-            </div>
-          )}
-
-          {selection && (
-            <Button
-              variant="filled"
-              className="gap-1 px-2.5 py-1 text-xs"
-              title="Exportar tramo seleccionado"
-              onClick={() => setExportOpen(true)}
-            >
-              <Download className="size-3.5" />
-              Exportar
-            </Button>
-          )}
-        </div>
-
-        <DayCalendar value={new Date(day * 1000)} max={new Date(now * 1000)} onChange={(d) => seek(moveToDay(position, d, liveEdge), { play: playing })} />
         <span className="ml-auto font-mono text-xs" aria-live="off" data-testid="rec-clock">
           {fmtDateTime(new Date(position * 1000))}
         </span>
@@ -209,8 +162,8 @@ export function LiveRecDock({
               <li>Espacio: reproducir / pausar</li>
               <li>← / →: ±10 s</li>
               <li>Mayús + ← / →: ±1 min</li>
-              <li>I: marcar inicio (IN)</li>
-              <li>O: marcar fin (OUT)</li>
+              <li>I: marcar inicio</li>
+              <li>O: marcar fin</li>
               <li>Esc: limpiar selección de tramo</li>
               <li>Rueda sobre la línea: acercar / alejar</li>
               <li>Arrastrar: desplazar · Clic: ir a ese momento</li>
@@ -230,6 +183,7 @@ export function LiveRecDock({
         onSelectCamera={onSelectCamera}
         selection={selection}
       />
+      <TimelineLegend />
       {selection && (
         <LiveExportModal
           open={exportOpen}

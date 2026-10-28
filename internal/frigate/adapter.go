@@ -32,6 +32,9 @@ type Adapter interface {
 	StreamCodecs(ctx context.Context) (map[string]string, error)
 	// Recordings lists recorded segments of a camera between two unix times.
 	Recordings(ctx context.Context, camera string, after, before float64) ([]RecordingSegment, error)
+	// RecordingDays lists the days ("YYYY-MM-DD", in the named IANA time zone, oldest first) on which the
+	// server holds any recording. It covers every camera of the server and can take several seconds.
+	RecordingDays(ctx context.Context, timezone string) ([]string, error)
 	StartExport(ctx context.Context, camera string, start, end float64, name string) (string, error)
 	Export(ctx context.Context, id string) (ExportInfo, error)
 	// CameraFrigateConfig reads detection and analytics configuration from Frigate for one camera.

@@ -2,8 +2,10 @@ package api
 
 import (
 	"context"
+	"time"
 
 	"github.com/jdolan-exalink/openvms/internal/api/gen"
+	"github.com/jdolan-exalink/openvms/internal/inventory"
 	"github.com/jdolan-exalink/openvms/internal/media"
 )
 
@@ -142,6 +144,34 @@ func (h *Handlers) ListCameraRecordings(ctx context.Context, r gen.ListCameraRec
 		out.Items = append(out.Items, gen.RecordingSpan{StartTime: s.Start, EndTime: s.End, Motion: s.Motion, Objects: s.Objects})
 	}
 	return out, nil
+}
+
+func (h *Handlers) ListCameraRecordingDays(ctx context.Context, r gen.ListCameraRecordingDaysRequestObject) (gen.ListCameraRecordingDaysResponseObject, error) {
+	a, err := actor(ctx)
+	if err != nil {
+		return nil, err
+	}
+	loc, err := zoneFor(r.Params.Timezone)
+	if err != nil {
+		return nil, err
+	}
+	days, err := h.Media.RecordingDays(ctx, a, r.CameraId, r.Params.From, r.Params.To, loc)
+	if err != nil {
+		return nil, err
+	}
+	return gen.ListCameraRecordingDays200JSONResponse{Items: days}, nil
+}
+
+// zoneFor resolves the optional IANA time zone of a recording-days request; no name means UTC.
+func zoneFor(name *string) (*time.Location, error) {
+	if name == nil || *name == "" {
+		return time.UTC, nil
+	}
+	loc, err := time.LoadLocation(*name)
+	if err != nil {
+		return nil, &inventory.ValidationError{Msg: "the time zone is not a known IANA name"}
+	}
+	return loc, nil
 }
 
 func toExport(e media.Export) gen.Export {

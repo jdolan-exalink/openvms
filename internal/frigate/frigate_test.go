@@ -236,6 +236,25 @@ func TestRecordingsAndExports(t *testing.T) {
 	}
 }
 
+func TestRecordingDaysListsTheDaysTheServerHasVideoOldestFirst(t *testing.T) {
+	ts := startOpenMock(t)
+	ctx := context.Background()
+	a, err := Connect(ctx, ConnInfo{BaseURL: ts.URL, AuthMode: AuthNone})
+	if err != nil {
+		t.Fatal(err)
+	}
+	days, err := a.RecordingDays(ctx, "America/Argentina/Buenos_Aires")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(days) != 3 || days[0] >= days[1] || days[1] >= days[2] {
+		t.Fatalf("days = %v, want three dates, oldest first", days)
+	}
+	if want := time.Now().In(time.FixedZone("ART", -3*3600)).Format("2006-01-02"); days[2] != want {
+		t.Fatalf("last day = %s, want today in the requested zone (%s)", days[2], want)
+	}
+}
+
 func TestMediaURLPath(t *testing.T) {
 	if p, err := MediaURLPath("/media/frigate/clips/review/thumb-a-1.webp"); err != nil || p != "/clips/review/thumb-a-1.webp" {
 		t.Errorf("got %q %v", p, err)

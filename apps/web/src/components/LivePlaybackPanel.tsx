@@ -4,8 +4,10 @@ import { ChevronLeft, ChevronRight, X } from "lucide-react";
 import { useEffect, useState } from "react";
 import { useT } from "@/i18n";
 import { eventsQuery, recordingsQuery } from "@/api/queries";
+import { DayCalendar } from "@/components/DayCalendar";
 import { RecordingPlayer } from "@/components/RecordingPlayer";
 import { recorderMotionEvents } from "@/lib/recorderMotion";
+import { useRecordingDays } from "@/lib/useRecordingDays";
 import { useRecorderCameraIds } from "@/lib/useRecorderCameras";
 import { RecordingTimeline } from "@/components/RecordingTimeline";
 import { Button, ErrorNote, Field, TextInput } from "@/components/ui";
@@ -48,6 +50,7 @@ export function LivePlaybackPanel({
     enabled: !!cameraId,
   });
   const recorderIds = useRecorderCameraIds();
+  const recordingDays = useRecordingDays(cameraId, new Date(day * 1000));
   // A recorder has no analytics of its own: its motion detections are what the timeline can show.
   const dayEvents = [
     ...(events.data?.pages.flatMap((page) => page.items) ?? []),
@@ -73,10 +76,13 @@ export function LivePlaybackPanel({
         <Field label={t("live.day")}>
           <div className="flex items-center gap-1">
             <Button aria-label={t("live.previousDay")} onClick={() => setDay(day - DAY)}><ChevronLeft className="size-4" /></Button>
-            <TextInput
-              type="date"
-              value={toLocalInput(new Date(day * 1000)).slice(0, 10)}
-              onChange={(event) => event.target.value && setDay(startOfDay(new Date(`${event.target.value}T00:00`).getTime() / 1000))}
+            <DayCalendar
+              value={new Date(day * 1000)}
+              max={new Date(now * 1000)}
+              placement="below"
+              marked={recordingDays.marked}
+              onMonthChange={recordingDays.onMonthChange}
+              onChange={(d) => setDay(startOfDay(d.getTime() / 1000))}
             />
             <Button aria-label={t("live.nextDay")} onClick={() => setDay(Math.min(day + DAY, startOfDay(now)))}><ChevronRight className="size-4" /></Button>
           </div>

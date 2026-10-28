@@ -6,8 +6,10 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { api, unwrap } from "@/api/client";
 import { camerasQuery, eventsQuery, meQuery, recordingsQuery } from "@/api/queries";
 import { type HlsPlayerHandle } from "@/components/HlsPlayer";
+import { DayCalendar } from "@/components/DayCalendar";
 import { RecordingPlayer } from "@/components/RecordingPlayer";
 import { recorderMotionEvents } from "@/lib/recorderMotion";
+import { useRecordingDays } from "@/lib/useRecordingDays";
 import { useRecorderCameraIds } from "@/lib/useRecorderCameras";
 import { RecordingTimeline } from "@/components/RecordingTimeline";
 import { Button, ErrorNote, Field, IconButton, PageHeader, RemovableChip, Select, TextInput } from "@/components/ui";
@@ -88,6 +90,7 @@ export function Playback() {
     enabled: !!primaryCameraId,
   });
   const recorderIds = useRecorderCameraIds();
+  const recordingDays = useRecordingDays(primaryCameraId, new Date(day * 1000));
   // A recorder has no analytics of its own: its motion detections are what the timeline can show.
   const dayEvents = [
     ...(events.data?.pages.flatMap((p) => p.items) ?? []),
@@ -174,11 +177,13 @@ export function Playback() {
         <Field label={t("live.day")}>
           <div className="flex items-center gap-2">
             <IconButton variant="tonal" icon={ChevronLeft} aria-label={t("live.previousDay")} onClick={() => setDay(day - DAY)} />
-            <TextInput
-              type="date"
-              className="font-mono"
-              value={toLocalInput(new Date(day * 1000)).slice(0, 10)}
-              onChange={(e) => e.target.value && setDay(startOfDay(new Date(e.target.value + "T00:00").getTime() / 1000))}
+            <DayCalendar
+              value={new Date(day * 1000)}
+              max={new Date(now * 1000)}
+              placement="below"
+              marked={recordingDays.marked}
+              onMonthChange={recordingDays.onMonthChange}
+              onChange={(d) => setDay(startOfDay(d.getTime() / 1000))}
             />
             <IconButton variant="tonal" icon={ChevronRight} aria-label={t("live.nextDay")} onClick={() => setDay(Math.min(day + DAY, startOfDay(now)))} />
           </div>

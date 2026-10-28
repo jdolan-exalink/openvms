@@ -22,18 +22,25 @@ export function monthGrid(year: number, month: number): (Date | null)[] {
 
 /**
  * DayCalendar is a lightweight accessible month picker (button + popover grid). Days after
- * `max` are disabled; `marked` optionally highlights days known to have recordings.
+ * `max` are disabled; `marked` optionally puts a red dot on days known to have recordings.
  */
 export function DayCalendar({
   value,
   max,
   marked,
+  onMonthChange,
+  placement = "above",
   onChange,
 }: {
   value: Date;
   /** Latest selectable day (usually today). */
   max: Date;
+  /** Days known to have recordings get a red dot. */
   marked?: (day: Date) => boolean;
+  /** Called with the month the grid shows whenever it opens or moves, so the caller can load that month's marks. */
+  onMonthChange?: (year: number, month: number) => void;
+  /** Which side of the button the popover opens on. */
+  placement?: "above" | "below";
   onChange: (day: Date) => void;
 }) {
   const [open, setOpen] = useState(false);
@@ -54,6 +61,10 @@ export function DayCalendar({
       document.removeEventListener("keydown", onKey);
     };
   }, [open]);
+
+  useEffect(() => {
+    if (open) onMonthChange?.(cursor.year, cursor.month);
+  }, [open, cursor.year, cursor.month, onMonthChange]);
 
   const shift = (delta: number) =>
     setCursor((c) => {
@@ -77,7 +88,7 @@ export function DayCalendar({
         <CalendarDays className="size-4" aria-hidden /> {label}
       </Button>
       {open && (
-        <div role="dialog" aria-label="Calendario" className="absolute bottom-full left-0 z-30 mb-1 w-64 rounded-lg border border-line bg-surface p-2 shadow-lg">
+        <div role="dialog" aria-label="Calendario" className={cn("absolute left-0 z-30 w-64 rounded-lg border border-line bg-surface p-2 shadow-lg", placement === "above" ? "bottom-full mb-1" : "top-full mt-1")}>
           <div className="mb-1 flex items-center justify-between">
             <Button aria-label="Mes anterior" className="px-2 py-1" onClick={() => shift(-1)}>
               <ChevronLeft className="size-4" aria-hidden />
@@ -102,20 +113,20 @@ export function DayCalendar({
                   type="button"
                   role="gridcell"
                   aria-selected={sameDay(cell, value)}
-                  aria-label={cell.toLocaleDateString("es", { day: "numeric", month: "long", year: "numeric" })}
+                  aria-label={cell.toLocaleDateString("es", { day: "numeric", month: "long", year: "numeric" }) + (marked?.(cell) ? ", con grabaciones" : "")}
                   disabled={cell > limit}
                   onClick={() => {
                     onChange(cell);
                     setOpen(false);
                   }}
                   className={cn(
-                    "rounded py-1 hover:bg-raised focus-visible:outline-2 focus-visible:outline-accent disabled:cursor-not-allowed disabled:opacity-30",
+                    "relative rounded py-1 hover:bg-raised focus-visible:outline-2 focus-visible:outline-accent disabled:cursor-not-allowed disabled:opacity-30",
                     sameDay(cell, value) && "bg-accent text-bg hover:bg-accent",
                     !sameDay(cell, value) && sameDay(cell, limit) && "border border-accent/50",
-                    !sameDay(cell, value) && marked?.(cell) && "font-semibold text-accent",
                   )}
                 >
                   {cell.getDate()}
+                  {marked?.(cell) && <span data-testid="recording-dot" aria-hidden className="absolute bottom-0.5 left-1/2 size-1 -translate-x-1/2 rounded-full bg-red-500" />}
                 </button>
               ) : (
                 <span key={i} role="gridcell" aria-hidden />
