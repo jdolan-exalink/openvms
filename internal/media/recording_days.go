@@ -43,10 +43,14 @@ func (s *Service) RecordingDays(ctx context.Context, actor authz.Actor, cameraID
 			return nil, &inventory.UnsupportedKindError{Kind: cam.Server.Kind}
 		}
 		key := "nvr|" + cam.ID.String() + "|" + loc.String() + "|" + from.UTC().Format(time.RFC3339) + "|" + to.UTC().Format(time.RFC3339)
-		return s.cachedDays(key, func() ([]string, error) { return s.nvrDays(ctx, cam, from, to, loc) })
+		all, err = s.cachedDays(ctx, key, func() ([]string, error) { return s.nvrDays(ctx, cam, from, to, loc) })
+		if err != nil {
+			return nil, err
+		}
+		return daysWithin(all, from, to, loc), nil
 	}
 	key := "frigate|" + cam.Server.ID.String() + "|" + loc.String()
-	all, err = s.cachedDays(key, func() ([]string, error) {
+	all, err = s.cachedDays(ctx, key, func() ([]string, error) {
 		a, err := s.Adapters.Get(ctx, cam.Server)
 		if err != nil {
 			return nil, &inventory.FrigateError{Err: err}
@@ -60,6 +64,12 @@ func (s *Service) RecordingDays(ctx context.Context, actor authz.Actor, cameraID
 	if err != nil {
 		return nil, err
 	}
+	return daysWithin(all, from, to, loc), nil
+}
+
+// daysWithin keeps the days of the list that fall between the local dates of from and to, so a recorder and a
+// Frigate server answer for exactly the window that was asked.
+func daysWithin(all []string, from, to time.Time, loc *time.Location) []string {
 	first, last := from.In(loc).Format("2006-01-02"), to.In(loc).Format("2006-01-02")
 	out := make([]string, 0, len(all))
 	for _, d := range all {
@@ -67,7 +77,7 @@ func (s *Service) RecordingDays(ctx context.Context, actor authz.Actor, cameraID
 			out = append(out, d)
 		}
 	}
-	return out, nil
+	return out
 }
 
 // nvrDays reads the record log in one-week pieces (a month of motion segments is thousands of entries).
@@ -85,7 +95,8 @@ func (s *Service) nvrDays(ctx context.Context, cam Camera, from, to time.Time, l
 		}
 		for _, sp := range spans {
 			seen[sp.Start.In(loc).Format("2006-01-02")] = true
-			seen[sp.End.In(loc).Format("2006-01-02")] = true
+			// A stretch that ends exactly at midnight has no video on the day that starts there.
+			seen[sp.End.Add(-time.Nanosecond).In(loc).Format("2006-01-02")] = true
 		}
 	}
 	out := make([]string, 0, len(seen))
@@ -96,22 +107,73 @@ func (s *Service) nvrDays(ctx context.Context, cam Camera, from, to time.Time, l
 	return out, nil
 }
 
-func (s *Service) cachedDays(key string, load func() ([]string, error)) ([]string, error) {
+// maxRecordingDaysEntries bounds the cache: a caller may vary the window freely, so old entries are dropped.
+const maxRecordingDaysEntries = 256
+
+// recordingDaysFlight is one load in progress; callers that ask for the same key meanwhile wait for it.
+type recordingDaysFlight struct {
+	done chan struct{}
+	days []string
+	err  error
+}
+
+// cachedDays returns the days for key from the cache, or loads them. Concurrent loads of one key share a single
+// call (Frigate takes seconds to answer), a failure is not remembered, and expired or surplus entries are dropped.
+func (s *Service) cachedDays(ctx context.Context, key string, load func() ([]string, error)) ([]string, error) {
 	s.daysMu.Lock()
 	if e, ok := s.days[key]; ok && time.Now().Before(e.expires) {
 		s.daysMu.Unlock()
 		return e.days, nil
 	}
-	s.daysMu.Unlock()
-	days, err := load()
-	if err != nil {
-		return nil, err
+	if f, ok := s.daysFlights[key]; ok {
+		s.daysMu.Unlock()
+		select {
+		case <-f.done:
+			return f.days, f.err
+		case <-ctx.Done():
+			return nil, ctx.Err()
+		}
 	}
+	f := &recordingDaysFlight{done: make(chan struct{})}
+	if s.daysFlights == nil {
+		s.daysFlights = map[string]*recordingDaysFlight{}
+	}
+	s.daysFlights[key] = f
+	s.daysMu.Unlock()
+
+	f.days, f.err = load()
+
 	s.daysMu.Lock()
-	if s.days == nil {
-		s.days = map[string]recordingDaysEntry{}
+	delete(s.daysFlights, key)
+	if f.err == nil {
+		if s.days == nil {
+			s.days = map[string]recordingDaysEntry{}
+		}
+		s.evictRecordingDays()
+		s.days[key] = recordingDaysEntry{days: f.days, expires: time.Now().Add(recordingDaysTTL)}
 	}
-	s.days[key] = recordingDaysEntry{days: days, expires: time.Now().Add(recordingDaysTTL)}
 	s.daysMu.Unlock()
-	return days, nil
+	close(f.done)
+	return f.days, f.err
+}
+
+// evictRecordingDays drops expired entries and, when the cache is still full, the ones that expire first.
+// The caller holds daysMu.
+func (s *Service) evictRecordingDays() {
+	now := time.Now()
+	for k, e := range s.days {
+		if !now.Before(e.expires) {
+			delete(s.days, k)
+		}
+	}
+	for len(s.days) >= maxRecordingDaysEntries {
+		var oldest string
+		var at time.Time
+		for k, e := range s.days {
+			if oldest == "" || e.expires.Before(at) {
+				oldest, at = k, e.expires
+			}
+		}
+		delete(s.days, oldest)
+	}
 }

@@ -151,19 +151,27 @@ func (h *Handlers) ListCameraRecordingDays(ctx context.Context, r gen.ListCamera
 	if err != nil {
 		return nil, err
 	}
-	loc := time.UTC
-	if r.Params.Timezone != nil && *r.Params.Timezone != "" {
-		l, err := time.LoadLocation(*r.Params.Timezone)
-		if err != nil {
-			return nil, &inventory.ValidationError{Msg: "the time zone is not a known IANA name"}
-		}
-		loc = l
+	loc, err := zoneFor(r.Params.Timezone)
+	if err != nil {
+		return nil, err
 	}
 	days, err := h.Media.RecordingDays(ctx, a, r.CameraId, r.Params.From, r.Params.To, loc)
 	if err != nil {
 		return nil, err
 	}
 	return gen.ListCameraRecordingDays200JSONResponse{Items: days}, nil
+}
+
+// zoneFor resolves the optional IANA time zone of a recording-days request; no name means UTC.
+func zoneFor(name *string) (*time.Location, error) {
+	if name == nil || *name == "" {
+		return time.UTC, nil
+	}
+	loc, err := time.LoadLocation(*name)
+	if err != nil {
+		return nil, &inventory.ValidationError{Msg: "the time zone is not a known IANA name"}
+	}
+	return loc, nil
 }
 
 func toExport(e media.Export) gen.Export {
