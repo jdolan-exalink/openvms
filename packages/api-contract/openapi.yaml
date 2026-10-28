@@ -4190,6 +4190,37 @@ paths:
         "403": { $ref: "#/components/responses/Forbidden" }
         "404": { $ref: "#/components/responses/NotFound" }
         "502": { $ref: "#/components/responses/FrigateUnreachable" }
+  /api/v1/cameras/{cameraId}/recording-days:
+    parameters:
+      - { name: cameraId, in: path, required: true, schema: { type: string, format: uuid } }
+    get:
+      tags: [playback]
+      operationId: listCameraRecordingDays
+      summary: Days with recordings on the camera's server or recorder (recordings.seek)
+      description: |
+        For the day picker. A Frigate server answers for all its cameras; a Provision-ISR recorder answers for
+        the camera itself. Days are dates in the given time zone. The answer is cached for ten minutes.
+      parameters:
+        - { name: from, in: query, required: true, schema: { type: string, format: date-time } }
+        - { name: to, in: query, required: true, schema: { type: string, format: date-time }, description: At most 62 days after from. }
+        - { name: timezone, in: query, required: false, schema: { type: string }, description: IANA time zone name the days are counted in (default UTC). }
+      responses:
+        "200":
+          description: Days, oldest first
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [items]
+                properties:
+                  items:
+                    type: array
+                    items: { type: string, pattern: "^\\d{4}-\\d{2}-\\d{2}$", example: "2026-10-28" }
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { $ref: "#/components/responses/NotFound" }
+        "502": { $ref: "#/components/responses/FrigateUnreachable" }
   /api/v1/exports:
     get:
       tags: [playback]

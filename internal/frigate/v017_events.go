@@ -8,8 +8,10 @@ import (
 	"io"
 	"net/http"
 	"net/url"
+	"sort"
 	"strconv"
 	"strings"
+	"time"
 )
 
 func (a *v017) Media() Media { return a.c }
@@ -154,6 +156,27 @@ func (a *v017) Recordings(ctx context.Context, camera string, after, before floa
 		return nil, err
 	}
 	return mergeSegments(raw), nil
+}
+
+// RecordingDays reads GET /api/recordings/summary, which answers {"YYYY-MM-DD": true, ...} for the days
+// that have recordings.
+func (a *v017) RecordingDays(ctx context.Context, timezone string) ([]string, error) {
+	params := url.Values{}
+	if timezone != "" {
+		params.Set("timezone", timezone)
+	}
+	var raw map[string]bool
+	if err := a.c.getJSON(ctx, "/api/recordings/summary", params, &raw); err != nil {
+		return nil, err
+	}
+	days := make([]string, 0, len(raw))
+	for d, has := range raw {
+		if _, err := time.Parse("2006-01-02", d); err == nil && has {
+			days = append(days, d)
+		}
+	}
+	sort.Strings(days)
+	return days, nil
 }
 
 // mergeSegments joins adjacent recording chunks (Frigate stores ~10 s files) into

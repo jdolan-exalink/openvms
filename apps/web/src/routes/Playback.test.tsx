@@ -54,9 +54,11 @@ describe("Playback", () => {
       await vi.advanceTimersByTimeAsync(1_000);
     });
     screen.getByText("Grabaciones");
-    const dateInput = document.querySelector<HTMLInputElement>('input[type="date"]');
+    // The day picker is a button that names the day it shows.
+    const dayLabel = (d: Date) => d.toLocaleDateString("es", { weekday: "short", day: "numeric", month: "short", year: "numeric" });
+    const shownDay = () => screen.getByRole("button", { name: /^Elegir día/ }).getAttribute("aria-label");
     const instantInput = document.querySelector<HTMLInputElement>('input[type="datetime-local"]');
-    expect(dateInput?.value).toBe("2025-06-15");
+    expect(shownDay()).toContain(dayLabel(new Date(2025, 5, 15)));
     expect(instantInput?.value).toBe("2025-06-15T00:00");
 
     await act(async () => {
@@ -65,7 +67,7 @@ describe("Playback", () => {
     await act(async () => {
       screen.getByRole("button", { name: "Día siguiente" }).click();
     });
-    expect(dateInput?.value).toBe("2025-06-16");
+    expect(shownDay()).toContain(dayLabel(new Date(2025, 5, 16)));
 
     unmount();
     const clockIntervalIndex = setIntervalSpy.mock.calls.findIndex((call) => call[1] === 30_000);
@@ -120,7 +122,9 @@ describe("Playback", () => {
 
     await screen.findByText("Grabaciones");
     await waitFor(() => {
-      expect(document.querySelector<HTMLInputElement>('input[type="date"]')?.value).toBe(expectedDate);
+      expect(screen.getByRole("button", { name: /^Elegir día/ }).getAttribute("aria-label")).toContain(
+        mountedAt.toLocaleDateString("es", { weekday: "short", day: "numeric", month: "short", year: "numeric" }),
+      );
       expect(document.querySelector<HTMLInputElement>('input[type="datetime-local"]')?.value).toBe(expectedInstant);
     });
   });

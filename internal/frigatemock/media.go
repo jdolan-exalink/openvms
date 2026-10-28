@@ -185,6 +185,23 @@ func (s *Server) recordings(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, out)
 }
 
+// recordingsSummary answers like Frigate: the days with recordings (the last three, as the mock records
+// continuously), keyed by date in the requested time zone.
+func (s *Server) recordingsSummary(w http.ResponseWriter, r *http.Request) {
+	loc := time.UTC
+	if tz := r.URL.Query().Get("timezone"); tz != "" {
+		if l, err := time.LoadLocation(tz); err == nil {
+			loc = l
+		}
+	}
+	out := map[string]bool{}
+	now := time.Now().In(loc)
+	for i := 0; i < 3; i++ {
+		out[now.AddDate(0, 0, -i).Format("2006-01-02")] = true
+	}
+	writeJSON(w, out)
+}
+
 func (s *Server) hasCamera(name string) bool {
 	for _, c := range s.Cameras {
 		if c.Name == name {

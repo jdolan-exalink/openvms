@@ -1,6 +1,7 @@
 import { ChevronsLeft, ChevronsRight, CircleHelp, Download, Pause, Play, SkipBack, SkipForward, StepBack, StepForward, X } from "lucide-react";
 import { useEffect, useMemo, useState, useSyncExternalStore } from "react";
 import { DayCalendar } from "@/components/DayCalendar";
+import { useRecordingDays } from "@/lib/useRecordingDays";
 import { DayTimeline, type TimelineCamera, type TimelineEvent } from "@/components/DayTimeline";
 import { LiveExportModal } from "@/components/LiveExportModal";
 import { Button, Select } from "@/components/ui";
@@ -55,6 +56,8 @@ export function LiveRecDock({
   const { seek, play, pause, playing, speed, setSpeed, day, getPosition, subscribePosition } = transport;
   const position = useSyncExternalStore(subscribePosition, getPosition);
   const eventTimes = useMemo(() => events.map((e) => e.time), [events]);
+
+  const recordingDays = useRecordingDays(selectedId ?? cameras[0]?.id, new Date(day * 1000));
 
   const [inTime, setInTime] = useState<number | undefined>();
   const [outTime, setOutTime] = useState<number | undefined>();
@@ -195,7 +198,7 @@ export function LiveRecDock({
           )}
         </div>
 
-        <DayCalendar value={new Date(day * 1000)} max={new Date(now * 1000)} onChange={(d) => seek(moveToDay(position, d, liveEdge), { play: playing })} />
+        <DayCalendar value={new Date(day * 1000)} max={new Date(now * 1000)} marked={recordingDays.marked} onMonthChange={recordingDays.onMonthChange} onChange={(d) => seek(moveToDay(position, d, liveEdge), { play: playing })} />
         <span className="ml-auto font-mono text-xs" aria-live="off" data-testid="rec-clock">
           {fmtDateTime(new Date(position * 1000))}
         </span>

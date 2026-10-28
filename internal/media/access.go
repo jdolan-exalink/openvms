@@ -29,6 +29,9 @@ type Service struct {
 
 	mu    sync.Mutex
 	cache map[cacheKey]cacheEntry
+
+	daysMu sync.Mutex
+	days   map[string]recordingDaysEntry
 }
 
 // Media requests arrive in bursts (an HLS player asks for a segment every few seconds per

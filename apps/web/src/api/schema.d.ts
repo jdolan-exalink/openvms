@@ -3347,6 +3347,29 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/cameras/{cameraId}/recording-days": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                cameraId: string;
+            };
+            cookie?: never;
+        };
+        /**
+         * Days with recordings on the camera's server or recorder (recordings.seek)
+         * @description For the day picker. A Frigate server answers for all its cameras; a Provision-ISR recorder answers for
+         *     the camera itself. Days are dates in the given time zone. The answer is cached for ten minutes.
+         */
+        get: operations["listCameraRecordingDays"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/exports": {
         parameters: {
             query?: never;
@@ -13872,6 +13895,41 @@ export interface operations {
                 content: {
                     "application/json": {
                         items: components["schemas"]["RecordingSpan"][];
+                    };
+                };
+            };
+            400: components["responses"]["BadRequest"];
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+            502: components["responses"]["FrigateUnreachable"];
+        };
+    };
+    listCameraRecordingDays: {
+        parameters: {
+            query: {
+                from: string;
+                /** @description At most 62 days after from. */
+                to: string;
+                /** @description IANA time zone name the days are counted in (default UTC). */
+                timezone?: string;
+            };
+            header?: never;
+            path: {
+                cameraId: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Days, oldest first */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        items: string[];
                     };
                 };
             };
