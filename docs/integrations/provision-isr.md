@@ -76,7 +76,7 @@ The authentication mode, the certificate switch and event alarm modes of Frigate
 | ONVIF services and 14 media profiles | confirmed | real recorder, after enabling ONVIF |
 | RTSP server and stream URL | confirmed: `rtsp://host:554/chID=<n>&streamType=main\|sub&linkType=tcp` (Digest). A real `DESCRIBE` of all 14 streams (7 channels, main and sub) answered 200 with an SDP. Detect runs one `DESCRIBE` and shows the codec | RTSP `DESCRIBE`, ONVIF `GetStreamUri`, `ffprobe` |
 | Video codecs on the tested unit | main stream H.264 1920x1080 25 fps (channel 1 is H.265); **sub stream H.265** 704x576 6 fps on every channel | `DESCRIBE` and `ffprobe` |
-| Live video in OpenVMS | **not available yet**: the live viewer only knows Frigate's go2rtc. A recorder camera shows "El video de este NVR todavía no está disponible en OpenVMS" | needs a media path outside Frigate, see `ROADMAP271026.md` |
+| Live video in OpenVMS | **confirmed** through the `go2rtc` container: the live viewer plays a recorder camera (main stream copied, H.265 converted to H.264). First picture after about 4 to 5 seconds. Without the container the camera shows "El video de este NVR todavía no está disponible en OpenVMS" | gateway integration tests, and a real run through the Compose container against the unit |
 | PTZ | unsupported on the tested unit (no profile has PTZ); not wired | ONVIF profiles |
 | Events (HTTP POST, ONVIF events) | unknown | `REQUIRES PAYLOAD SAMPLE` |
 | Analytics | unknown | `REQUIRES PAYLOAD SAMPLE` |
@@ -86,6 +86,30 @@ The authentication mode, the certificate switch and event alarm modes of Frigate
 
 The capability matrix on screen uses three states: **Confirmada** (seen working), **Sin verificar** (the recorder claims or advertises it,
 not tested) and **No disponible**. Only confirmed features are offered.
+
+## Live video
+
+The live viewer plays the cameras of a recorder through a `go2rtc` container that is part of the Compose stack.
+
+- **How it works.** When a viewer opens a recorder camera, the API reads the stored account, asks the recorder's RTSP server once for the codec (cached for 10 minutes),
+  registers the stream in go2rtc and proxies go2rtc's MSE websocket to the browser, which is the same protocol and player as for Frigate cameras. The browser never
+  receives the recorder's address or password.
+- **Codecs.** An H.264 stream is copied without conversion. Anything else (the sub streams of the tested unit are H.265) is converted to H.264, because not every browser
+  plays H.265 through Media Source Extensions. The conversion costs CPU only while someone is watching; with nobody watching go2rtc runs no ffmpeg and no connection to the recorder is open.
+- **Quality.** The grid uses the sub stream; the single view uses the main stream.
+- **Setting.** `GO2RTC_URL` (default `http://go2rtc:1984` in `docker-compose.yml`). Empty turns recorder video off and the viewer says it is not available.
+- **Limits.** Live only: no playback of recordings (that needs the native SDK, see `ROADMAP271026.md`), no audio, no PTZ. The camera posters shown while a tile connects are not
+  available for recorder cameras yet.
+
+### The go2rtc container
+
+- Image `alexxit/go2rtc` pinned by digest (version 1.9.9); update it deliberately.
+- Runs as user 65532 with a read-only root file system, no Linux capabilities, `no-new-privileges`, 1 GiB of memory, 2 CPUs and a process limit.
+- **No published port.** It sits on the `media` network, which only the API shares. go2rtc's API has no authentication and can list the stream sources, which carry the recorder's
+  credentials, so nothing else may be attached to that network.
+- The stream sources live in memory: go2rtc saves them to its config file, which is a tmpfs seeded from `deploy/go2rtc/go2rtc.yaml`, so they vanish when the container restarts
+  and the API registers them again on the next view.
+- Its RTSP and WebRTC servers are not exposed: RTSP listens on the container's loopback (go2rtc needs the module as a client) and WebRTC is off.
 
 ## Channel numbers
 
@@ -99,7 +123,7 @@ derives the number from the id. On the tested unit the ids 1, 7, 8, 9, A, B, C m
 
 | Model | Platform | Firmware | Web API | ONVIF | Channels and health | Video | PTZ | Events | Status |
 |---|---|---|---|---|---|---|---|---|---|
-| `NVR8-16400AN(1U)` (`TD-3116H2-B1`) | TVT NVMS-9000 | `1.4.7.61583B230726` | confirmed | confirmed | confirmed | stream starts confirmed (RTSP `DESCRIBE`), not played in OpenVMS yet | unsupported on this unit | unknown | partial |
+| `NVR8-16400AN(1U)` (`TD-3116H2-B1`) | TVT NVMS-9000 | `1.4.7.61583B230726` | confirmed | confirmed | confirmed | live confirmed (go2rtc); recordings not | unsupported on this unit | unknown | partial |
 | Other Provision-ISR / Ossia models | NVMS-9000 family | - | unknown | unknown | unknown | unknown | unknown | unknown | unknown |
 
 Allowed states: `confirmed | partial | experimental | unsupported | unknown`. A model is added here only after it was read on a real unit.
@@ -138,7 +162,8 @@ for a recorder and never contact it.
 | `nvr_locked` | Too many failed logins; wait before retrying |
 | `nvr_unsupported` | The address answers, but it is not an NVMS-9000 recorder, or it is not activated |
 | ONVIF shows "No disponible" | The ONVIF switch is off or was not saved on the recorder |
-| `rtsp` shows "Sin verificar" | Expected until video playback is implemented |
+| The camera says the video is not available | The `go2rtc` container is not running or `GO2RTC_URL` is empty; check `docker compose ps go2rtc` |
+| The camera says the recorder rejected the credentials | The stored password is outdated: edit the server's connection tab |
 
 ## Next phases
 

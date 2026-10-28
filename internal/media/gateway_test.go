@@ -47,12 +47,15 @@ func TestLiveStreamNoRestreamFailsFast(t *testing.T) {
 func TestLiveKindRefusal(t *testing.T) {
 	var recorder Camera
 	recorder.Server.Kind = "provision_nvr"
-	code, msg, refused := liveKindRefusal(recorder)
+	code, msg, refused := liveKindRefusal(recorder, false)
 	if !refused || code != CodeVideoUnavailable || msg == "" {
-		t.Fatalf("recorder camera: got (%q, %q, %v), want a video_unavailable refusal", code, msg, refused)
+		t.Fatalf("recorder camera without a video gateway: got (%q, %q, %v), want a video_unavailable refusal", code, msg, refused)
+	}
+	if _, _, refused := liveKindRefusal(recorder, true); refused {
+		t.Error("a recorder camera must not be refused when the video gateway is configured")
 	}
 	for name, cam := range map[string]Camera{"frigate": {Server: serverOfKind("frigate")}, "kind not set (partial row)": {}} {
-		if _, _, refused := liveKindRefusal(cam); refused {
+		if _, _, refused := liveKindRefusal(cam, false); refused {
 			t.Errorf("%s must not be refused", name)
 		}
 	}
