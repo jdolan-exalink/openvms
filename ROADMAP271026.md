@@ -47,6 +47,26 @@ Verified: Go unit tests, the full integration suites of `internal/inventory`, `i
 
 Answered since: editing a recorder's connection (address, port, HTTPS, account, password) is supported on branch `feat/provision-nvr-edit` (see `docs/integrations/provision-isr.md`).
 
+## Live video from the recorder (Phase 1b): what the test showed and what is proposed
+
+**What the owner saw.** Dragging a recorder camera into the live viewer shows "Servidor no disponible". The cause is not the recorder: the live viewer dials Frigate's go2rtc
+and a recorder has none. It now says "El video de este NVR todavía no está disponible en OpenVMS" and stops retrying.
+
+**What was verified on the real unit (read-only).** RTSP works with Digest: all 14 streams (7 channels, main and sub) answered `DESCRIBE`. Main streams are H.264 1920x1080 at 25 fps
+(channel 1 is H.265); **sub streams are H.265 704x576 at 6 fps**. H.265 does not play in every browser through Media Source Extensions, so the grid (sub) needs a transcode or must use main.
+
+**Proposal (needs the owner's go-ahead: it adds a container to the deployment).** Add a `go2rtc` service to the Compose stack and let the live gateway use it for recorder cameras the way
+it uses Frigate's go2rtc today:
+1. The gateway builds the RTSP URL on the server (credentials unsealed from the stored password, never sent to the browser), registers the stream in go2rtc through its HTTP API and
+   dials the same MSE websocket it already proxies. The browser protocol and the player do not change.
+2. H.265 is transcoded to H.264 by go2rtc's ffmpeg source when the browser cannot play it; main stays untouched when it is already H.264.
+3. go2rtc listens only on the internal network, runs as a non-root user and its image is pinned by digest. The password lives in go2rtc's memory, so its API must not be reachable from outside.
+4. Cost to decide: CPU for the H.265 to H.264 transcode of the grid (6 fps at 704x576 is light), one more container, and a pinned third-party image.
+
+Alternative: put ffmpeg in the API image (distroless today). It has no new container but a larger blast radius for the process that holds every session, so it is not recommended.
+
+Not part of this proposal: recorded video (playback), which depends on Phase 4, and audio.
+
 ### Later phases (blocked on evidence)
 | Phase | Item | Blocker |
 |---|---|---|
