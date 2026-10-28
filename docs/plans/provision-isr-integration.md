@@ -252,3 +252,17 @@ when `queryOnvifCfg` reports the switch on, keeps every ONVIF address on the rec
 `playback`, `events` and `analytics` from it. A capability is `confirmed` only when it was exercised: `rtsp` stays `unknown` until a stream is
 played, and `playback`, `events` and `analytics` stay `unknown` ("advertised, REQUIRES REAL DEVICE TEST"). The capability table in section 3.2
 is superseded by the matrix `Detect` returns.
+
+## Update 2026-10-28: registration, health and removal (T4)
+
+- **Create:** `POST /api/v1/servers/provision-nvr` (site, name, host, port, https, username, password, optional `channel_ids`). It logs in once,
+  reads the recorder, seals the password with the same sealer and row-bound AAD as Frigate servers, and stores the server with `kind =
+  provision_nvr`. The Provision capability matrix and identity live in the `capabilities` column under the key `provision_nvr`, so the Frigate
+  flags in that column stay off; `Server.provision` returns them.
+- **Sync:** refreshes that matrix and the cameras already imported, and marks cameras whose channel disappeared. It does not add channels.
+- **Health:** the Frigate poller no longer lists recorders. A separate path polls `queryChlStatus` and the disks with one cached session per
+  recorder: channel online means camera `online`; an offline channel degrades the server (`cameras_offline`, named by display name); a disk the
+  recorder reports `bad` degrades it (`recorder_disk_bad`). A rejected password is reported once and not retried.
+- **Guards:** `connInfo`, `Adapters.Get` and `frigateAdapter` refuse a non-Frigate kind (409 `unsupported_for_server_kind`), so no Frigate
+  operation can send a Frigate request to a recorder.
+- **Removal:** deleting a channel camera forgets it in OpenVMS only; the recorder is not touched.
