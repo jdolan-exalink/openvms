@@ -10,14 +10,15 @@ COPY apps/web ./apps/web
 RUN NODE_OPTIONS=--max-old-space-size=1024 pnpm --filter @openvms/web build
 
 # Caddy is rebuilt here because the official image is built with an older Go patch release, and the image
-# scan fails the build on HIGH findings that have a fix (standard library and golang.org/x/net). Same
-# module set as the official image (no plugins); x/net is raised to the fixed release.
+# scan fails the build on HIGH findings that have a fix (standard library, golang.org/x/net and
+# go-jose). Same module set as the official image (no plugins); x/net and go-jose are raised to the
+# fixed releases (go-jose 4.1.6 fixes CVE-2026-116587, a DoS when parsing JWKs with RSA keys).
 FROM golang:1.26-alpine AS caddy
 ARG CADDY_VERSION=v2.11.7
 # main.go is what xcaddy generates for a build without plugins.
 RUN mkdir /src && cd /src && go mod init caddybuild \
  && printf 'package main\n\nimport (\n\tcaddycmd "github.com/caddyserver/caddy/v2/cmd"\n\t_ "github.com/caddyserver/caddy/v2/modules/standard"\n)\n\nfunc main() { caddycmd.Main() }\n' > main.go \
- && go get github.com/caddyserver/caddy/v2@${CADDY_VERSION} golang.org/x/net@v0.60.0 \
+ && go get github.com/caddyserver/caddy/v2@${CADDY_VERSION} golang.org/x/net@v0.60.0 github.com/go-jose/go-jose/v4@v4.1.6 \
  && go mod tidy \
  && CGO_ENABLED=0 go build -trimpath -ldflags "-s -w" -o /out/caddy .
 
