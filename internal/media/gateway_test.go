@@ -2,7 +2,10 @@ package media
 
 import (
 	"errors"
+	"net/http"
+	"net/http/httptest"
 	"testing"
+	"time"
 
 	"github.com/jdolan-exalink/openvms/internal/store/db"
 )
@@ -76,5 +79,33 @@ func TestLiveSignalRefusal(t *testing.T) {
 		if _, _, refused := liveSignalRefusal(cam); refused {
 			t.Errorf("%s must not be refused", name)
 		}
+	}
+}
+
+func TestReplayWindow(t *testing.T) {
+	req := func(q string) *http.Request { return httptest.NewRequest(http.MethodGet, "/x?"+q, nil) }
+	start, end, ok := replayWindow(req("start=1792000000&end=1792003600"))
+	if !ok || !start.Equal(time.Unix(1792000000, 0).UTC()) || end.Sub(start) != time.Hour {
+		t.Fatalf("a valid window: %v %v %v", start, end, ok)
+	}
+	if _, _, ok := replayWindow(req("start=1792000000.5&end=1792003600.9")); !ok {
+		t.Fatal("fractional seconds are accepted")
+	}
+	for name, q := range map[string]string{
+		"empty":       "",
+		"no end":      "start=1792000000",
+		"not numbers": "start=a&end=b",
+		"equal":       "start=1792000000&end=1792000000",
+		"backwards":   "start=1792003600&end=1792000000",
+		"a day plus":  "start=1792000000&end=1792086401",
+		"too early":   "start=5&end=100",
+		"too late":    "start=1792000000&end=9999999999",
+	} {
+		if _, _, ok := replayWindow(req(q)); ok {
+			t.Errorf("%s must be refused", name)
+		}
+	}
+	if _, _, ok := replayWindow(req("start=1792000000&end=1792086400")); !ok {
+		t.Error("exactly a day is allowed")
 	}
 }

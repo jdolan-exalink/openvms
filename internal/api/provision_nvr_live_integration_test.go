@@ -8,6 +8,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"net/url"
+	"strconv"
 	"strings"
 	"sync"
 	"testing"
@@ -36,6 +37,7 @@ type fakeGo2RTC struct {
 	mu      sync.Mutex
 	sources map[string]string
 	asked   []string
+	deleted []string
 }
 
 func newFakeGo2RTC(t *testing.T) *fakeGo2RTC {
@@ -45,7 +47,11 @@ func newFakeGo2RTC(t *testing.T) *fakeGo2RTC {
 	mux := http.NewServeMux()
 	mux.HandleFunc("/api/streams", func(w http.ResponseWriter, r *http.Request) {
 		f.mu.Lock()
-		f.sources[r.URL.Query().Get("name")] = r.URL.Query().Get("src")
+		if r.Method == http.MethodDelete {
+			f.deleted = append(f.deleted, r.URL.Query().Get("src"))
+		} else {
+			f.sources[r.URL.Query().Get("name")] = r.URL.Query().Get("src")
+		}
 		f.mu.Unlock()
 	})
 	mux.HandleFunc("/api/ws", func(w http.ResponseWriter, r *http.Request) {
@@ -70,6 +76,33 @@ func newFakeGo2RTC(t *testing.T) *fakeGo2RTC {
 	f.srv = httptest.NewServer(mux)
 	t.Cleanup(f.srv.Close)
 	return f
+}
+
+func (f *fakeGo2RTC) wasDeleted(name string) bool {
+	deadline := time.Now().Add(3 * time.Second)
+	for time.Now().Before(deadline) {
+		f.mu.Lock()
+		for _, d := range f.deleted {
+			if d == name {
+				f.mu.Unlock()
+				return true
+			}
+		}
+		f.mu.Unlock()
+		time.Sleep(50 * time.Millisecond)
+	}
+	return false
+}
+
+func (f *fakeGo2RTC) onlyStreamWithPrefix(prefix string) (name, src string, n int) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	for k, v := range f.sources {
+		if strings.HasPrefix(k, prefix) {
+			name, src, n = k, v, n+1
+		}
+	}
+	return
 }
 
 func (f *fakeGo2RTC) source(name string) string {
@@ -111,7 +144,7 @@ func setupLive(t *testing.T, build func(env *demofix.Env) *media.NVRVideo) *live
 		t.Fatal(err)
 	}
 	adapters := inventory.NewAdapters(env.Svc)
-	mediaSvc := &media.Service{Store: env.Store, Adapters: adapters, Log: pgtest.Discard()}
+	mediaSvc := &media.Service{Store: env.Store, Adapters: adapters, Log: pgtest.Discard(), NVR: video}
 	h := &api.Handlers{Inv: env.Svc, Media: mediaSvc, Log: pgtest.Discard()}
 	router, err := api.NewRouter(h, pgtest.Discard(), api.Options{
 		Queries: db.New(env.Pool),
@@ -141,6 +174,17 @@ func nvrConn(t *testing.T, nvrURL, password string) inventory.NVRConnInput {
 func (l *liveEnv) dial(t *testing.T, token, quality string) *websocket.Conn {
 	t.Helper()
 	wsURL := "ws" + strings.TrimPrefix(l.ts.URL, "http") + "/media/v1/cameras/" + l.camera.String() + "/live?quality=" + quality
+	c, _, err := websocket.DefaultDialer.Dial(wsURL, http.Header{"Authorization": {"Bearer " + token}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = c.Close() })
+	return c
+}
+
+func (l *liveEnv) dialPlayback(t *testing.T, token, query string) *websocket.Conn {
+	t.Helper()
+	wsURL := "ws" + strings.TrimPrefix(l.ts.URL, "http") + "/media/v1/cameras/" + l.camera.String() + "/playback?" + query
 	c, _, err := websocket.DefaultDialer.Dial(wsURL, http.Header{"Authorization": {"Bearer " + token}})
 	if err != nil {
 		t.Fatal(err)
@@ -278,3 +322,110 @@ func TestRecorderCameraFailuresAreReportedWithTheRightCode(t *testing.T) {
 		}
 	})
 }
+
+func TestRecorderCameraPlaysItsRecordingThroughGo2RTC(t *testing.T) {
+	g2 := newFakeGo2RTC(t)
+	l := setupLive(t, func(env *demofix.Env) *media.NVRVideo { return newVideo(t, env, g2, probeReturning("H264", nil)) })
+	// The segment proved on the real unit: 10:27:41 UTC, 37 s. The recorder's clock (fixture) is three hours behind UTC.
+	start := time.Date(2026, 10, 28, 10, 27, 41, 0, time.UTC)
+	query := "quality=main&start=" + itoa(start.Unix()) + "&end=" + itoa(start.Add(37*time.Second).Unix())
+
+	c := l.dialPlayback(t, l.AdminToken, query)
+	if err := c.WriteMessage(websocket.TextMessage, []byte(`{"type":"mse","value":"avc1.640029,avc1.64002A"}`)); err != nil {
+		t.Fatal(err)
+	}
+	text, binary := read(t, c)
+	if binary != 3 || len(text) == 0 || !strings.Contains(text[0], `"type":"mse"`) {
+		t.Fatalf("the browser got text=%v binary=%d, want the codec line and 3 segments", text, binary)
+	}
+
+	name, src, n := g2.onlyStreamWithPrefix("nvr-" + l.camera.String() + "-rec-")
+	if n != 1 {
+		t.Fatalf("go2rtc has %d replay streams for the camera, want 1", n)
+	}
+	for _, want := range []string{"/chID=10&date=2026-10-28&time=07:27:41&timelen=37&streamType=main&linkType=tcp", "#video=copy"} {
+		if !strings.Contains(src, want) {
+			t.Fatalf("source %q lacks %q: the replay must use the recorder's local time", src, want)
+		}
+	}
+	if !g2.wasDeleted(name) {
+		t.Fatalf("the replay stream %q must be removed when the session ends", name)
+	}
+	for _, secret := range []string{"Live-Pass-4", "127.0.0.1", "rtsp://"} {
+		if strings.Contains(strings.Join(text, " "), secret) {
+			t.Fatalf("the browser received %q", secret)
+		}
+	}
+}
+
+func TestRecorderPlaybackRefusals(t *testing.T) {
+	g2 := newFakeGo2RTC(t)
+	l := setupLive(t, func(env *demofix.Env) *media.NVRVideo { return newVideo(t, env, g2, probeReturning("H264", nil)) })
+	now := time.Now()
+	for name, query := range map[string]string{
+		"no range":  "quality=main",
+		"backwards": "start=" + itoa(now.Unix()) + "&end=" + itoa(now.Add(-time.Hour).Unix()),
+		"too long":  "start=" + itoa(now.Add(-48*time.Hour).Unix()) + "&end=" + itoa(now.Unix()),
+		"nonsense":  "start=a&end=b",
+	} {
+		text, _ := read(t, l.dialPlayback(t, l.AdminToken, query))
+		if errorCode(text) != "camera_offline" {
+			t.Fatalf("%s: frames = %v, want camera_offline", name, text)
+		}
+	}
+	if _, _, n := g2.onlyStreamWithPrefix("nvr-"); n != 0 {
+		t.Fatal("a refused range must not register a stream")
+	}
+
+	// A Frigate camera has no replay through this socket: it plays through HLS.
+	frigateCam := l.Cameras["frigate-h01/plaza"].ID
+	wsURL := "ws" + strings.TrimPrefix(l.ts.URL, "http") + "/media/v1/cameras/" + frigateCam.String() + "/playback?start=" + itoa(now.Add(-time.Hour).Unix()) + "&end=" + itoa(now.Unix())
+	c, _, err := websocket.DefaultDialer.Dial(wsURL, http.Header{"Authorization": {"Bearer " + l.AdminToken}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer c.Close()
+	if text, _ := read(t, c); errorCode(text) != "video_unavailable" {
+		t.Fatalf("a Frigate camera on the playback socket: frames = %v, want video_unavailable", text)
+	}
+
+	// Without a video gateway the recorder camera says so, and a bad credential never reaches the upgrade.
+	bare := setupLive(t, nil)
+	text, _ := read(t, bare.dialPlayback(t, bare.AdminToken, "start="+itoa(now.Add(-time.Hour).Unix())+"&end="+itoa(now.Unix())))
+	if errorCode(text) != "video_unavailable" {
+		t.Fatalf("without go2rtc: frames = %v, want video_unavailable", text)
+	}
+	wsURL = "ws" + strings.TrimPrefix(l.ts.URL, "http") + "/media/v1/cameras/" + l.camera.String() + "/playback?start=" + itoa(now.Add(-time.Hour).Unix()) + "&end=" + itoa(now.Unix())
+	if _, resp, err := websocket.DefaultDialer.Dial(wsURL, http.Header{"Authorization": {"Bearer nope"}}); err == nil || resp == nil || resp.StatusCode != http.StatusUnauthorized {
+		t.Fatalf("a bad token must be refused at the handshake with 401, got resp=%v err=%v", resp, err)
+	}
+}
+
+func TestRecorderCameraTimelineComesFromTheRecordersLog(t *testing.T) {
+	g2 := newFakeGo2RTC(t)
+	l := setupLive(t, func(env *demofix.Env) *media.NVRVideo { return newVideo(t, env, g2, probeReturning("H264", nil)) })
+	from := time.Date(2026, 10, 28, 8, 0, 0, 0, time.UTC).Format(time.RFC3339)
+	to := time.Date(2026, 10, 28, 12, 0, 0, 0, time.UTC).Format(time.RFC3339)
+	req, _ := http.NewRequest(http.MethodGet, l.ts.URL+"/api/v1/cameras/"+l.camera.String()+"/recordings?from="+from+"&to="+to, nil)
+	req.Header.Set("Authorization", "Bearer "+l.AdminToken)
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer resp.Body.Close()
+	var body struct {
+		Items []struct {
+			StartTime time.Time `json:"start_time"`
+			EndTime   time.Time `json:"end_time"`
+			Motion    int       `json:"motion"`
+		} `json:"items"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&body); err != nil || resp.StatusCode != http.StatusOK {
+		t.Fatalf("status %d, %v", resp.StatusCode, err)
+	}
+	if len(body.Items) != 3 || body.Items[1].EndTime.Sub(body.Items[1].StartTime) != 37*time.Second || body.Items[1].Motion != 1 {
+		t.Fatalf("timeline = %+v", body.Items)
+	}
+}
+
+func itoa(n int64) string { return strconv.FormatInt(n, 10) }
