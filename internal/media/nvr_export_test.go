@@ -122,6 +122,28 @@ echo data > "$last"`)
 	}
 }
 
+func TestCaptureReplayKeepsWhatWasWrittenWhenTheRangeRunsPastTheFootage(t *testing.T) {
+	// ffmpeg wrote 12 s, then the recorder went quiet and the stall timeout ended it with an error.
+	bin := fakeFFmpeg(t, `for last; do :; done
+echo out_time_us=12000000
+echo data > "$last"
+echo "rtsp://u:p@h/x: Connection timed out" >&2
+exit 1`)
+	out := filepath.Join(t.TempDir(), "o.mp4")
+	if err := captureReplay(context.Background(), bin, "rtsp://u:p@h/x", out, time.Minute, nil); err != nil {
+		t.Fatalf("a capture that ended on the stall timeout after writing video must succeed: %v", err)
+	}
+}
+
+func TestCaptureReplayFailsWhenTheStallHappenedBeforeAnyVideo(t *testing.T) {
+	bin := fakeFFmpeg(t, `echo "rtsp://u:p@h/x: Connection timed out" >&2
+exit 1`)
+	err := captureReplay(context.Background(), bin, "rtsp://u:p@h/x", filepath.Join(t.TempDir(), "o.mp4"), time.Minute, nil)
+	if err == nil {
+		t.Fatal("a timeout with no video written is a failure")
+	}
+}
+
 func TestCaptureReplayFailureNeverLeaksTheRecordersPassword(t *testing.T) {
 	bin := fakeFFmpeg(t, `echo "rtsp://admin:topsecret@192.0.2.9:554/x: Server returned 401 Unauthorized" >&2; exit 1`)
 	err := captureReplay(context.Background(), bin, "rtsp://admin:topsecret@192.0.2.9:554/x", filepath.Join(t.TempDir(), "o.mp4"), time.Minute, nil)

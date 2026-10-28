@@ -8,10 +8,12 @@ import (
 	"io"
 	"net"
 	"net/url"
+	"os"
 	"os/exec"
 	"strconv"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/jdolan-exalink/openvms/internal/inventory"
@@ -67,6 +69,17 @@ func (n *NVRVideo) HasRecording(ctx context.Context, cam Camera, from, to time.T
 	return len(spans) > 0, nil
 }
 
+const (
+	// replayStallTimeoutUS ends a read of the recorder that gets no data, in microseconds.
+	replayStallTimeoutUS = 10_000_000
+	// replayCapSlack lets ffmpeg's -t cap sit a little above the clip so a clip is never cut short.
+	replayCapSlack = 2
+	// replayFinishMargin is how close to the clip's length the capture is asked to finish.
+	replayFinishMargin = time.Second
+	// ffmpegMessageMax bounds the ffmpeg message kept in an error.
+	ffmpegMessageMax = 300
+)
+
 // ffmpegReplayArgs copies the recorder's replay into an MP4 without re-encoding. Audio is dropped: recorders
 // send G.711, which MP4 cannot carry as it is. The recorder does not close the stream when the clip ends, so
 // -timeout ends a stalled read after 10 s and captureReplay asks ffmpeg to finish once the whole clip is written.
@@ -77,8 +90,8 @@ func ffmpegReplayArgs(rtspURL, outPath string, d time.Duration) []string {
 	}
 	return []string{
 		"-y", "-loglevel", "error", "-nostats", "-progress", "pipe:1",
-		"-rtsp_transport", "tcp", "-timeout", "10000000", "-i", rtspURL,
-		"-t", strconv.Itoa(secs + 2), "-an", "-c:v", "copy", "-movflags", "+faststart",
+		"-rtsp_transport", "tcp", "-timeout", strconv.Itoa(replayStallTimeoutUS), "-i", rtspURL,
+		"-t", strconv.Itoa(secs + replayCapSlack), "-an", "-c:v", "copy", "-movflags", "+faststart",
 		"-f", "mp4", outPath,
 	}
 }
@@ -138,11 +151,13 @@ func captureReplay(ctx context.Context, ffmpegPath, rtspURL, outPath string, d t
 		return err
 	}
 	var quit sync.Once
+	var written atomic.Int64
 	cmd.Stdout = &progressWriter{fn: func(done time.Duration) {
+		written.Store(int64(done))
 		if onProgress != nil {
 			onProgress(done)
 		}
-		if done >= d-time.Second {
+		if done >= d-replayFinishMargin {
 			// In its own goroutine: this runs inside ffmpeg's output pipe reader and must never block it.
 			quit.Do(func() {
 				go func() {
@@ -162,11 +177,18 @@ func captureReplay(ctx context.Context, ffmpegPath, rtspURL, outPath string, d t
 			return ctx.Err()
 		}
 		msg := strings.TrimSpace(redactRTSP(stderr.String(), rtspURL))
+		// The range may run past the last recording: the recorder then sends nothing more and keeps the stream
+		// open, so ffmpeg ends on its stall timeout. What was written up to there is the footage that exists.
+		if written.Load() > 0 && strings.Contains(strings.ToLower(msg), "timed out") {
+			if fi, serr := os.Stat(outPath); serr == nil && fi.Size() > 0 {
+				return nil
+			}
+		}
 		if msg == "" {
 			msg = err.Error()
 		}
-		if len(msg) > 300 {
-			msg = msg[:300]
+		if len(msg) > ffmpegMessageMax {
+			msg = msg[:ffmpegMessageMax]
 		}
 		return fmt.Errorf("the recorder's video could not be copied: %s", msg)
 	}
