@@ -77,7 +77,7 @@ export const DELETE_CAMERA_LABEL = "Eliminar cámara";
  * Confirmation of a camera delete. The camera leaves OpenVMS and Frigate's config and stops recording;
  * its events and recordings are not deleted now, and it can be restored from the cameras list.
  */
-export function DeleteCameraDialog({ cameraId, name, onClose, onDeleted }: { cameraId: string; name: string; onClose: () => void; onDeleted: () => void }) {
+export function DeleteCameraDialog({ cameraId, name, recorder, onClose, onDeleted }: { cameraId: string; name: string; recorder?: boolean; onClose: () => void; onDeleted: () => void }) {
   const qc = useQueryClient();
   const remove = useMutation({
     mutationFn: async () => unwrap(await api.DELETE("/api/v1/cameras/{cameraId}", { params: { path: { cameraId } } })),
@@ -89,7 +89,9 @@ export function DeleteCameraDialog({ cameraId, name, onClose, onDeleted }: { cam
   return (
     <ConfirmDialog
       title={DELETE_CAMERA_LABEL}
-      message={`Se eliminará "${name}" de OpenVMS y de la configuración de Frigate, y dejará de grabar: no habrá grabaciones nuevas. Frigate se reiniciará, así que todas las cámaras de ese servidor dejarán de grabar unos instantes. OpenVMS no borra ahora sus eventos ni las grabaciones existentes: se conservan hasta que pasen sus días de grabación. Podés restaurarla desde la lista de cámaras del servidor.`}
+      message={recorder
+        ? `Se eliminará "${name}" de OpenVMS. El NVR no se toca: sigue grabando este canal. OpenVMS no borra ahora sus eventos ni lo ya guardado. Podés restaurarla desde la lista de cámaras del servidor.`
+        : `Se eliminará "${name}" de OpenVMS y de la configuración de Frigate, y dejará de grabar: no habrá grabaciones nuevas. Frigate se reiniciará, así que todas las cámaras de ese servidor dejarán de grabar unos instantes. OpenVMS no borra ahora sus eventos ni las grabaciones existentes: se conservan hasta que pasen sus días de grabación. Podés restaurarla desde la lista de cámaras del servidor.`}
       confirmLabel="Eliminar"
       pending={remove.isPending}
       error={remove.error}

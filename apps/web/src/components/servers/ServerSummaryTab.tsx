@@ -17,6 +17,8 @@ export function problemText(problem: Schemas["ServerProblem"], t: Translate) {
       return t("servers.problemCamerasOffline", { cameras: (problem.cameras ?? []).join(", ") });
     case "storage_high":
       return t("servers.problemStorageHigh", { percent: String(problem.used_percent ?? "") });
+    case "recorder_disk_bad":
+      return t("servers.problemRecorderDisk");
     default:
       return t("servers.problemDetectionStalled");
   }
