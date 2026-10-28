@@ -143,7 +143,13 @@ func captureReplay(ctx context.Context, ffmpegPath, rtspURL, outPath string, d t
 			onProgress(done)
 		}
 		if done >= d-time.Second {
-			quit.Do(func() { _, _ = io.WriteString(stdin, "q\n") })
+			// In its own goroutine: this runs inside ffmpeg's output pipe reader and must never block it.
+			quit.Do(func() {
+				go func() {
+					_, _ = io.WriteString(stdin, "q\n")
+					_ = stdin.Close()
+				}()
+			})
 		}
 	}}
 	// A killed ffmpeg may leave a child holding the pipes; do not wait for it forever.

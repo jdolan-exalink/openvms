@@ -1,12 +1,16 @@
 package media
 
 import (
+	"context"
 	"crypto/sha256"
 	"encoding/hex"
 	"errors"
 	"os"
 	"path/filepath"
 	"testing"
+	"time"
+
+	"github.com/google/uuid"
 )
 
 func TestSealFileHashesAndRenamesACapture(t *testing.T) {
@@ -44,4 +48,36 @@ func TestSealFileTreatsAnEmptyCaptureAsNoRecording(t *testing.T) {
 	if _, err := os.Stat(filepath.Join(dir, "a.mp4")); !os.IsNotExist(err) {
 		t.Fatal("an empty capture must not become a final file")
 	}
+}
+
+func TestARecorderServesAtMostTwoCapturesAtOnce(t *testing.T) {
+	m := &ExportJobManager{}
+	server := uuid.New()
+	ctx := context.Background()
+	r1, err := m.recorderSlot(ctx, server)
+	if err != nil {
+		t.Fatal(err)
+	}
+	r2, err := m.recorderSlot(ctx, server)
+	if err != nil {
+		t.Fatal(err)
+	}
+	// A third waits; another recorder is not held back by this one.
+	other, err := m.recorderSlot(ctx, uuid.New())
+	if err != nil {
+		t.Fatal(err)
+	}
+	other()
+	waiting, cancel := context.WithTimeout(ctx, 50*time.Millisecond)
+	defer cancel()
+	if _, err := m.recorderSlot(waiting, server); !errors.Is(err, context.DeadlineExceeded) {
+		t.Fatalf("a third capture on one recorder must wait, got %v", err)
+	}
+	r1()
+	r3, err := m.recorderSlot(ctx, server)
+	if err != nil {
+		t.Fatalf("a freed slot must be reusable: %v", err)
+	}
+	r2()
+	r3()
 }

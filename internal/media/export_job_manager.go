@@ -46,6 +46,8 @@ type ExportJobManager struct {
 
 	mu       sync.Mutex
 	inFlight map[uuid.UUID]context.CancelFunc
+	// recorderSlots limits the copies running against each recorder (see maxRecorderCaptures).
+	recorderSlots map[uuid.UUID]chan struct{}
 }
 
 func (m *ExportJobManager) Run(ctx context.Context) {

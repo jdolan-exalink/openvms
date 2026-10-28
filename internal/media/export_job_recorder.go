@@ -12,10 +12,35 @@ import (
 	"path/filepath"
 	"time"
 
+	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
 
 	"github.com/jdolan-exalink/openvms/internal/store"
 )
+
+// maxRecorderCaptures bounds the copies running against one recorder at a time: each holds an RTSP session for
+// at least the length of its clip, and a recorder serves only a few at once.
+const maxRecorderCaptures = 2
+
+// recorderSlot waits for one of the recorder's capture slots and returns the function that frees it.
+func (m *ExportJobManager) recorderSlot(ctx context.Context, server uuid.UUID) (func(), error) {
+	m.mu.Lock()
+	if m.recorderSlots == nil {
+		m.recorderSlots = map[uuid.UUID]chan struct{}{}
+	}
+	slots, ok := m.recorderSlots[server]
+	if !ok {
+		slots = make(chan struct{}, maxRecorderCaptures)
+		m.recorderSlots[server] = slots
+	}
+	m.mu.Unlock()
+	select {
+	case slots <- struct{}{}:
+		return func() { <-slots }, nil
+	case <-ctx.Done():
+		return nil, ctx.Err()
+	}
+}
 
 // startRecorderExport moves a recorder camera's item straight to "transferring": there is no remote export to
 // wait for, the worker copies the recorder's replay itself.
@@ -41,6 +66,11 @@ func (m *ExportJobManager) captureRecorderItem(ctx context.Context, j activeJobR
 	if m.NVR == nil {
 		return errors.New("exporting recorder cameras is not enabled on this deployment")
 	}
+	release, err := m.recorderSlot(ctx, it.serverID)
+	if err != nil {
+		return err
+	}
+	defer release()
 	cam := Camera{ID: it.cameraID, RemoteName: it.remoteName, Server: it.serverRow}
 	has, err := m.NVR.HasRecording(ctx, cam, j.start, j.end)
 	if err != nil {
@@ -72,25 +102,45 @@ func (m *ExportJobManager) captureRecorderItem(ctx context.Context, j activeJobR
 	}()
 
 	total := j.end.Sub(j.start)
-	lastWrite := time.Time{}
-	err = captureReplay(ctx, ffmpeg, rtsp, partPath, total, func(done time.Duration) {
-		if time.Since(lastWrite) < time.Second {
-			return
+	// Progress is written by its own goroutine so a slow database never blocks ffmpeg's output pipe.
+	progress := make(chan float32, 1)
+	writerDone := make(chan struct{})
+	go func() {
+		defer close(writerDone)
+		for prog := range progress {
+			_ = m.Store.TxRaw(ctx, store.AllTenants, func(tx pgx.Tx) error {
+				if _, err := tx.Exec(ctx, `UPDATE export_job_items SET progress = $2, updated_at = now() WHERE id = $1`, it.id, prog); err != nil {
+					return err
+				}
+				_, err := tx.Exec(ctx, `UPDATE export_jobs SET progress = (SELECT COALESCE(avg(progress), 0) FROM export_job_items WHERE job_id = $1), updated_at = now() WHERE id = $1`, j.id)
+				return err
+			})
+			select {
+			case <-time.After(time.Second):
+			case <-ctx.Done():
+			}
 		}
-		lastWrite = time.Now()
+	}()
+	err = captureReplay(ctx, ffmpeg, rtsp, partPath, total, func(done time.Duration) {
 		prog := float32(done) / float32(total) * 100
 		if prog > 99 {
 			prog = 99
 		}
-		_ = m.Store.TxRaw(ctx, store.AllTenants, func(tx pgx.Tx) error {
-			_, err := tx.Exec(ctx, `UPDATE export_job_items SET progress = $2, updated_at = now() WHERE id = $1`, it.id, prog)
-			if err != nil {
-				return err
+		select { // keep only the latest value; never wait
+		case progress <- prog:
+		default:
+			select {
+			case <-progress:
+			default:
 			}
-			_, err = tx.Exec(ctx, `UPDATE export_jobs SET progress = (SELECT COALESCE(avg(progress), 0) FROM export_job_items WHERE job_id = $1), updated_at = now() WHERE id = $1`, j.id)
-			return err
-		})
+			select {
+			case progress <- prog:
+			default:
+			}
+		}
 	})
+	close(progress)
+	<-writerDone
 	if err != nil {
 		_ = os.Remove(partPath)
 		return err
