@@ -3,12 +3,14 @@ import { useEffect, useMemo } from "react";
 import { eventsQuery, recordingsQuery } from "@/api/queries";
 import { ApiError } from "@/api/client";
 import { vehicleHeadline, vehiclePaint } from "@/lib/format";
+import { recorderMotionEvents } from "@/lib/recorderMotion";
 import { DAY_S, mergeSpans, type Span } from "@/lib/timeScale";
+import { useRecorderCameraIds } from "@/lib/useRecorderCameras";
 
 /** Event pages (500 each) fetched for the timeline markers; more days are dense enough to cluster anyway. */
 const MAX_EVENT_PAGES = 4;
 
-type Coverage = { spans: Record<string, Span[]>; denied: string[]; loaded: string[] };
+type Coverage = { spans: Record<string, Span[]>; denied: string[]; loaded: string[]; motion: ReturnType<typeof recorderMotionEvents> };
 
 /**
  * useRecData loads, for the cameras of the grid and one local day, the recording coverage of
@@ -17,6 +19,7 @@ type Coverage = { spans: Record<string, Span[]>; denied: string[]; loaded: strin
 export function useRecData(cameraIds: string[], day: number, enabled: boolean) {
   const from = new Date(day * 1000).toISOString();
   const to = new Date((day + DAY_S) * 1000).toISOString();
+  const recorders = useRecorderCameraIds();
 
   const coverage = useQueries({
     queries: cameraIds.map((id) => ({
@@ -26,11 +29,13 @@ export function useRecData(cameraIds: string[], day: number, enabled: boolean) {
       retry: (count: number, error: unknown) => !(error instanceof ApiError && error.status === 403) && count < 2,
     })),
     combine: (results): Coverage => {
-      const out: Coverage = { spans: {}, denied: [], loaded: [] };
+      const out: Coverage = { spans: {}, denied: [], loaded: [], motion: [] };
       results.forEach((r, i) => {
         const id = cameraIds[i]!;
         if (r.data) {
           out.loaded.push(id);
+          // A recorder has no analytics of its own: its motion detections are what the timeline can show.
+          if (recorders.has(id)) out.motion.push(...recorderMotionEvents(id, r.data));
           out.spans[id] = mergeSpans(r.data.map((s) => ({ start: Date.parse(s.start_time) / 1000, end: Date.parse(s.end_time) / 1000 })));
         } else if (r.error instanceof ApiError && r.error.status === 403) {
           out.denied.push(id);
@@ -71,5 +76,26 @@ export function useRecData(cameraIds: string[], day: number, enabled: boolean) {
     [events.data],
   );
 
-  return { spans: coverage.spans, denied: coverage.denied, loaded: coverage.loaded, events: eventList, error: events.error };
+  const withMotion = useMemo(
+    () =>
+      coverage.motion.length === 0
+        ? eventList
+        : [
+            ...eventList,
+            ...coverage.motion.map((m) => ({
+              id: m.id,
+              time: Date.parse(m.start_time) / 1000,
+              end: Date.parse(m.end_time) / 1000,
+              severity: m.severity,
+              cameraId: m.camera_id,
+              label: m.labels[0] ?? "",
+              detail: undefined,
+              color: undefined,
+              title: undefined,
+            })),
+          ].sort((a, b) => a.time - b.time),
+    [eventList, coverage.motion],
+  );
+
+  return { spans: coverage.spans, denied: coverage.denied, loaded: coverage.loaded, events: withMotion, error: events.error };
 }

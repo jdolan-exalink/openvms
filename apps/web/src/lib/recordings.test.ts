@@ -17,3 +17,20 @@ describe("vodWindowForInstant", () => {
     expect(window).toEqual({ start: dayStart + 490, end: dayStart + 600 });
   });
 });
+
+describe("clampToNow", () => {
+  it("leaves a past instant alone and pulls a future one back to just before now", async () => {
+    const { clampToNow } = await import("./recordings");
+    expect(clampToNow(1_000, 5_000)).toBe(1_000);
+    expect(clampToNow(9_000, 5_000)).toBe(4_995);
+    expect(clampToNow(5_000, 5_000)).toBe(4_995);
+  });
+
+  it("keeps the window it feeds valid: a click in the future no longer ends before it starts", async () => {
+    const { clampToNow, vodWindowForInstant } = await import("./recordings");
+    const now = 100_000;
+    const day = 80_000;
+    const { start, end } = vodWindowForInstant(clampToNow(now + 3 * 3600, now), day, now);
+    expect(end).toBeGreaterThan(start);
+  });
+});

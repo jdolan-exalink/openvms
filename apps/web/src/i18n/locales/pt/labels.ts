@@ -12,6 +12,7 @@ const messages = {
   factTrailer: "Reboque",
   factUpper: "Cima",
   factLower: "Baixo",
+  objectMotion: "Movimento",
   objectPerson: "Pessoa",
   objectCar: "Carro",
   objectMotorcycle: "Moto",

@@ -5,10 +5,12 @@ import { useEffect, useState } from "react";
 import { useT } from "@/i18n";
 import { eventsQuery, recordingsQuery } from "@/api/queries";
 import { RecordingPlayer } from "@/components/RecordingPlayer";
+import { recorderMotionEvents } from "@/lib/recorderMotion";
+import { useRecorderCameraIds } from "@/lib/useRecorderCameras";
 import { RecordingTimeline } from "@/components/RecordingTimeline";
 import { Button, ErrorNote, Field, TextInput } from "@/components/ui";
 import { fmtDateTime, toLocalInput } from "@/lib/format";
-import { vodWindowForInstant } from "@/lib/recordings";
+import { clampToNow, vodWindowForInstant } from "@/lib/recordings";
 
 const DAY = 24 * 3600;
 const unixNow = () => Math.floor(Date.now() / 1000);
@@ -45,9 +47,15 @@ export function LivePlaybackPanel({
     ...eventsQuery({ camera_id: [cameraId], from, to, limit: 500 }),
     enabled: !!cameraId,
   });
-  const dayEvents = events.data?.pages.flatMap((page) => page.items) ?? [];
+  const recorderIds = useRecorderCameraIds();
+  // A recorder has no analytics of its own: its motion detections are what the timeline can show.
+  const dayEvents = [
+    ...(events.data?.pages.flatMap((page) => page.items) ?? []),
+    ...(recorderIds.has(cameraId) ? recorderMotionEvents(cameraId, recordings.data) : []),
+  ];
   const { start: winStart, end: winEnd } = vodWindowForInstant(instant, day, now);
-  const jump = (time: number) => {
+  const jump = (requested: number) => {
+    const time = clampToNow(requested, now);
     setInstant(time);
     setPosition(time);
   };
