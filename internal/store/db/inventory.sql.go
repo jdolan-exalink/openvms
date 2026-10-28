@@ -537,7 +537,7 @@ func (q *Queries) GetDeletedCamera(ctx context.Context, id uuid.UUID) (Camera, e
 }
 
 const getServer = `-- name: GetServer :one
-SELECT fs.id, fs.tenant_id, fs.site_id, fs.name, fs.base_url, fs.username, fs.password_sealed, fs.tls_skip_verify, fs.frigate_version, fs.capabilities, fs.status, fs.last_seen_at, fs.last_checked_at, fs.last_error, fs.stats, fs.created_at, fs.updated_at, fs.deleted_at, fs.deleted_by, fs.auth_mode, fs.event_alarm_mode,
+SELECT fs.id, fs.tenant_id, fs.site_id, fs.name, fs.base_url, fs.username, fs.password_sealed, fs.tls_skip_verify, fs.frigate_version, fs.capabilities, fs.status, fs.last_seen_at, fs.last_checked_at, fs.last_error, fs.stats, fs.created_at, fs.updated_at, fs.deleted_at, fs.deleted_by, fs.auth_mode, fs.event_alarm_mode, fs.kind,
     (SELECT count(*) FROM cameras c WHERE c.server_id = fs.id AND c.deleted_at IS NULL)::int AS camera_count,
     ah.last_seen_at AS agent_last_seen_at, ah.version AS agent_version, ah.status AS agent_status,
     COALESCE(acx.expires, to_timestamp(0))::timestamptz AS agent_cert_expires_at
@@ -574,6 +574,7 @@ type GetServerRow struct {
 	DeletedBy          *uuid.UUID
 	AuthMode           string
 	EventAlarmMode     string
+	Kind               string
 	CameraCount        int32
 	AgentLastSeenAt    *time.Time
 	AgentVersion       *string
@@ -606,6 +607,7 @@ func (q *Queries) GetServer(ctx context.Context, id uuid.UUID) (GetServerRow, er
 		&i.DeletedBy,
 		&i.AuthMode,
 		&i.EventAlarmMode,
+		&i.Kind,
 		&i.CameraCount,
 		&i.AgentLastSeenAt,
 		&i.AgentVersion,
@@ -616,7 +618,7 @@ func (q *Queries) GetServer(ctx context.Context, id uuid.UUID) (GetServerRow, er
 }
 
 const getServerForUpdate = `-- name: GetServerForUpdate :one
-SELECT fs.id, fs.tenant_id, fs.site_id, fs.name, fs.base_url, fs.username, fs.password_sealed, fs.tls_skip_verify, fs.frigate_version, fs.capabilities, fs.status, fs.last_seen_at, fs.last_checked_at, fs.last_error, fs.stats, fs.created_at, fs.updated_at, fs.deleted_at, fs.deleted_by, fs.auth_mode, fs.event_alarm_mode,
+SELECT fs.id, fs.tenant_id, fs.site_id, fs.name, fs.base_url, fs.username, fs.password_sealed, fs.tls_skip_verify, fs.frigate_version, fs.capabilities, fs.status, fs.last_seen_at, fs.last_checked_at, fs.last_error, fs.stats, fs.created_at, fs.updated_at, fs.deleted_at, fs.deleted_by, fs.auth_mode, fs.event_alarm_mode, fs.kind,
     (SELECT count(*) FROM cameras c WHERE c.server_id = fs.id AND c.deleted_at IS NULL)::int AS camera_count,
     ah.last_seen_at AS agent_last_seen_at, ah.version AS agent_version, ah.status AS agent_status,
     COALESCE(acx.expires, to_timestamp(0))::timestamptz AS agent_cert_expires_at
@@ -654,6 +656,7 @@ type GetServerForUpdateRow struct {
 	DeletedBy          *uuid.UUID
 	AuthMode           string
 	EventAlarmMode     string
+	Kind               string
 	CameraCount        int32
 	AgentLastSeenAt    *time.Time
 	AgentVersion       *string
@@ -686,6 +689,7 @@ func (q *Queries) GetServerForUpdate(ctx context.Context, id uuid.UUID) (GetServ
 		&i.DeletedBy,
 		&i.AuthMode,
 		&i.EventAlarmMode,
+		&i.Kind,
 		&i.CameraCount,
 		&i.AgentLastSeenAt,
 		&i.AgentVersion,
@@ -696,7 +700,7 @@ func (q *Queries) GetServerForUpdate(ctx context.Context, id uuid.UUID) (GetServ
 }
 
 const getServerRow = `-- name: GetServerRow :one
-SELECT id, tenant_id, site_id, name, base_url, username, password_sealed, tls_skip_verify, frigate_version, capabilities, status, last_seen_at, last_checked_at, last_error, stats, created_at, updated_at, deleted_at, deleted_by, auth_mode, event_alarm_mode FROM frigate_servers WHERE id = $1 AND deleted_at IS NULL
+SELECT id, tenant_id, site_id, name, base_url, username, password_sealed, tls_skip_verify, frigate_version, capabilities, status, last_seen_at, last_checked_at, last_error, stats, created_at, updated_at, deleted_at, deleted_by, auth_mode, event_alarm_mode, kind FROM frigate_servers WHERE id = $1 AND deleted_at IS NULL
 `
 
 // Full row with the sealed credentials, for code that connects to Frigate.
@@ -725,6 +729,7 @@ func (q *Queries) GetServerRow(ctx context.Context, id uuid.UUID) (FrigateServer
 		&i.DeletedBy,
 		&i.AuthMode,
 		&i.EventAlarmMode,
+		&i.Kind,
 	)
 	return i, err
 }
@@ -858,7 +863,7 @@ func (q *Queries) LastCameraRemovalRevision(ctx context.Context, cameraID string
 }
 
 const listAllActiveServers = `-- name: ListAllActiveServers :many
-SELECT id, tenant_id, site_id, name, base_url, username, password_sealed, tls_skip_verify, frigate_version, capabilities, status, last_seen_at, last_checked_at, last_error, stats, created_at, updated_at, deleted_at, deleted_by, auth_mode, event_alarm_mode FROM frigate_servers WHERE deleted_at IS NULL ORDER BY id
+SELECT id, tenant_id, site_id, name, base_url, username, password_sealed, tls_skip_verify, frigate_version, capabilities, status, last_seen_at, last_checked_at, last_error, stats, created_at, updated_at, deleted_at, deleted_by, auth_mode, event_alarm_mode, kind FROM frigate_servers WHERE deleted_at IS NULL ORDER BY id
 `
 
 func (q *Queries) ListAllActiveServers(ctx context.Context) ([]FrigateServer, error) {
@@ -892,6 +897,7 @@ func (q *Queries) ListAllActiveServers(ctx context.Context) ([]FrigateServer, er
 			&i.DeletedBy,
 			&i.AuthMode,
 			&i.EventAlarmMode,
+			&i.Kind,
 		); err != nil {
 			return nil, err
 		}
@@ -1332,7 +1338,7 @@ func (q *Queries) ListServerCameras(ctx context.Context, serverID uuid.UUID) ([]
 }
 
 const listServers = `-- name: ListServers :many
-SELECT fs.id, fs.tenant_id, fs.site_id, fs.name, fs.base_url, fs.username, fs.password_sealed, fs.tls_skip_verify, fs.frigate_version, fs.capabilities, fs.status, fs.last_seen_at, fs.last_checked_at, fs.last_error, fs.stats, fs.created_at, fs.updated_at, fs.deleted_at, fs.deleted_by, fs.auth_mode, fs.event_alarm_mode,
+SELECT fs.id, fs.tenant_id, fs.site_id, fs.name, fs.base_url, fs.username, fs.password_sealed, fs.tls_skip_verify, fs.frigate_version, fs.capabilities, fs.status, fs.last_seen_at, fs.last_checked_at, fs.last_error, fs.stats, fs.created_at, fs.updated_at, fs.deleted_at, fs.deleted_by, fs.auth_mode, fs.event_alarm_mode, fs.kind,
     (SELECT count(*) FROM cameras c WHERE c.server_id = fs.id AND c.deleted_at IS NULL)::int AS camera_count,
     ah.last_seen_at AS agent_last_seen_at, ah.version AS agent_version, ah.status AS agent_status,
     COALESCE(acx.expires, to_timestamp(0))::timestamptz AS agent_cert_expires_at
@@ -1377,6 +1383,7 @@ type ListServersRow struct {
 	DeletedBy          *uuid.UUID
 	AuthMode           string
 	EventAlarmMode     string
+	Kind               string
 	CameraCount        int32
 	AgentLastSeenAt    *time.Time
 	AgentVersion       *string
@@ -1415,6 +1422,7 @@ func (q *Queries) ListServers(ctx context.Context, arg ListServersParams) ([]Lis
 			&i.DeletedBy,
 			&i.AuthMode,
 			&i.EventAlarmMode,
+			&i.Kind,
 			&i.CameraCount,
 			&i.AgentLastSeenAt,
 			&i.AgentVersion,

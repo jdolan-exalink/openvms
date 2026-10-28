@@ -616,7 +616,7 @@ func (q *Queries) ListFaceBlobPurge(ctx context.Context, maxRows int32) ([]FaceB
 }
 
 const listFaceCapableServers = `-- name: ListFaceCapableServers :many
-SELECT id, tenant_id, site_id, name, base_url, username, password_sealed, tls_skip_verify, frigate_version, capabilities, status, last_seen_at, last_checked_at, last_error, stats, created_at, updated_at, deleted_at, deleted_by, auth_mode, event_alarm_mode FROM frigate_servers
+SELECT id, tenant_id, site_id, name, base_url, username, password_sealed, tls_skip_verify, frigate_version, capabilities, status, last_seen_at, last_checked_at, last_error, stats, created_at, updated_at, deleted_at, deleted_by, auth_mode, event_alarm_mode, kind FROM frigate_servers
 WHERE tenant_id = $1 AND deleted_at IS NULL AND capabilities @> '{"face_recognition": true}'::jsonb
 ORDER BY lower(name), id
 `
@@ -652,6 +652,7 @@ func (q *Queries) ListFaceCapableServers(ctx context.Context, tenantID uuid.UUID
 			&i.DeletedBy,
 			&i.AuthMode,
 			&i.EventAlarmMode,
+			&i.Kind,
 		); err != nil {
 			return nil, err
 		}
@@ -664,7 +665,7 @@ func (q *Queries) ListFaceCapableServers(ctx context.Context, tenantID uuid.UUID
 }
 
 const listFaceCapableServersAny = `-- name: ListFaceCapableServersAny :many
-SELECT id, tenant_id, site_id, name, base_url, username, password_sealed, tls_skip_verify, frigate_version, capabilities, status, last_seen_at, last_checked_at, last_error, stats, created_at, updated_at, deleted_at, deleted_by, auth_mode, event_alarm_mode FROM frigate_servers
+SELECT id, tenant_id, site_id, name, base_url, username, password_sealed, tls_skip_verify, frigate_version, capabilities, status, last_seen_at, last_checked_at, last_error, stats, created_at, updated_at, deleted_at, deleted_by, auth_mode, event_alarm_mode, kind FROM frigate_servers
 WHERE deleted_at IS NULL AND capabilities @> '{"face_recognition": true}'::jsonb
 ORDER BY tenant_id, lower(name), id
 `
@@ -701,6 +702,7 @@ func (q *Queries) ListFaceCapableServersAny(ctx context.Context) ([]FrigateServe
 			&i.DeletedBy,
 			&i.AuthMode,
 			&i.EventAlarmMode,
+			&i.Kind,
 		); err != nil {
 			return nil, err
 		}
@@ -713,7 +715,7 @@ func (q *Queries) ListFaceCapableServersAny(ctx context.Context) ([]FrigateServe
 }
 
 const listFaceCapableServersScoped = `-- name: ListFaceCapableServersScoped :many
-SELECT id, tenant_id, site_id, name, base_url, username, password_sealed, tls_skip_verify, frigate_version, capabilities, status, last_seen_at, last_checked_at, last_error, stats, created_at, updated_at, deleted_at, deleted_by, auth_mode, event_alarm_mode FROM frigate_servers
+SELECT id, tenant_id, site_id, name, base_url, username, password_sealed, tls_skip_verify, frigate_version, capabilities, status, last_seen_at, last_checked_at, last_error, stats, created_at, updated_at, deleted_at, deleted_by, auth_mode, event_alarm_mode, kind FROM frigate_servers
 WHERE tenant_id = ANY($1::uuid[]) AND deleted_at IS NULL AND capabilities @> '{"face_recognition": true}'::jsonb
   AND (cardinality($2::uuid[]) = 0 OR site_id = ANY($2::uuid[]))
   AND (cardinality($3::uuid[]) = 0 OR id = ANY($3::uuid[]))
@@ -759,6 +761,7 @@ func (q *Queries) ListFaceCapableServersScoped(ctx context.Context, arg ListFace
 			&i.DeletedBy,
 			&i.AuthMode,
 			&i.EventAlarmMode,
+			&i.Kind,
 		); err != nil {
 			return nil, err
 		}

@@ -227,7 +227,7 @@ func toCaps(c inventory.ServerView) gen.Capabilities {
 func toServer(s inventory.ServerView) gen.Server {
 	mode := gen.EventAlarmMode(s.EventAlarmMode)
 	out := gen.Server{
-		Id: s.ID, TenantId: s.TenantID, SiteId: s.SiteID, Name: s.Name, BaseUrl: s.BaseUrl, AuthMode: gen.AuthMode(s.AuthMode), Username: s.Username,
+		Id: s.ID, Kind: gen.ServerKind(s.Kind), TenantId: s.TenantID, SiteId: s.SiteID, Name: s.Name, BaseUrl: s.BaseUrl, AuthMode: gen.AuthMode(s.AuthMode), Username: s.Username,
 		TlsSkipVerify: s.TlsSkipVerify, FrigateVersion: s.FrigateVersion, Capabilities: toCaps(s),
 		EventAlarmMode: &mode,
 		Status:         gen.HealthStatus(s.Status), LastSeenAt: s.LastSeenAt, LastCheckedAt: s.LastCheckedAt,

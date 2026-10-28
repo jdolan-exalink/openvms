@@ -4569,9 +4569,15 @@ export interface components {
             used_mb: number;
             free_mb: number;
         };
+        /**
+         * @description What the server is. frigate is a Frigate NVR; provision_nvr is a Provision-ISR recorder.
+         * @enum {string}
+         */
+        ServerKind: "frigate" | "provision_nvr";
         Server: {
             /** Format: uuid */
             id: string;
+            kind: components["schemas"]["ServerKind"];
             /** Format: uuid */
             tenant_id: string;
             /** Format: uuid */

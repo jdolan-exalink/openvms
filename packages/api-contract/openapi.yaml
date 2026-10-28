@@ -5899,11 +5899,16 @@ components:
         total_mb: { type: number }
         used_mb: { type: number }
         free_mb: { type: number }
+    ServerKind:
+      type: string
+      enum: [frigate, provision_nvr]
+      description: What the server is. frigate is a Frigate NVR; provision_nvr is a Provision-ISR recorder.
     Server:
       type: object
-      required: [id, tenant_id, site_id, name, base_url, auth_mode, username, tls_skip_verify, frigate_version, capabilities, status, last_error, camera_count, created_at, updated_at]
+      required: [id, kind, tenant_id, site_id, name, base_url, auth_mode, username, tls_skip_verify, frigate_version, capabilities, status, last_error, camera_count, created_at, updated_at]
       properties:
         id: { type: string, format: uuid }
+        kind: { $ref: "#/components/schemas/ServerKind" }
         tenant_id: { type: string, format: uuid }
         site_id: { type: string, format: uuid }
         name: { type: string }

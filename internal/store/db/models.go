@@ -616,6 +616,7 @@ type FrigateServer struct {
 	DeletedBy      *uuid.UUID
 	AuthMode       string
 	EventAlarmMode string
+	Kind           string
 }
 
 type LprRead struct {
