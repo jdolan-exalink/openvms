@@ -581,6 +581,32 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/servers/{serverId}/provision-nvr/channels": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                serverId: string;
+            };
+            cookie?: never;
+        };
+        /**
+         * Read the channels a Provision-ISR recorder has now
+         * @description Read-only. Each channel says whether it already is a camera. Requires servers.manage on the server; only for servers of kind provision_nvr.
+         */
+        get: operations["listProvisionNvrChannels"];
+        put?: never;
+        /**
+         * Import channels of a Provision-ISR recorder as cameras
+         * @description Adds the chosen channels as cameras. Channels already imported are left as they are; channels deleted here earlier are skipped. Nothing is written to the recorder. Requires servers.manage on the server.
+         */
+        post: operations["importProvisionNvrChannels"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/servers/{serverId}/agent/tls": {
         parameters: {
             query?: never;
@@ -4671,6 +4697,21 @@ export interface components {
             /** @description recording */
             recording?: string;
             motion?: string;
+            /** @description Only on the channel list of a registered recorder; true when the channel already is a camera. */
+            imported?: boolean;
+        };
+        ProvisionNvrChannelList: {
+            items: components["schemas"]["ProvisionNvrChannel"][];
+        };
+        ProvisionNvrImportRequest: {
+            /** @description Channel ids from the channel list. */
+            channel_ids: string[];
+        };
+        ProvisionNvrImportResult: {
+            /** @description Channels that became new cameras. */
+            added: number;
+            /** @description Channels deleted here earlier; restore them from the deleted cameras instead. */
+            skipped: number;
         };
         ProvisionNvrDisk: {
             id: string;
@@ -4706,7 +4747,7 @@ export interface components {
         };
         ServerProblem: {
             /** @enum {string} */
-            code: "cameras_offline" | "storage_high" | "detection_stalled";
+            code: "cameras_offline" | "storage_high" | "detection_stalled" | "recorder_disk_bad";
             /** @description Names of the enabled cameras without signal (cameras_offline). */
             cameras?: string[];
             /** @description Share of the recordings disk in use (storage_high). */
@@ -9301,6 +9342,65 @@ export interface operations {
             403: components["responses"]["Forbidden"];
             404: components["responses"]["NotFound"];
             502: components["responses"]["FrigateUnreachable"];
+        };
+    };
+    listProvisionNvrChannels: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                serverId: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The recorder's channels */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ProvisionNvrChannelList"];
+                };
+            };
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+            409: components["responses"]["Conflict"];
+            502: components["responses"]["NvrUnreachable"];
+        };
+    };
+    importProvisionNvrChannels: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                serverId: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ProvisionNvrImportRequest"];
+            };
+        };
+        responses: {
+            /** @description Imported */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ProvisionNvrImportResult"];
+                };
+            };
+            400: components["responses"]["BadRequest"];
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+            409: components["responses"]["Conflict"];
+            502: components["responses"]["NvrUnreachable"];
         };
     };
     getServerAgentTLSConfig: {

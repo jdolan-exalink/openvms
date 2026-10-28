@@ -203,3 +203,76 @@ func TestProvisionNvrServerLifecycleOverHTTP(t *testing.T) {
 		}
 	})
 }
+
+func TestProvisionNvrChannelRoutesOverHTTP(t *testing.T) {
+	te := setupMapsTest(t, false)
+	site := te.Cameras["frigate-h01/plaza"].SiteID.String()
+	const pass = "Channels-Pass-5"
+	nvr := nvmstest.New(t, "admin", pass)
+	operator := te.Demo.Tokens["operador"]
+
+	body := nvrBody(t, site, nvr.URL, pass)
+	body["name"] = "NVR channels"
+	status, _, out := te.request(http.MethodPost, "/api/v1/servers/provision-nvr/detect", te.AdminToken, nil, nvrBody(t, site, nvr.URL, pass))
+	if status != http.StatusOK {
+		t.Fatalf("detect = %d: %s", status, out)
+	}
+	var det gen.ProvisionNvrDetection
+	if err := json.Unmarshal(out, &det); err != nil {
+		t.Fatal(err)
+	}
+	body["channel_ids"] = []string{det.Channels[0].Id, det.Channels[1].Id}
+	status, _, out = te.request(http.MethodPost, "/api/v1/servers/provision-nvr", te.AdminToken, nil, body)
+	if status != http.StatusCreated {
+		t.Fatalf("create with two channels = %d: %s", status, out)
+	}
+	var srv gen.Server
+	_ = json.Unmarshal(out, &srv)
+	if srv.CameraCount != 2 {
+		t.Fatalf("camera count = %d, want the 2 chosen channels", srv.CameraCount)
+	}
+	path := "/api/v1/servers/" + srv.Id.String() + "/provision-nvr/channels"
+
+	if status, _, out := te.request(http.MethodGet, path, operator, nil, nil); status != http.StatusForbidden {
+		t.Fatalf("operator list = %d, want 403: %s", status, out)
+	}
+	status, _, out = te.request(http.MethodGet, path, te.AdminToken, nil, nil)
+	if status != http.StatusOK {
+		t.Fatalf("list = %d: %s", status, out)
+	}
+	var list gen.ProvisionNvrChannelList
+	_ = json.Unmarshal(out, &list)
+	imported := 0
+	for _, c := range list.Items {
+		if c.Imported != nil && *c.Imported {
+			imported++
+		}
+	}
+	if len(list.Items) != 7 || imported != 2 {
+		t.Fatalf("list = %d channels, %d imported; want 7 and 2", len(list.Items), imported)
+	}
+
+	if status, _, out := te.request(http.MethodPost, path, te.AdminToken, nil, map[string]any{"channel_ids": []string{"nope"}}); status != http.StatusBadRequest {
+		t.Fatalf("unknown channel = %d, want 400: %s", status, out)
+	}
+	if status, _, out := te.request(http.MethodPost, path, operator, nil, map[string]any{"channel_ids": []string{det.Channels[2].Id}}); status != http.StatusForbidden {
+		t.Fatalf("operator import = %d, want 403: %s", status, out)
+	}
+	status, _, out = te.request(http.MethodPost, path, te.AdminToken, nil, map[string]any{"channel_ids": []string{det.Channels[2].Id, det.Channels[3].Id}})
+	if status != http.StatusOK {
+		t.Fatalf("import = %d: %s", status, out)
+	}
+	var res gen.ProvisionNvrImportResult
+	_ = json.Unmarshal(out, &res)
+	if res.Added != 2 || res.Skipped != 0 {
+		t.Fatalf("import result = %+v, want 2 added", res)
+	}
+
+	frigate := "/api/v1/servers/" + te.Cameras["frigate-h01/plaza"].ServerID.String() + "/provision-nvr/channels"
+	status, _, out = te.request(http.MethodGet, frigate, te.AdminToken, nil, nil)
+	var e gen.Error
+	_ = json.Unmarshal(out, &e)
+	if status != http.StatusConflict || e.Code != "unsupported_for_server_kind" {
+		t.Fatalf("channels of a Frigate server = %d %q, want 409 unsupported_for_server_kind", status, e.Code)
+	}
+}

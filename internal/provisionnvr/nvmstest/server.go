@@ -82,6 +82,13 @@ func (s *Server) Logins() int {
 	return s.logins
 }
 
+// SetPassword changes the password the recorder accepts, like an operator changing it on the device.
+func (s *Server) SetPassword(password string) {
+	s.mu.Lock()
+	s.password = password
+	s.mu.Unlock()
+}
+
 // ExpireSession makes the next authenticated call answer "session timeout", once.
 func (s *Server) ExpireSession() {
 	s.mu.Lock()

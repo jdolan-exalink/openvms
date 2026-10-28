@@ -41,17 +41,7 @@ func toNvrDetection(d *provisionnvr.Detection) gen.ProvisionNvrDetection {
 		Capabilities:    make([]gen.ProvisionNvrCapability, 0, len(d.Capabilities)),
 	}
 	for _, c := range d.Channels {
-		ch := gen.ProvisionNvrChannel{Id: c.ID, Name: c.Name, Address: optString(c.Address), Model: optString(c.Model), Protocol: optString(c.Protocol)}
-		if c.Port > 0 {
-			port := c.Port
-			ch.Port = &port
-		}
-		if c.Status != nil {
-			online := c.Status.Online
-			ch.Online = &online
-			ch.Recording, ch.Motion = optString(c.Status.Recording), optString(c.Status.Motion)
-		}
-		out.Channels = append(out.Channels, ch)
+		out.Channels = append(out.Channels, toNvrChannel(c.Channel, c.Status))
 	}
 	for _, dk := range d.Storage.Disks {
 		slot := dk.Slot
@@ -108,4 +98,49 @@ func toNvrInfo(i *inventory.NVRInfo) *gen.ProvisionNvrInfo {
 		out.Capabilities = append(out.Capabilities, gen.ProvisionNvrCapability{Name: c.Name, State: gen.ProvisionNvrCapabilityState(c.State), Source: c.Source, Detail: c.Detail})
 	}
 	return out
+}
+
+func toNvrChannel(c provisionnvr.Channel, st *provisionnvr.ChannelStatus) gen.ProvisionNvrChannel {
+	ch := gen.ProvisionNvrChannel{Id: c.ID, Name: c.Name, Address: optString(c.Address), Model: optString(c.Model), Protocol: optString(c.Protocol)}
+	if c.Port > 0 {
+		port := c.Port
+		ch.Port = &port
+	}
+	if st != nil {
+		online := st.Online
+		ch.Online = &online
+		ch.Recording, ch.Motion = optString(st.Recording), optString(st.Motion)
+	}
+	return ch
+}
+
+func (h *Handlers) ListProvisionNvrChannels(ctx context.Context, r gen.ListProvisionNvrChannelsRequestObject) (gen.ListProvisionNvrChannelsResponseObject, error) {
+	a, err := actor(ctx)
+	if err != nil {
+		return nil, err
+	}
+	views, err := h.Inv.ListProvisionNVRChannels(ctx, a, r.ServerId)
+	if err != nil {
+		return nil, err
+	}
+	out := gen.ListProvisionNvrChannels200JSONResponse{Items: make([]gen.ProvisionNvrChannel, 0, len(views))}
+	for _, v := range views {
+		ch := toNvrChannel(v.Channel, v.Status)
+		imported := v.Imported
+		ch.Imported = &imported
+		out.Items = append(out.Items, ch)
+	}
+	return out, nil
+}
+
+func (h *Handlers) ImportProvisionNvrChannels(ctx context.Context, r gen.ImportProvisionNvrChannelsRequestObject) (gen.ImportProvisionNvrChannelsResponseObject, error) {
+	a, err := actor(ctx)
+	if err != nil {
+		return nil, err
+	}
+	added, skipped, err := h.Inv.ImportProvisionNVRChannels(ctx, a, r.ServerId, r.Body.ChannelIds)
+	if err != nil {
+		return nil, err
+	}
+	return gen.ImportProvisionNvrChannels200JSONResponse{Added: added, Skipped: skipped}, nil
 }

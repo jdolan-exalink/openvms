@@ -740,6 +740,47 @@ paths:
         "403": { $ref: "#/components/responses/Forbidden" }
         "404": { $ref: "#/components/responses/NotFound" }
         "502": { $ref: "#/components/responses/FrigateUnreachable" }
+  /api/v1/servers/{serverId}/provision-nvr/channels:
+    parameters:
+      - { name: serverId, in: path, required: true, schema: { type: string, format: uuid } }
+    get:
+      tags: [servers]
+      operationId: listProvisionNvrChannels
+      summary: Read the channels a Provision-ISR recorder has now
+      description: Read-only. Each channel says whether it already is a camera. Requires servers.manage on the server; only for servers of kind provision_nvr.
+      responses:
+        "200":
+          description: The recorder's channels
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ProvisionNvrChannelList" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { $ref: "#/components/responses/NotFound" }
+        "409": { $ref: "#/components/responses/Conflict" }
+        "502": { $ref: "#/components/responses/NvrUnreachable" }
+    post:
+      tags: [servers]
+      operationId: importProvisionNvrChannels
+      summary: Import channels of a Provision-ISR recorder as cameras
+      description: Adds the chosen channels as cameras. Channels already imported are left as they are; channels deleted here earlier are skipped. Nothing is written to the recorder. Requires servers.manage on the server.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/ProvisionNvrImportRequest" }
+      responses:
+        "200":
+          description: Imported
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ProvisionNvrImportResult" }
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { $ref: "#/components/responses/NotFound" }
+        "409": { $ref: "#/components/responses/Conflict" }
+        "502": { $ref: "#/components/responses/NvrUnreachable" }
   /api/v1/servers/{serverId}/agent/tls:
     parameters:
       - { name: serverId, in: path, required: true, schema: { type: string, format: uuid } }
@@ -6004,6 +6045,23 @@ components:
         online: { type: boolean, nullable: true, description: Absent when the recorder did not report channel status. }
         recording: { type: string, description: recording, noRecording, off or recordingAbnormal when reported. }
         motion: { type: string }
+        imported: { type: boolean, description: Only on the channel list of a registered recorder; true when the channel already is a camera. }
+    ProvisionNvrChannelList:
+      type: object
+      required: [items]
+      properties:
+        items: { type: array, items: { $ref: "#/components/schemas/ProvisionNvrChannel" } }
+    ProvisionNvrImportRequest:
+      type: object
+      required: [channel_ids]
+      properties:
+        channel_ids: { type: array, minItems: 1, items: { type: string }, description: Channel ids from the channel list. }
+    ProvisionNvrImportResult:
+      type: object
+      required: [added, skipped]
+      properties:
+        added: { type: integer, description: Channels that became new cameras. }
+        skipped: { type: integer, description: Channels deleted here earlier; restore them from the deleted cameras instead. }
     ProvisionNvrDisk:
       type: object
       required: [id, model, size_mb, free_mb]
@@ -6040,7 +6098,7 @@ components:
       type: object
       required: [code]
       properties:
-        code: { type: string, enum: [cameras_offline, storage_high, detection_stalled] }
+        code: { type: string, enum: [cameras_offline, storage_high, detection_stalled, recorder_disk_bad] }
         cameras: { type: array, items: { type: string }, description: Names of the enabled cameras without signal (cameras_offline). }
         used_percent: { type: integer, description: Share of the recordings disk in use (storage_high). }
     ServerStorage:

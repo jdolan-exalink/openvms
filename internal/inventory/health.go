@@ -70,6 +70,10 @@ type HealthPoller struct {
 
 	detectionOnce sync.Once
 	detection     *DetectionTracker
+
+	// nvr holds the logged-in client of each Provision recorder (see health_nvr.go).
+	nvrMu sync.Mutex
+	nvr   map[uuid.UUID]*nvrSession
 }
 
 // DefaultCapabilityInterval is the capability refresh period of the health poller.
@@ -118,10 +122,13 @@ func (p *HealthPoller) PollOnce(ctx context.Context) {
 	if p.Adapters == nil {
 		p.Adapters = NewAdapters(p.Svc)
 	}
-	var servers []db.FrigateServer
+	var servers, recorders []db.FrigateServer
 	err := p.Svc.Store.Tx(ctx, store.AllTenants, func(q *db.Queries) error {
 		var err error
-		servers, err = q.ListAllActiveFrigateServers(ctx)
+		if servers, err = q.ListAllActiveFrigateServers(ctx); err != nil {
+			return err
+		}
+		recorders, err = q.ListAllActiveProvisionNvrServers(ctx)
 		return err
 	})
 	if err != nil {
@@ -138,6 +145,16 @@ func (p *HealthPoller) PollOnce(ctx context.Context) {
 			cctx, cancel := context.WithTimeout(ctx, 20*time.Second)
 			defer cancel()
 			p.check(cctx, srv)
+		}()
+	}
+	for _, srv := range recorders {
+		wg.Add(1)
+		sem <- struct{}{}
+		go func() {
+			defer func() { <-sem; wg.Done() }()
+			cctx, cancel := context.WithTimeout(ctx, 20*time.Second)
+			defer cancel()
+			p.checkNVR(cctx, srv)
 		}()
 	}
 	wg.Wait()

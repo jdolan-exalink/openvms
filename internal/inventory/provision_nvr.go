@@ -96,16 +96,21 @@ func (in NVRConnInput) baseURL() string {
 // detectNVR reads a recorder and maps its failures to errors the API can answer with.
 func detectNVR(ctx context.Context, baseURL, username, password string) (*provisionnvr.Detection, error) {
 	det, err := provisionnvr.Detect(ctx, provisionnvr.DetectInput{BaseURL: baseURL, Username: username, Password: password})
-	if err == nil {
-		return det, nil
+	if err != nil {
+		return nil, mapNVRErr(err)
 	}
+	return det, nil
+}
+
+// mapNVRErr turns a failure of the recorder client into an error the API can answer with.
+func mapNVRErr(err error) error {
 	if class, ok := provisionnvr.ClassOf(err); ok {
-		return nil, &NVRError{Class: class, Err: err}
+		return &NVRError{Class: class, Err: err}
 	}
 	if errors.Is(err, provisionnvr.ErrInvalidEndpoint) {
-		return nil, invalid("host or port is not valid")
+		return invalid("host or port is not valid")
 	}
-	return nil, &NVRError{Class: provisionnvr.ClassOffline, Err: err}
+	return &NVRError{Class: provisionnvr.ClassOffline, Err: err}
 }
 
 // DetectProvisionNvr reads a recorder's identity, channels, storage and capabilities without saving
@@ -222,7 +227,7 @@ func (s *Service) CreateProvisionNVR(ctx context.Context, actor authz.Actor, in 
 			return store.Classify(err)
 		}
 		for _, ch := range channels {
-			if _, err := upsertNVRChannel(ctx, q, site.TenantID, site.ID, id, ch); err != nil {
+			if _, _, err := upsertNVRChannel(ctx, q, site.TenantID, site.ID, id, ch); err != nil {
 				return err
 			}
 		}
@@ -263,23 +268,23 @@ func selectChannels(det *provisionnvr.Detection, ids []string) ([]provisionnvr.C
 
 // upsertNVRChannel stores one recorder channel as a camera: its remote name is the channel id, which
 // stays the same when the channel is renamed. Phase 1 has no video, so the stream fields stay empty.
-// It reports whether a row was inserted; a tombstoned (deleted) channel is skipped and reports false.
-func upsertNVRChannel(ctx context.Context, q *db.Queries, tenantID, siteID, serverID uuid.UUID, ch provisionnvr.Channel) (bool, error) {
+// It reports whether a row was inserted, or skipped because the channel was deleted here (tombstoned).
+func upsertNVRChannel(ctx context.Context, q *db.Queries, tenantID, siteID, serverID uuid.UUID, ch provisionnvr.Channel) (inserted, skipped bool, err error) {
 	name := strings.TrimSpace(ch.Name)
 	if name == "" {
 		name = ch.ID
 	}
-	inserted, err := q.UpsertCamera(ctx, db.UpsertCameraParams{
+	inserted, err = q.UpsertCamera(ctx, db.UpsertCameraParams{
 		TenantID: tenantID, SiteID: siteID, ServerID: serverID, RemoteName: ch.ID, DisplayName: name,
 		Enabled: true, Zones: []string{},
 	})
 	if errors.Is(err, pgx.ErrNoRows) {
-		return false, nil
+		return false, true, nil
 	}
 	if err != nil || !inserted {
-		return inserted, err
+		return inserted, false, err
 	}
-	return true, q.RematerializeDynamicGroups(ctx, db.RematerializeDynamicGroupsParams{TenantID: tenantID})
+	return true, false, q.RematerializeDynamicGroups(ctx, db.RematerializeDynamicGroupsParams{TenantID: tenantID})
 }
 
 // syncProvisionNVR re-reads a recorder: it refreshes the stored capabilities and the cameras it already
@@ -321,7 +326,7 @@ func (s *Service) syncProvisionNVR(ctx context.Context, actor authz.Actor, srv d
 			if !ok {
 				continue
 			}
-			if _, err := upsertNVRChannel(ctx, q, srv.TenantID, srv.SiteID, srv.ID, ch); err != nil {
+			if _, _, err := upsertNVRChannel(ctx, q, srv.TenantID, srv.SiteID, srv.ID, ch); err != nil {
 				return err
 			}
 			res.Updated++
@@ -392,4 +397,135 @@ func (s *Service) updateProvisionNVR(ctx context.Context, actor authz.Actor, cur
 		return ServerView{}, err
 	}
 	return s.GetServer(ctx, actor, current.ID)
+}
+
+// NVRChannelView is a channel the recorder has now, with its live state and whether it already is a camera.
+type NVRChannelView struct {
+	provisionnvr.Channel
+	Status   *provisionnvr.ChannelStatus
+	Imported bool
+}
+
+// loadNVR loads a recorder the actor may manage and opens its client. The password is opened only for the call.
+func (s *Service) loadNVR(ctx context.Context, actor authz.Actor, id uuid.UUID) (db.GetServerRow, *provisionnvr.Client, error) {
+	var srv db.GetServerRow
+	err := s.tx(ctx, actor, func(q *db.Queries, c *access.Checker) error {
+		var err error
+		if srv, err = q.GetServer(ctx, id); err != nil {
+			return notFoundOr(err)
+		}
+		return c.Require(authz.ServersManage, access.Server(srv.TenantID, srv.SiteID, srv.ID))
+	})
+	if err != nil {
+		return srv, nil, err
+	}
+	if srv.Kind != KindProvisionNVR {
+		return srv, nil, &UnsupportedKindError{Kind: srv.Kind}
+	}
+	pw, err := s.Sealer.Open(srv.PasswordSealed, srv.ID[:])
+	if err != nil {
+		return srv, nil, err
+	}
+	client, err := provisionnvr.NewClient(srv.BaseUrl, provisionnvr.NewCredentials(srv.Username, string(pw)), provisionnvr.Config{})
+	if err != nil {
+		return srv, nil, mapNVRErr(err)
+	}
+	return srv, client, nil
+}
+
+// ListProvisionNVRChannels reads the channels the recorder has now and marks the ones that already are cameras.
+// Read-only; needs servers.manage.
+func (s *Service) ListProvisionNVRChannels(ctx context.Context, actor authz.Actor, id uuid.UUID) ([]NVRChannelView, error) {
+	srv, client, err := s.loadNVR(ctx, actor, id)
+	if err != nil {
+		return nil, err
+	}
+	defer func() { _ = client.Logout(ctx) }()
+	channels, err := client.Channels(ctx)
+	if err != nil {
+		return nil, mapNVRErr(err)
+	}
+	statuses, _ := client.ChannelStatuses(ctx) // the state is a nicety; the list is not worth failing for it
+	byID := map[string]provisionnvr.ChannelStatus{}
+	for _, st := range statuses {
+		byID[st.ID] = st
+	}
+	imported := map[string]bool{}
+	err = s.tx(ctx, actor, func(q *db.Queries, _ *access.Checker) error {
+		cams, err := q.ListServerCameras(ctx, srv.ID)
+		for _, c := range cams {
+			imported[c.RemoteName] = true
+		}
+		return err
+	})
+	if err != nil {
+		return nil, err
+	}
+	out := make([]NVRChannelView, 0, len(channels))
+	for _, ch := range channels {
+		v := NVRChannelView{Channel: ch, Imported: imported[ch.ID]}
+		if st, ok := byID[ch.ID]; ok {
+			v.Status = &st
+		}
+		out = append(out, v)
+	}
+	return out, nil
+}
+
+// ImportProvisionNVRChannels adds the chosen channels as cameras. A channel that is already a camera is left
+// as it is; one deleted here earlier is skipped (restore it from the deleted cameras). Nothing is written to
+// the recorder. Needs servers.manage.
+func (s *Service) ImportProvisionNVRChannels(ctx context.Context, actor authz.Actor, id uuid.UUID, ids []string) (added, skipped int, err error) {
+	if len(ids) == 0 {
+		return 0, 0, invalid("choose at least one channel")
+	}
+	srv, client, err := s.loadNVR(ctx, actor, id)
+	if err != nil {
+		return 0, 0, err
+	}
+	defer func() { _ = client.Logout(ctx) }()
+	channels, err := client.Channels(ctx)
+	if err != nil {
+		return 0, 0, mapNVRErr(err)
+	}
+	byID := map[string]provisionnvr.Channel{}
+	for _, ch := range channels {
+		byID[ch.ID] = ch
+	}
+	chosen := make([]provisionnvr.Channel, 0, len(ids))
+	seen := map[string]bool{}
+	for _, cid := range ids {
+		ch, ok := byID[cid]
+		if !ok {
+			return 0, 0, invalid("channel %q is not on the recorder", cid)
+		}
+		if !seen[cid] {
+			seen[cid] = true
+			chosen = append(chosen, ch)
+		}
+	}
+	err = s.tx(ctx, actor, func(q *db.Queries, c *access.Checker) error {
+		if err := c.Require(authz.ServersManage, access.Server(srv.TenantID, srv.SiteID, srv.ID)); err != nil {
+			return err
+		}
+		for _, ch := range chosen {
+			inserted, wasSkipped, err := upsertNVRChannel(ctx, q, srv.TenantID, srv.SiteID, srv.ID, ch)
+			if err != nil {
+				return err
+			}
+			switch {
+			case wasSkipped:
+				skipped++
+			case inserted:
+				added++
+			}
+		}
+		return audit(ctx, q, actor, &srv.TenantID, ActionServerSynced, "server", srv.ID, map[string]any{
+			"kind": KindProvisionNVR, "channels_added": added, "channels_skipped": skipped,
+		})
+	})
+	if err != nil {
+		return 0, 0, err
+	}
+	return added, skipped, nil
 }
