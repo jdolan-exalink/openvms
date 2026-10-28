@@ -5,6 +5,8 @@ import (
 	"encoding/xml"
 	"errors"
 	"fmt"
+	"regexp"
+	"strconv"
 	"strings"
 	"time"
 )
@@ -85,21 +87,30 @@ func (c *Client) RecordLog(ctx context.Context, channelID string, from, to time.
 	return out, nil
 }
 
-// UTCOffset is how far the recorder's clock is from UTC, read from its current local time (queryTimeCfg)
-// and rounded to 15 minutes. Its replay URLs take local time, so an offset that is guessed would play
-// the wrong moment.
+// UTCOffset is how far the recorder's local time is from UTC (queryTimeCfg). Its replay URLs take local
+// time, so an offset that is guessed would play the wrong moment. The recorder's time zone ("ART3": three
+// hours behind) is used when it states one without daylight saving; otherwise the offset is read from its
+// current local time against ours and rounded to 15 minutes, which holds only while its clock is within
+// seven minutes of the real time.
 func (c *Client) UTCOffset(ctx context.Context) (time.Duration, error) {
 	return c.utcOffsetAt(ctx, time.Now())
 }
 
 func (c *Client) utcOffsetAt(ctx context.Context, now time.Time) (time.Duration, error) {
 	var v struct {
-		Current string `xml:"content>synchronizeInfo>currentTime"`
-		Date    string `xml:"content>formatInfo>date"`
-		Time    string `xml:"content>formatInfo>time"`
+		Current  string `xml:"content>synchronizeInfo>currentTime"`
+		Date     string `xml:"content>formatInfo>date"`
+		Time     string `xml:"content>formatInfo>time"`
+		Zone     string `xml:"content>timezoneInfo>timeZone"`
+		Daylight string `xml:"content>timezoneInfo>daylightSwitch"`
 	}
 	if err := c.read(ctx, "queryTimeCfg", "", &v); err != nil {
 		return 0, err
+	}
+	if !strings.EqualFold(strings.TrimSpace(v.Daylight), "true") {
+		if off, ok := parsePOSIXOffset(strings.TrimSpace(v.Zone)); ok {
+			return off, nil
+		}
 	}
 	local, err := parseDeviceTime(strings.TrimSpace(v.Current), strings.TrimSpace(v.Date), strings.TrimSpace(v.Time))
 	if err != nil {
@@ -141,3 +152,27 @@ func ReplayPath(channel int, stream Stream, start time.Time, offset time.Duratio
 	}
 	return fmt.Sprintf("/chID=%d&date=%s&time=%s&timelen=%d&streamType=%s&linkType=tcp", channel, local.Format("2006-01-02"), local.Format("15:04:05"), secs, stream)
 }
+
+// parsePOSIXOffset reads a POSIX style time zone such as "ART3" (three hours west of UTC), "CET-1" or
+// "IST-5:30" and returns its offset from UTC. Zones with daylight saving rules ("EST5EDT") are not read.
+func parsePOSIXOffset(zone string) (time.Duration, bool) {
+	m := posixZone.FindStringSubmatch(zone)
+	if m == nil {
+		return 0, false
+	}
+	hours, _ := strconv.Atoi(m[2])
+	minutes := 0
+	if m[3] != "" {
+		minutes, _ = strconv.Atoi(m[3])
+	}
+	if hours > 14 || minutes > 59 {
+		return 0, false
+	}
+	west := time.Duration(hours)*time.Hour + time.Duration(minutes)*time.Minute
+	if m[1] == "-" {
+		return west, true // "CET-1" is one hour east of UTC
+	}
+	return -west, true
+}
+
+var posixZone = regexp.MustCompile(`^[A-Za-z]{3,6}([+-]?)(\d{1,2})(?::(\d{2}))?$`)

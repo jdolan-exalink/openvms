@@ -97,16 +97,50 @@ func TestRecordLogIgnoresMalformedSegmentsAndRefusesANonUTCLog(t *testing.T) {
 	}
 }
 
-func TestUTCOffsetIsReadFromTheRecordersClock(t *testing.T) {
+func TestUTCOffsetUsesTheRecordersTimeZoneNotOurClock(t *testing.T) {
 	srv := nvmstest.New(t, "admin", "pw-ok")
 	c := recClient(t, srv)
-	// The fixture says it is 28/10/2026 08:40:08 there; that is 11:40 UTC, so the recorder is 3 hours behind.
-	off, err := c.utcOffsetAt(context.Background(), time.Date(2026, 10, 28, 11, 40, 11, 0, time.UTC))
-	if err != nil || off != -3*time.Hour {
-		t.Fatalf("offset = %v, %v; want -3h", off, err)
+	// The fixture states zone ART3 without daylight saving: three hours behind, whatever time it is here.
+	for _, now := range []time.Time{time.Date(2026, 10, 28, 11, 40, 11, 0, time.UTC), time.Date(2031, 1, 5, 3, 3, 3, 0, time.UTC)} {
+		off, err := c.utcOffsetAt(context.Background(), now)
+		if err != nil || off != -3*time.Hour {
+			t.Fatalf("at %v the offset = %v, %v; want -3h", now, off, err)
+		}
+	}
+}
+
+func TestParsePOSIXOffset(t *testing.T) {
+	for zone, want := range map[string]time.Duration{
+		"ART3": -3 * time.Hour, "EST5": -5 * time.Hour, "UTC0": 0, "CET-1": time.Hour, "IST-5:30": 5*time.Hour + 30*time.Minute,
+		"NPT-5:45": 5*time.Hour + 45*time.Minute, "GMT+3": -3 * time.Hour, "AEST-10": 10 * time.Hour,
+	} {
+		if got, ok := parsePOSIXOffset(zone); !ok || got != want {
+			t.Fatalf("parsePOSIXOffset(%q) = %v, %v; want %v", zone, got, ok, want)
+		}
+	}
+	for _, bad := range []string{"", "EST5EDT", "garbage", "ART", "ART99", "ART3:75", "3"} {
+		if got, ok := parsePOSIXOffset(bad); ok {
+			t.Fatalf("parsePOSIXOffset(%q) = %v, want not ok", bad, got)
+		}
+	}
+}
+
+func TestUTCOffsetReadsTheClockWhenTheZoneCannotBeUsed(t *testing.T) {
+	srv := nvmstest.New(t, "admin", "pw-ok")
+	c := recClient(t, srv)
+	// With daylight saving on, or a zone that is not understood, the clock decides: 08:40:08 there at 11:40 UTC here is -3h.
+	for name, zone := range map[string]string{
+		"daylight saving": "<timezoneInfo><timeZone>ART3</timeZone><daylightSwitch>true</daylightSwitch></timezoneInfo>",
+		"unknown zone":    "<timezoneInfo><timeZone>America/Cordoba</timeZone><daylightSwitch>false</daylightSwitch></timezoneInfo>",
+	} {
+		srv.Override["queryTimeCfg"] = `<response><status>success</status><content>` + zone + `<synchronizeInfo><currentTime>28/10/2026 08:40:08</currentTime></synchronizeInfo><formatInfo><date>day-month-year</date><time>24</time></formatInfo></content></response>`
+		off, err := c.utcOffsetAt(context.Background(), time.Date(2026, 10, 28, 11, 40, 11, 0, time.UTC))
+		if err != nil || off != -3*time.Hour {
+			t.Fatalf("%s: offset = %v, %v; want -3h from the clock", name, off, err)
+		}
 	}
 	srv.Override["queryTimeCfg"] = `<response><status>success</status><content><synchronizeInfo><currentTime>2026/10/28 05:10:03 PM</currentTime></synchronizeInfo><formatInfo><date>year-month-day</date><time>12</time></formatInfo></content></response>`
-	off, err = c.utcOffsetAt(context.Background(), time.Date(2026, 10, 28, 11, 40, 0, 0, time.UTC))
+	off, err := c.utcOffsetAt(context.Background(), time.Date(2026, 10, 28, 11, 40, 0, 0, time.UTC))
 	if err != nil || off != 5*time.Hour+30*time.Minute {
 		t.Fatalf("12 hour clock: offset = %v, %v; want +5h30m", off, err)
 	}
