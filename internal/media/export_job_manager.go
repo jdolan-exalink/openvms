@@ -34,7 +34,11 @@ type ExportJobManager struct {
 	StorageDir string
 	Limiter    *BandwidthLimiter
 	Interval   time.Duration
-	Log        interface {
+	// NVR copies the video of Provision-ISR recorder cameras (they have no Frigate to export for them).
+	NVR *NVRVideo
+	// FFmpeg is the ffmpeg binary used for recorder cameras; empty looks it up in PATH.
+	FFmpeg string
+	Log    interface {
 		InfoContext(ctx context.Context, msg string, args ...any)
 		WarnContext(ctx context.Context, msg string, args ...any)
 		ErrorContext(ctx context.Context, msg string, args ...any)
@@ -42,6 +46,8 @@ type ExportJobManager struct {
 
 	mu       sync.Mutex
 	inFlight map[uuid.UUID]context.CancelFunc
+	// recorderSlots limits the copies running against each recorder (see maxRecorderCaptures).
+	recorderSlots map[uuid.UUID]chan struct{}
 }
 
 func (m *ExportJobManager) Run(ctx context.Context) {
@@ -295,6 +301,10 @@ func (m *ExportJobManager) startRemoteExport(ctx context.Context, j activeJobRow
 		m.failItem(ctx, it.id, "frigate server not found or deleted")
 		return
 	}
+	if it.serverRow.Kind == inventory.KindProvisionNVR {
+		m.startRecorderExport(ctx, j, it)
+		return
+	}
 	a, err := m.Adapters.Get(ctx, it.serverRow)
 	if err != nil {
 		m.Log.WarnContext(ctx, "export manager: adapter get", "server_id", it.serverID, "error", err)
@@ -386,7 +396,11 @@ func (m *ExportJobManager) ensureTransferring(parentCtx context.Context, j activ
 			cancel()
 		}()
 
-		if err := m.transferItem(transferCtx, j, it); err != nil {
+		run := m.transferItem
+		if it.serverRow.Kind == inventory.KindProvisionNVR {
+			run = m.captureRecorderItem
+		}
+		if err := run(transferCtx, j, it); err != nil {
 			if !errors.Is(err, context.Canceled) {
 				m.Log.WarnContext(parentCtx, "export manager: transfer failed", "item_id", it.id, "error", err)
 				m.failItem(parentCtx, it.id, err.Error())

@@ -196,6 +196,8 @@ func run() error {
 		Limiter:    exportLimiter,
 		Interval:   2 * time.Second,
 		Log:        log,
+		// Recorder (Provision-ISR) cameras are copied straight from the recorder with ffmpeg.
+		NVR: &media.NVRVideo{Sealer: sealer},
 	}
 	go jobManager.Run(ctx)
 
