@@ -43,11 +43,14 @@ func statusFor(err error) (int, string, string) {
 	var mce *inventory.ManagedConflictError
 	var fe *inventory.FrigateError
 	var nvr *inventory.NVRError
+	var uke *inventory.UnsupportedKindError
 	var fve *faces.ValidationError
 	var fre *faces.RemoteError
 	switch {
 	case errors.As(err, &nvr):
 		return nvrStatus(nvr)
+	case errors.As(err, &uke):
+		return http.StatusConflict, "unsupported_for_server_kind", uke.Error()
 	case errors.As(err, &ve):
 		return http.StatusBadRequest, "invalid", ve.Msg
 	case errors.As(err, &be):

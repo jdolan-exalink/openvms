@@ -73,12 +73,15 @@ type FrigateConfigRevision struct {
 
 func serverRow(srv db.GetServerRow) db.FrigateServer {
 	return db.FrigateServer{
-		ID: srv.ID, BaseUrl: srv.BaseUrl, AuthMode: srv.AuthMode, Username: srv.Username,
+		ID: srv.ID, Kind: srv.Kind, BaseUrl: srv.BaseUrl, AuthMode: srv.AuthMode, Username: srv.Username,
 		PasswordSealed: srv.PasswordSealed, TlsSkipVerify: srv.TlsSkipVerify,
 	}
 }
 
 func (s *Service) frigateAdapter(ctx context.Context, srv db.GetServerRow) (frigate.Adapter, error) {
+	if err := requireFrigate(srv.Kind); err != nil {
+		return nil, err
+	}
 	info, err := s.connInfo(serverRow(srv))
 	if err != nil {
 		return nil, err

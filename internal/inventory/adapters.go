@@ -35,6 +35,9 @@ func NewAdapters(svc *Service) *Adapters {
 
 // Get returns a connected adapter for srv, connecting (and detecting the version) if needed.
 func (p *Adapters) Get(ctx context.Context, srv db.FrigateServer) (frigate.Adapter, error) {
+	if err := requireFrigate(srv.Kind); err != nil {
+		return nil, err
+	}
 	p.mu.Lock()
 	c, ok := p.entries[srv.ID]
 	p.mu.Unlock()

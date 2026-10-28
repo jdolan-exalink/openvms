@@ -16,3 +16,10 @@ func TestToServerReportsItsKind(t *testing.T) {
 		}
 	}
 }
+
+func TestStatusForUnsupportedServerKind(t *testing.T) {
+	status, code, _ := statusFor(&inventory.UnsupportedKindError{Kind: "provision_nvr"})
+	if status != 409 || code != "unsupported_for_server_kind" {
+		t.Fatalf("statusFor = %d %q, want 409 unsupported_for_server_kind", status, code)
+	}
+}

@@ -15,6 +15,29 @@ import (
 	"github.com/jdolan-exalink/openvms/internal/store/db"
 )
 
+// Server kinds, as stored in frigate_servers.kind.
+const (
+	KindFrigate      = "frigate"
+	KindProvisionNVR = "provision_nvr"
+)
+
+// UnsupportedKindError reports an operation that only exists for another kind of server, for example a
+// Frigate configuration change asked of a Provision-ISR recorder.
+type UnsupportedKindError struct{ Kind string }
+
+func (e *UnsupportedKindError) Error() string {
+	return "this operation is not available for " + e.Kind + " servers"
+}
+
+// requireFrigate fails for a server that is not a Frigate server. An empty kind is a Frigate server: it
+// comes from a partial row built before kinds existed, never from the database.
+func requireFrigate(kind string) error {
+	if kind != "" && kind != KindFrigate {
+		return &UnsupportedKindError{Kind: kind}
+	}
+	return nil
+}
+
 // NVRError is a failed call to a Provision-ISR recorder. Class says what the caller should tell the
 // user; the underlying error stays out of the message because it may describe the recorder's answer.
 type NVRError struct {

@@ -66,6 +66,13 @@ ORDER BY fs.name;
 -- name: ListAllActiveServers :many
 SELECT * FROM frigate_servers WHERE deleted_at IS NULL ORDER BY id;
 
+-- name: ListAllActiveFrigateServers :many
+-- The servers the Frigate pollers (events, health) talk to; other kinds have their own clients.
+SELECT * FROM frigate_servers WHERE deleted_at IS NULL AND kind = 'frigate' ORDER BY id;
+
+-- name: ListAllActiveProvisionNvrServers :many
+SELECT * FROM frigate_servers WHERE deleted_at IS NULL AND kind = 'provision_nvr' ORDER BY id;
+
 -- name: GetServer :one
 SELECT fs.*,
     (SELECT count(*) FROM cameras c WHERE c.server_id = fs.id AND c.deleted_at IS NULL)::int AS camera_count,

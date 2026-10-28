@@ -148,7 +148,7 @@ func (s *Syncer) SyncAll(ctx context.Context) {
 	var servers []db.FrigateServer
 	err := s.Store.Tx(ctx, store.AllTenants, func(q *db.Queries) error {
 		var err error
-		servers, err = q.ListAllActiveServers(ctx)
+		servers, err = q.ListAllActiveFrigateServers(ctx)
 		return err
 	})
 	if err != nil {
