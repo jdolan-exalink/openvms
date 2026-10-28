@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"net"
+	"net/url"
 	"strconv"
 	"strings"
 
@@ -347,11 +348,30 @@ func (s *Service) syncProvisionNVR(ctx context.Context, actor authz.Actor, srv d
 	return res, err
 }
 
-// updateProvisionNVR renames a recorder or moves it to another site. Its connection (address, account,
-// password) cannot be edited yet: remove the recorder and add it again.
+// normalizeNVRBase turns what a user typed ("http://host", "https://host:8443") into the stored form
+// scheme://host:port, with the default port made explicit like registration does.
+func normalizeNVRBase(raw string) (string, error) {
+	u, err := url.Parse(strings.TrimSpace(raw))
+	if err != nil || (u.Scheme != "http" && u.Scheme != "https") || u.Hostname() == "" || u.User != nil || (u.Path != "" && u.Path != "/") || u.RawQuery != "" || u.Fragment != "" {
+		return "", invalid("the address must look like http://host or https://host:port")
+	}
+	port := u.Port()
+	if port == "" {
+		port = "80"
+		if u.Scheme == "https" {
+			port = "443"
+		}
+	}
+	return u.Scheme + "://" + net.JoinHostPort(u.Hostname(), port), nil
+}
+
+// updateProvisionNVR renames a recorder, moves it to another site, and changes its connection (address,
+// account, password). A changed connection is proven first: the recorder must answer with the new
+// settings, and it must still be the same recorder, which means at least one imported channel exists on
+// it; otherwise nothing is saved. A blank password keeps the stored one, unless the account changes.
 func (s *Service) updateProvisionNVR(ctx context.Context, actor authz.Actor, current db.GetServerRow, in UpdateServerInput) (ServerView, error) {
-	if in.BaseURL != nil || in.AuthMode != nil || in.Username != nil || in.Password != nil || in.TLSSkipVerify != nil || in.EventAlarmMode != nil {
-		return ServerView{}, invalid("the connection of a Provision recorder cannot be edited yet; remove it and add it again")
+	if in.AuthMode != nil || in.TLSSkipVerify != nil || in.EventAlarmMode != nil {
+		return ServerView{}, invalid("a Provision recorder has no authentication mode, certificate switch or event alarm mode to edit")
 	}
 	name, siteID := current.Name, current.SiteID
 	if in.Name != nil {
@@ -362,6 +382,67 @@ func (s *Service) updateProvisionNVR(ctx context.Context, actor authz.Actor, cur
 	if in.SiteID != nil {
 		siteID = *in.SiteID
 	}
+
+	base, user, sealed := current.BaseUrl, current.Username, current.PasswordSealed
+	var caps []byte
+	connChanged := false
+	if in.BaseURL != nil || in.Username != nil || (in.Password != nil && *in.Password != "") {
+		var err error
+		if in.BaseURL != nil {
+			if base, err = normalizeNVRBase(*in.BaseURL); err != nil {
+				return ServerView{}, err
+			}
+		}
+		if in.Username != nil {
+			if user = strings.TrimSpace(*in.Username); user == "" {
+				return ServerView{}, invalid("username cannot be empty")
+			}
+		}
+		newPassword := in.Password != nil && *in.Password != ""
+		connChanged = base != current.BaseUrl || user != current.Username || newPassword
+		if connChanged {
+			if user != current.Username && !newPassword {
+				return ServerView{}, invalid("enter the password of the new account")
+			}
+			var pw string
+			if newPassword {
+				pw = *in.Password
+			} else {
+				stored, err := s.Sealer.Open(current.PasswordSealed, current.ID[:])
+				if err != nil {
+					return ServerView{}, err
+				}
+				pw = string(stored)
+			}
+			if base != current.BaseUrl {
+				err := s.tx(ctx, actor, func(q *db.Queries, c *access.Checker) error {
+					if err := c.Require(authz.ServersManage, access.Server(current.TenantID, current.SiteID, current.ID)); err != nil {
+						return err
+					}
+					return requireFreeAddress(ctx, q, current.TenantID, current.ID, base)
+				})
+				if err != nil {
+					return ServerView{}, err
+				}
+			}
+			det, err := detectNVR(ctx, base, user, pw)
+			if err != nil {
+				return ServerView{}, err
+			}
+			if err := s.requireSameRecorder(ctx, actor, current, det); err != nil {
+				return ServerView{}, err
+			}
+			if caps, err = nvrCapabilitiesJSON(det); err != nil {
+				return ServerView{}, err
+			}
+			if newPassword {
+				if sealed, err = s.Sealer.Seal([]byte(pw), current.ID[:]); err != nil {
+					return ServerView{}, err
+				}
+			}
+		}
+	}
+
 	err := s.tx(ctx, actor, func(q *db.Queries, c *access.Checker) error {
 		if err := c.Require(authz.ServersManage, access.Server(current.TenantID, current.SiteID, current.ID)); err != nil {
 			return err
@@ -375,11 +456,21 @@ func (s *Service) updateProvisionNVR(ctx context.Context, actor authz.Actor, cur
 				return invalid("a server cannot move to another tenant")
 			}
 		}
+		if base != current.BaseUrl {
+			if err := requireFreeAddress(ctx, q, current.TenantID, current.ID, base); err != nil {
+				return err
+			}
+		}
 		if err := q.UpdateServer(ctx, db.UpdateServerParams{
-			ID: current.ID, Name: name, SiteID: siteID, BaseUrl: current.BaseUrl, AuthMode: current.AuthMode, Username: current.Username,
-			PasswordSealed: current.PasswordSealed, TlsSkipVerify: current.TlsSkipVerify,
+			ID: current.ID, Name: name, SiteID: siteID, BaseUrl: base, AuthMode: current.AuthMode, Username: user,
+			PasswordSealed: sealed, TlsSkipVerify: current.TlsSkipVerify,
 		}); err != nil {
 			return store.Classify(err)
+		}
+		if caps != nil {
+			if err := q.UpdateServerDiscovery(ctx, db.UpdateServerDiscoveryParams{ID: current.ID, FrigateVersion: current.FrigateVersion, Capabilities: caps}); err != nil {
+				return err
+			}
 		}
 		if siteID != current.SiteID {
 			if err := q.MoveServerCameras(ctx, db.MoveServerCamerasParams{ServerID: current.ID, SiteID: siteID}); err != nil {
@@ -390,13 +481,42 @@ func (s *Service) updateProvisionNVR(ctx context.Context, actor authz.Actor, cur
 			}
 		}
 		return audit(ctx, q, actor, &current.TenantID, ActionServerUpdated, "server", current.ID, map[string]any{
-			"kind": KindProvisionNVR, "renamed": name != current.Name, "moved": siteID != current.SiteID,
+			"kind": KindProvisionNVR, "renamed": name != current.Name, "moved": siteID != current.SiteID, "connection_changed": connChanged,
 		})
 	})
 	if err != nil {
 		return ServerView{}, err
 	}
 	return s.GetServer(ctx, actor, current.ID)
+}
+
+// requireSameRecorder refuses a new connection that answers as another recorder: a server with cameras
+// must find at least one of their channels on it, so the cameras keep pointing at real channels.
+func (s *Service) requireSameRecorder(ctx context.Context, actor authz.Actor, srv db.GetServerRow, det *provisionnvr.Detection) error {
+	var known []string
+	err := s.tx(ctx, actor, func(q *db.Queries, _ *access.Checker) error {
+		cams, err := q.ListServerCameras(ctx, srv.ID)
+		for _, c := range cams {
+			known = append(known, c.RemoteName)
+		}
+		return err
+	})
+	if err != nil {
+		return err
+	}
+	if len(known) == 0 {
+		return nil
+	}
+	onRecorder := map[string]bool{}
+	for _, c := range det.Channels {
+		onRecorder[c.ID] = true
+	}
+	for _, id := range known {
+		if onRecorder[id] {
+			return nil
+		}
+	}
+	return invalid("that address answers as a different recorder: none of the imported channels exist on it")
 }
 
 // NVRChannelView is a channel the recorder has now, with its live state and whether it already is a camera.

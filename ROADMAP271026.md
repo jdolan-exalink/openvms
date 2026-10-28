@@ -42,8 +42,9 @@ Verified: Go unit tests, the full integration suites of `internal/inventory`, `i
 - Native review of the newest slices: those that include regenerated `api.gen.go` exceed the reviewer's context budget (`lens_context_budget_exceeded`).
 
 ### Open questions
-1. Editing a recorder's connection (address, password) is not supported yet. Is that acceptable for Phase 1?
-2. `auth_failed` is reported through `last_error` with status `offline`, because the server status column keeps its four values. Do we want a real `auth_failed` status?
+1. `auth_failed` is reported through `last_error` with status `offline`, because the server status column keeps its four values. Do we want a real `auth_failed` status?
+
+Answered since: editing a recorder's connection (address, port, HTTPS, account, password) is supported on branch `feat/provision-nvr-edit` (see `docs/integrations/provision-isr.md`).
 
 ### Later phases (blocked on evidence)
 | Phase | Item | Blocker |

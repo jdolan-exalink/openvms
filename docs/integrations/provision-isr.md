@@ -56,8 +56,14 @@ OpenVMS polls each recorder with one cached login: per-channel online state and 
 | The account is locked | like `auth_failed`; tried again after 10 minutes | `unknown` |
 | The device is not an NVMS-9000 recorder | `offline`, `last_error` starts with `unsupported:` | `unknown` |
 
-The recorder's connection (address, account, password) cannot be edited yet. Renaming and moving it to another site works; to change anything
-else, remove the recorder and add it again.
+## Edit a recorder
+
+Edit the server, tab **Conexión**: name, site, address, web port, HTTPS, account and password. A blank password keeps the stored one (changing
+the account requires typing its password). When the address, the account or the password changes, OpenVMS first connects with the new
+settings and saves only if the recorder answers **and** it is still the same recorder, meaning at least one imported channel exists on it. A
+wrong password is refused after one attempt and nothing is saved. Entering the right password after a rejection restores the polling.
+
+The authentication mode, the certificate switch and event alarm modes of Frigate servers do not exist for recorders; the API refuses them.
 
 ## What works today
 

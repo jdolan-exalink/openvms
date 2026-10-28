@@ -8,7 +8,7 @@ import { ServerDetailTabs } from "@/components/servers/ServerDetailTabs";
 import { problemText } from "@/components/servers/ServerSummaryTab";
 import { Icon } from "@/components/Icon";
 import { Modal } from "@/components/Modal";
-import { Button, ErrorNote, Field, Select, StatusBadge, TextInput } from "@/components/ui";
+import { Button, ErrorNote, Field, Select, StatusBadge, Switch, TextInput } from "@/components/ui";
 import { useT } from "@/i18n";
 import { fmtDateTime } from "@/lib/format";
 
@@ -92,15 +92,35 @@ function Channels({ server }: { server: Schemas["Server"] }) {
   );
 }
 
+function splitBase(baseUrl: string) {
+  try {
+    const u = new URL(baseUrl);
+    const https = u.protocol === "https:";
+    return { host: u.hostname.replace(/^\[|\]$/g, ""), port: u.port || (https ? "443" : "80"), https };
+  } catch {
+    return { host: "", port: "80", https: false };
+  }
+}
+
+function joinBase(host: string, port: string, https: boolean) {
+  const h = host.trim();
+  return `${https ? "https" : "http"}://${h.includes(":") ? `[${h}]` : h}:${port || (https ? "443" : "80")}`;
+}
+
 function Connection({ server, sites, onDone }: { server: Schemas["Server"]; sites: Schemas["Site"][]; onDone: () => void }) {
   const t = useT();
   const qc = useQueryClient();
-  const [form, setForm] = useState({ name: server.name, site_id: server.site_id });
+  const initial = splitBase(server.base_url);
+  const [form, setForm] = useState({ name: server.name, site_id: server.site_id, ...initial, username: server.username, password: "" });
   const save = useMutation({
     mutationFn: async () => {
       const body: Schemas["ServerUpdate"] = {};
       if (form.name !== server.name) body.name = form.name;
       if (form.site_id !== server.site_id) body.site_id = form.site_id;
+      const base = joinBase(form.host, form.port, form.https);
+      if (base !== joinBase(initial.host, initial.port, initial.https)) body.base_url = base;
+      if (form.username !== server.username) body.username = form.username;
+      if (form.password) body.password = form.password;
       return unwrap(await api.PATCH("/api/v1/servers/{serverId}", { params: { path: { serverId: server.id } }, body }));
     },
     onSuccess: async () => {
@@ -108,6 +128,7 @@ function Connection({ server, sites, onDone }: { server: Schemas["Server"]; site
       onDone();
     },
   });
+  const edit = (k: "host" | "port" | "username" | "password") => (e: { target: { value: string } }) => setForm({ ...form, [k]: e.target.value });
   return (
     <form onSubmit={(e: FormEvent) => { e.preventDefault(); save.mutate(); }} className="flex flex-col gap-4">
       <div className="grid gap-4 sm:grid-cols-2">
@@ -117,8 +138,14 @@ function Connection({ server, sites, onDone }: { server: Schemas["Server"]; site
             {sites.map((s) => <option key={s.id} value={s.id}>{s.name}</option>)}
           </Select>
         </Field>
-        <Field label="Dirección"><TextInput readOnly value={server.base_url} /></Field>
-        <Field label="Usuario"><TextInput readOnly value={server.username} /></Field>
+        <Field label={t("servers.provisionHost")}><TextInput required value={form.host} onChange={edit("host")} autoComplete="off" /></Field>
+        <Field label={t("servers.provisionPort")}><TextInput required type="number" min={1} max={65535} value={form.port} onChange={edit("port")} /></Field>
+        <Switch className="self-center" label={t("servers.provisionHttps")} checked={form.https} onChange={(next) => setForm({ ...form, https: next })} />
+        <div className="hidden sm:block" />
+        <Field label={t("servers.provisionUser")}><TextInput required value={form.username} onChange={edit("username")} autoComplete="off" /></Field>
+        <Field label={t("servers.provisionPassword")} hint={t("servers.provisionPasswordKeep")}>
+          <TextInput type="password" value={form.password} onChange={edit("password")} autoComplete="new-password" />
+        </Field>
       </div>
       <p className="text-xs text-muted">{t("servers.provisionConnectionNote")}</p>
       <ErrorNote error={save.error} />
