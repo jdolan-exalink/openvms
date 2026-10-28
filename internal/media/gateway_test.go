@@ -3,7 +3,11 @@ package media
 import (
 	"errors"
 	"testing"
+
+	"github.com/jdolan-exalink/openvms/internal/store/db"
 )
+
+func serverOfKind(kind string) db.FrigateServer { return db.FrigateServer{Kind: kind} }
 
 // TestLiveStreamPicksSubOrMain covers the ordinary cases: sub for grids (default and
 // quality=sub), main for the single view (quality=main).
@@ -37,6 +41,20 @@ func TestLiveStreamNoRestreamFailsFast(t *testing.T) {
 	s, err := liveStream(cam, "")
 	if s != "" || !errors.Is(err, errNoStream) {
 		t.Fatalf("want (\"\", errNoStream), got (%q, %v)", s, err)
+	}
+}
+
+func TestLiveKindRefusal(t *testing.T) {
+	var recorder Camera
+	recorder.Server.Kind = "provision_nvr"
+	code, msg, refused := liveKindRefusal(recorder)
+	if !refused || code != CodeVideoUnavailable || msg == "" {
+		t.Fatalf("recorder camera: got (%q, %q, %v), want a video_unavailable refusal", code, msg, refused)
+	}
+	for name, cam := range map[string]Camera{"frigate": {Server: serverOfKind("frigate")}, "kind not set (partial row)": {}} {
+		if _, _, refused := liveKindRefusal(cam); refused {
+			t.Errorf("%s must not be refused", name)
+		}
 	}
 }
 

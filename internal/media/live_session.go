@@ -71,6 +71,8 @@ const (
 	CodeUpstreamUnreachable = "upstream_unreachable"
 	CodeCodecUnsupported    = "codec_unsupported"
 	CodeServerError         = "server_error"
+	// CodeVideoUnavailable: the camera belongs to a recorder whose video OpenVMS cannot play yet.
+	CodeVideoUnavailable = "video_unavailable"
 )
 
 // errorFrame is the JSON text frame the gateway sends right before closing a live socket:
