@@ -50,46 +50,87 @@ describe("LiveRecDock", () => {
   const dock = (transport: RecTransport, now = 1775600500) =>
     renderWithClient(<LiveRecDock transport={transport} cameras={mockCameras} events={[]} now={now} />);
 
-  it("frames the clip controls as Exportación, with Inicio and Fin that say what they do", () => {
+  it("frames the clip controls as Exportación and walks through Inicio, Fin and Exportar", () => {
     const { transport, setPos } = createTransport(1775600100);
     dock(transport);
 
     expect(screen.getByText("Exportación")).toBeInTheDocument();
-    const start = screen.getByRole("button", { name: "Marcar inicio" });
-    const end = screen.getByRole("button", { name: "Marcar fin" });
-    expect(start).toHaveAttribute("title", expect.stringContaining("Marcar inicio"));
-    expect(end).toHaveAttribute("title", expect.stringContaining("Marcar fin"));
-    expect(screen.getByText(/tocá Inicio/)).toBeInTheDocument();
-    expect(screen.queryByRole("button", { name: /Exportar/ })).not.toBeInTheDocument();
+    const start = () => screen.getByRole("button", { name: /inicio$/i });
+    const end = () => screen.getByRole("button", { name: /fin$/i });
+    const exportBtn = () => screen.getByRole("button", { name: "Exportar" });
 
-    fireEvent.click(start);
-    expect(start).toHaveTextContent(/Inicio\d\d:\d\d:\d\d/);
-    expect(screen.getByText(/tocá Fin/)).toBeInTheDocument();
+    // Nothing marked: Fin and Exportar are locked.
+    expect(start()).toBeEnabled();
+    expect(end()).toBeDisabled();
+    expect(end()).toHaveAttribute("title", expect.stringContaining("marcá el inicio"));
+    expect(exportBtn()).toBeDisabled();
+    expect(screen.getByRole("status")).toHaveTextContent(/Tocá Inicio/);
 
-    setPos(1775600200);
-    fireEvent.click(end);
-    expect(end).toHaveTextContent(/Fin\d\d:\d\d:\d\d/);
+    // First press: Inicio is being placed and follows the cursor; Fin stays locked.
+    fireEvent.click(start());
+    expect(start()).toHaveAccessibleName("Fijar inicio");
+    expect(start()).toHaveAttribute("aria-pressed", "true");
+    expect(end()).toBeDisabled();
+    expect(end()).toHaveAttribute("title", expect.stringContaining("fijá el inicio"));
+    setPos(1775600150);
+    fireEvent.click(start());
+    expect(start()).toHaveAccessibleName("Mover inicio");
+    expect(start()).toHaveAttribute("aria-pressed", "false");
+    expect(start()).toHaveTextContent(/Inicio\d\d:\d\d:\d\d/);
+
+    // Inicio is fixed: Fin opens. Placing Fin locks Inicio and Exportar.
+    expect(end()).toBeEnabled();
+    fireEvent.click(end());
+    expect(end()).toHaveAccessibleName("Fijar fin");
+    expect(start()).toBeDisabled();
+    expect(exportBtn()).toBeDisabled();
+    setPos(1775600250);
+    fireEvent.click(end());
+    expect(end()).toHaveAccessibleName("Mover fin");
+
+    // Both fixed: only now Exportar is enabled.
     expect(screen.getByTestId("export-duration")).toHaveTextContent("1m 40s");
-    expect(screen.getByRole("button", { name: /Exportar/ })).toBeInTheDocument();
+    expect(exportBtn()).toBeEnabled();
+    expect(start()).toBeEnabled();
 
     fireEvent.click(screen.getByRole("button", { name: /Limpiar selección/ }));
-    expect(start).not.toHaveTextContent(/\d\d:\d\d:\d\d/);
-    expect(screen.queryByRole("button", { name: /Exportar/ })).not.toBeInTheDocument();
+    expect(end()).toBeDisabled();
+    expect(exportBtn()).toBeDisabled();
   });
 
-  it("handles keyboard shortcuts I and O to mark the range", () => {
+  it("does not fix an end that is not after the start", () => {
+    const { transport, setPos } = createTransport(1775600200);
+    dock(transport);
+    fireEvent.click(screen.getByRole("button", { name: "Marcar inicio" }));
+    fireEvent.click(screen.getByRole("button", { name: "Fijar inicio" }));
+    fireEvent.click(screen.getByRole("button", { name: "Marcar fin" }));
+    setPos(1775600100);
+    fireEvent.click(screen.getByRole("button", { name: "Fijar fin" }));
+    expect(screen.getByRole("button", { name: "Fijar fin" })).toBeInTheDocument();
+    expect(screen.getByRole("status")).toHaveTextContent(/posterior al inicio/);
+    expect(screen.getByRole("button", { name: "Exportar" })).toBeDisabled();
+  });
+
+  it("follows the same two presses with keys I and O, and Escape stops placing before it clears", () => {
     const { transport, setPos } = createTransport(1775600100);
     dock(transport);
 
+    fireEvent.keyDown(window, { key: "o" }); // locked: no start yet
+    expect(screen.getByRole("button", { name: "Marcar fin" })).toBeDisabled();
+
     fireEvent.keyDown(window, { key: "i" });
-    expect(screen.getByRole("button", { name: "Marcar inicio" })).toHaveTextContent(/\d\d:\d\d:\d\d/);
+    expect(screen.getByRole("button", { name: "Fijar inicio" })).toBeInTheDocument();
+    fireEvent.keyDown(window, { key: "i" });
+    expect(screen.getByRole("button", { name: "Mover inicio" })).toBeInTheDocument();
 
     setPos(1775600300);
     fireEvent.keyDown(window, { key: "o" });
-    expect(screen.getByRole("button", { name: /Exportar/ })).toBeInTheDocument();
+    fireEvent.keyDown(window, { key: "Escape" }); // stops placing the end
+    expect(screen.getByRole("button", { name: "Marcar fin" })).toBeEnabled();
+    expect(screen.getByRole("button", { name: "Mover inicio" })).toBeInTheDocument();
 
-    fireEvent.keyDown(window, { key: "Escape" });
-    expect(screen.queryByRole("button", { name: /Exportar/ })).not.toBeInTheDocument();
+    fireEvent.keyDown(window, { key: "Escape" }); // nothing placing: clears
+    expect(screen.getByRole("button", { name: "Marcar inicio" })).toBeInTheDocument();
   });
 
   it("takes Ahora to today, fifteen minutes before the current time", () => {
