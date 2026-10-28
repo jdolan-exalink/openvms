@@ -144,6 +144,31 @@ function dominant(items: TimelineEvent[], c: ItemCluster): DetectionCategory {
   return [...counts.entries()].sort((a, b) => b[1] - a[1])[0]?.[0] ?? "other";
 }
 
+/** drawMark draws an export mark: a vertical line with a small badge ("->|" for the start, "|<-" for the end). */
+function drawMark(ctx: CanvasRenderingContext2D, x: number, height: number, kind: "start" | "end", color: string, placing: boolean) {
+  const w = 22;
+  const h = 14;
+  const bx = kind === "start" ? x : x - w;
+  ctx.save();
+  ctx.strokeStyle = color;
+  ctx.fillStyle = color;
+  ctx.lineWidth = 2;
+  if (placing) ctx.setLineDash([4, 3]);
+  ctx.beginPath();
+  ctx.moveTo(x, 0);
+  ctx.lineTo(x, height);
+  ctx.stroke();
+  ctx.setLineDash([]);
+  ctx.globalAlpha = placing ? 0.75 : 1;
+  ctx.fillRect(Math.max(0, Math.min(bx, ctx.canvas.clientWidth - w)), 0, w, h);
+  ctx.fillStyle = "#1a1112";
+  ctx.font = "bold 10px ui-monospace, monospace";
+  ctx.textAlign = "center";
+  ctx.textBaseline = "middle";
+  ctx.fillText(kind === "start" ? "->|" : "|<-", Math.max(0, Math.min(bx, ctx.canvas.clientWidth - w)) + w / 2, h / 2 + 0.5);
+  ctx.restore();
+}
+
 /**
  * DayTimeline is the docked timeline of the REC mode. A fixed ruler sits over one row per
  * grid camera (name on the left, recording coverage bar with its detections drawn on top),
@@ -163,6 +188,7 @@ export function DayTimeline({
   selectedId,
   onSelectCamera,
   selection,
+  marks,
 }: {
   /** Start of the shown day (unix seconds, local midnight). */
   day: number;
@@ -178,6 +204,8 @@ export function DayTimeline({
   onSelectCamera?: (cameraId: string) => void;
   /** Active [IN - OUT] range in unix seconds. */
   selection?: { start: number; end: number };
+  /** Export marks to draw with their ->| and |<- badges; `placing` marks are still following the playhead. */
+  marks?: { start?: number; end?: number; placing?: "start" | "end" };
 }) {
   const rulerEl = useRef<HTMLDivElement>(null);
   const rowsEl = useRef<HTMLDivElement>(null);
@@ -386,8 +414,15 @@ export function DayTimeline({
         ctx.lineWidth = 1;
       }
     }
+    if (marks) {
+      const accent = cssVar(host, "--md-primary", "#f38d70");
+      for (const kind of ["start", "end"] as const) {
+        const t = marks[kind];
+        if (t !== undefined && t >= view.start && t <= view.end) drawMark(ctx, x(t), RULER_H, kind, accent, marks.placing === kind);
+      }
+    }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [view, width, shownPosition, selection]);
+  }, [view, width, shownPosition, selection, marks]);
 
   // Rows: gridlines, coverage bars, detections and the playhead.
   useEffect(() => {
@@ -542,8 +577,14 @@ export function DayTimeline({
         ctx.globalAlpha = 1;
       }
     }
+    if (marks) {
+      for (const kind of ["start", "end"] as const) {
+        const t = marks[kind];
+        if (t !== undefined && t >= view.start && t <= view.end) drawMark(ctx, x(t), rowsH, kind, accent, marks.placing === kind);
+      }
+    }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [view, width, rowsH, rows, shownPosition, liveNow, selectedId, frame, selection]);
+  }, [view, width, rowsH, rows, shownPosition, liveNow, selectedId, frame, selection, marks]);
 
   // Tooltip: follows the pointer, clamped to the viewport, above the pointer unless there is no room.
   useLayoutEffect(() => {

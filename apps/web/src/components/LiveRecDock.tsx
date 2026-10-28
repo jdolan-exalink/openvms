@@ -8,6 +8,7 @@ import { RangeExportBox } from "@/components/RangeExportBox";
 import { TimelineLegend } from "@/components/TimelineLegend";
 import { Button, Select } from "@/components/ui";
 import { fmtDateTime } from "@/lib/format";
+import { escapeMarks, exportRange, pressEnd, pressStart, shownMarks, type ExportMarks, type MarkPress } from "@/lib/exportMarks";
 import { moveToDay, REC_LIVE_EDGE_S, REC_NOW_BACK_S, REC_SPEEDS, stepEvent } from "@/lib/liveRec";
 import type { RecTransport } from "@/lib/useRecPlayback";
 
@@ -54,22 +55,29 @@ export function LiveRecDock({
 
   const recordingDays = useRecordingDays(selectedId ?? cameras[0]?.id, new Date(day * 1000));
 
-  const [inTime, setInTime] = useState<number | undefined>();
-  const [outTime, setOutTime] = useState<number | undefined>();
+  const [marks, setMarks] = useState<ExportMarks>({});
+  const [refused, setRefused] = useState<MarkPress["refused"]>();
   const [exportOpen, setExportOpen] = useState(false);
 
-  const selection = useMemo(() => {
-    if (inTime === undefined || outTime === undefined || inTime === outTime) return undefined;
-    return {
-      start: Math.min(inTime, outTime),
-      end: Math.max(inTime, outTime),
-    };
-  }, [inTime, outTime]);
+  const selection = useMemo(() => exportRange(marks), [marks]);
+  // What the timeline draws: a mark being placed follows the cursor.
+  const shown = shownMarks(marks, position);
+  const timelineMarks = useMemo(
+    () => ({ start: shown.start, end: shown.end, placing: marks.placing }),
+    [shown.start, shown.end, marks.placing],
+  );
+  const timelineSelection = useMemo(
+    () => (shown.start !== undefined && shown.end !== undefined && shown.end > shown.start ? { start: shown.start, end: shown.end } : undefined),
+    [shown.start, shown.end],
+  );
 
-  const clearSelection = () => {
-    setInTime(undefined);
-    setOutTime(undefined);
+  const apply = (r: MarkPress) => {
+    setMarks(r.marks);
+    setRefused(r.refused);
   };
+  const markStart = () => apply(pressStart(marks, position));
+  const markEnd = () => apply(pressEnd(marks, position));
+  const clearSelection = () => apply({ marks: {} });
 
   const liveEdge = now - REC_LIVE_EDGE_S;
   // "Ahora" goes to today, a quarter of an hour before the current time.
@@ -97,13 +105,13 @@ export function LiveRecDock({
         step(sign * (event.shiftKey ? 60 : 10));
       } else if (event.key === "i" || event.key === "I") {
         event.preventDefault();
-        setInTime(position);
+        markStart();
       } else if (event.key === "o" || event.key === "O") {
         event.preventDefault();
-        setOutTime(position);
-      } else if (event.key === "Escape" && (inTime !== undefined || outTime !== undefined)) {
+        markEnd();
+      } else if (event.key === "Escape" && (marks.start !== undefined || marks.end !== undefined || marks.placing)) {
         event.preventDefault();
-        clearSelection();
+        apply({ marks: escapeMarks(marks) });
       }
     };
     window.addEventListener("keydown", onKey);
@@ -139,15 +147,7 @@ export function LiveRecDock({
         </Button>
         <DayCalendar value={new Date(day * 1000)} max={new Date(now * 1000)} marked={recordingDays.marked} onMonthChange={recordingDays.onMonthChange} onChange={(d) => seek(moveToDay(position, d, liveEdge), { play: playing })} />
 
-        <RangeExportBox
-          start={inTime}
-          end={outTime}
-          selection={selection}
-          onMarkStart={() => setInTime(position)}
-          onMarkEnd={() => setOutTime(position)}
-          onClear={clearSelection}
-          onExport={() => setExportOpen(true)}
-        />
+        <RangeExportBox marks={marks} refused={refused} onPressStart={markStart} onPressEnd={markEnd} onClear={clearSelection} onExport={() => setExportOpen(true)} />
 
         <span className="ml-auto font-mono text-xs" aria-live="off" data-testid="rec-clock">
           {fmtDateTime(new Date(position * 1000))}
@@ -162,9 +162,9 @@ export function LiveRecDock({
               <li>Espacio: reproducir / pausar</li>
               <li>← / →: ±10 s</li>
               <li>Mayús + ← / →: ±1 min</li>
-              <li>I: marcar inicio</li>
-              <li>O: marcar fin</li>
-              <li>Esc: limpiar selección de tramo</li>
+              <li>I: marcar inicio (otra vez para fijarlo)</li>
+              <li>O: marcar fin (otra vez para fijarlo)</li>
+              <li>Esc: dejar de mover la marca; otra vez, limpiar</li>
               <li>Rueda sobre la línea: acercar / alejar</li>
               <li>Arrastrar: desplazar · Clic: ir a ese momento</li>
               <li>Mayús + arrastrar (o el cabezal): buscar</li>
@@ -181,7 +181,8 @@ export function LiveRecDock({
         onSeek={(t, detection) => seek(Math.min(t, liveEdge), detection?.id ? { poster: { cameraId: detection.cameraId, eventId: detection.id } } : undefined)}
         selectedId={selectedId}
         onSelectCamera={onSelectCamera}
-        selection={selection}
+        selection={timelineSelection}
+        marks={timelineMarks}
       />
       <TimelineLegend />
       {selection && (
