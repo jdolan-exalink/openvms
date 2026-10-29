@@ -277,10 +277,16 @@ func (s *Service) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	rewrite := ""
 	if r.Method != http.MethodHead && resp.StatusCode != http.StatusNoContent && resp.StatusCode != http.StatusNotModified {
 		enc := strings.ToLower(strings.TrimSpace(resp.Header.Get("Content-Encoding")))
-		if mt, _, err := mime.ParseMediaType(resp.Header.Get("Content-Type")); err == nil && (enc == "" || enc == "identity") &&
-			(resp.ContentLength < 0 || resp.ContentLength <= s.cfg.RewriteLimit) {
-			if mt == "text/html" || mt == "text/css" {
-				rewrite = mt
+		if (enc == "" || enc == "identity") && (resp.ContentLength < 0 || resp.ContentLength <= s.cfg.RewriteLimit) {
+			mt, _, _ := mime.ParseMediaType(resp.Header.Get("Content-Type"))
+			mt = strings.ToLower(mt)
+			switch {
+			case mt == "text/html":
+				rewrite = "text/html"
+			case mt == "text/css" || strings.HasSuffix(strings.ToLower(cleaned), ".css"):
+				rewrite = "text/css"
+			case isJS(mt, cleaned):
+				rewrite = "application/javascript"
 			}
 		}
 	}
@@ -308,14 +314,26 @@ func (s *Service) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		s.stream(w, resp.Body, buf)
 		return
 	}
-	if rewrite == "text/html" {
+	switch rewrite {
+	case "text/html":
 		buf = rewriteHTML(buf, prefix, docDir(cleaned))
-	} else {
+	case "text/css":
 		buf = rewriteCSS(buf, prefix)
+	case "application/javascript":
+		buf = rewriteJS(buf)
 	}
 	out.Set("Content-Length", strconvItoa(len(buf)))
 	w.WriteHeader(resp.StatusCode)
 	_, _ = w.Write(buf)
+}
+
+func isJS(mt, path string) bool {
+	switch mt {
+	case "application/javascript", "text/javascript", "application/x-javascript", "text/ecmascript":
+		return true
+	}
+	p := strings.ToLower(path)
+	return strings.HasSuffix(p, ".js") || strings.HasSuffix(p, ".mjs")
 }
 
 func hasScheme(header, scheme string) bool {

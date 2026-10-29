@@ -9,9 +9,10 @@ import (
 )
 
 // The camera UI is served under /camproxy/{session}/ instead of at the root of its own host, so
-// absolute-path references have to be moved under that prefix. Only HTML and CSS bodies are touched;
-// scripts are never rewritten (a fetch/XHR/window.open shim injected into HTML covers the common
-// calls instead). Everything here is best effort and bounded by the caller's size limit.
+// absolute-path references have to be moved under that prefix. HTML and CSS bodies are rewritten
+// to move paths under prefix, and JavaScript bodies (or inline scripts) are rewritten to replace
+// window.top.location and related cross-frame accesses that fail in opaque sandboxes.
+// Everything here is best effort and bounded by the caller's size limit.
 
 var (
 	attrRootRe   = regexp.MustCompile(`(?i)\s(?:src|href|action|data-src|poster|formaction)\s*=\s*["']/`)
@@ -20,6 +21,9 @@ var (
 	baseTagRe    = regexp.MustCompile(`(?i)<base\b[^>]*>`)
 	headOpenRe   = regexp.MustCompile(`(?i)<head(?:\s[^>]*)?>`)
 	htmlOpenRe   = regexp.MustCompile(`(?i)<html(?:\s[^>]*)?>`)
+
+	jsWindowTopLocRe = regexp.MustCompile(`([^a-zA-Z0-9_$.]|^)window\.(?:top|parent)\.location\b`)
+	jsTopLocRe       = regexp.MustCompile(`([^a-zA-Z0-9_$.]|^)(?:top|parent)\.location\b`)
 )
 
 // prefixRoot inserts prefix before the final "/" of every match of re (each match ends in the "/" that
@@ -57,9 +61,15 @@ func rewriteCSS(body []byte, prefix string) []byte {
 	return prefixRoot(body, importRootRe, prefix)
 }
 
+func rewriteJS(body []byte) []byte {
+	body = jsWindowTopLocRe.ReplaceAll(body, []byte("${1}window.location"))
+	return jsTopLocRe.ReplaceAll(body, []byte("${1}location"))
+}
+
 // shimScript wraps the calls through which a camera UI usually builds absolute-path URLs. It cannot
 // see assignments to location (the browser does not allow intercepting those). It also shims
-// localStorage, sessionStorage and cookie when the sandboxed iframe lacks allow-same-origin.
+// localStorage, sessionStorage and cookie when the sandboxed iframe lacks allow-same-origin, and
+// provides safe fallbacks for nested cross-origin iframe DOM accesses.
 const shimScript = `<script>(function(){var P=%q;var B;try{B=new URL(document.baseURI).origin}catch(e){}
 function f(u){if(!u)return u;try{var H=window.location.host;if(typeof u==="object"&&u instanceof URL){if(u.host===H||(B&&u.origin===B)){var pn=u.pathname;if(pn!==P&&pn.indexOf(P+"/")!==0)return new URL(P+pn+u.search+u.hash,window.location.href)}return u}}catch(e){}if(typeof u!=="string")return u;if(u.charAt(0)==="/"&&u.charAt(1)!=="/"){if(u!==P&&u.indexOf(P+"/")!==0)return P+u;return u}try{var H=window.location.host;var parsed=new URL(u,window.location.href);if(parsed.host===H||(B&&parsed.origin===B)){var pn=parsed.pathname;if(pn!==P&&pn.indexOf(P+"/")!==0)return P+pn+parsed.search+parsed.hash}}catch(e){}return u}
 function S(){var s={};return{getItem:function(k){return Object.prototype.hasOwnProperty.call(s,k)?s[k]:null},setItem:function(k,v){s[k]=String(v)},removeItem:function(k){delete s[k]},clear:function(){s={}},key:function(i){return Object.keys(s)[i]||null},get length(){return Object.keys(s).length}}};
@@ -77,15 +87,18 @@ function rw(s){if(typeof s!=="string")return s;return s.replace(/(src|href|actio
 try{var DW=document.write;if(DW)document.write=function(){try{for(var i=0;i<arguments.length;i++){if(typeof arguments[i]==="string")arguments[i]=rw(arguments[i])}}catch(e){}return DW.apply(this,arguments)}}catch(e){}
 try{var DWL=document.writeln;if(DWL)document.writeln=function(){try{for(var i=0;i<arguments.length;i++){if(typeof arguments[i]==="string")arguments[i]=rw(arguments[i])}}catch(e){}return DWL.apply(this,arguments)}}catch(e){}
 var SA=Element.prototype.setAttribute;Element.prototype.setAttribute=function(n,v){try{if(/^(src|href|action|data-src|poster)$/i.test(n))v=f(v)}catch(e){}return SA.call(this,n,v)};
-[["HTMLImageElement","src"],["HTMLScriptElement","src"],["HTMLLinkElement","href"],["HTMLAnchorElement","href"],["HTMLIFrameElement","src"],["HTMLFormElement","action"],["HTMLSourceElement","src"],["HTMLMediaElement","src"],["HTMLEmbedElement","src"]].forEach(function(p){try{var pr=window[p[0]].prototype,d=Object.getOwnPropertyDescriptor(pr,p[1]);if(d&&d.set)Object.defineProperty(pr,p[1],{get:d.get,set:function(v){d.set.call(this,f(v))},configurable:true,enumerable:d.enumerable})}catch(e){}})})();</script>`
+[["HTMLImageElement","src"],["HTMLScriptElement","src"],["HTMLLinkElement","href"],["HTMLAnchorElement","href"],["HTMLIFrameElement","src"],["HTMLFormElement","action"],["HTMLSourceElement","src"],["HTMLMediaElement","src"],["HTMLEmbedElement","src"]].forEach(function(p){try{var pr=window[p[0]].prototype,d=Object.getOwnPropertyDescriptor(pr,p[1]);if(d&&d.set)Object.defineProperty(pr,p[1],{get:d.get,set:function(v){d.set.call(this,f(v))},configurable:true,enumerable:d.enumerable})}catch(e){}});
+try{var cwD=Object.getOwnPropertyDescriptor(HTMLIFrameElement.prototype,"contentWindow");if(cwD&&cwD.get){var oCW=cwD.get;Object.defineProperty(HTMLIFrameElement.prototype,"contentWindow",{get:function(){var w=oCW.call(this);try{if(w&&w.document)return w}catch(e){var dE={style:{},innerHTML:"",classList:{add:function(){},remove:function(){}}};var dD={getElementById:function(){return dE},querySelector:function(){return dE},querySelectorAll:function(){return[]},body:dE};return{document:dD,style:{}}}return w},configurable:true,enumerable:cwD.enumerable})}}catch(e){}
+try{var cdD=Object.getOwnPropertyDescriptor(HTMLIFrameElement.prototype,"contentDocument");if(cdD&&cdD.get){var oCD=cdD.get;Object.defineProperty(HTMLIFrameElement.prototype,"contentDocument",{get:function(){try{var d=oCD.call(this);if(d)return d}catch(e){}var dE={style:{},innerHTML:"",classList:{add:function(){},remove:function(){}}};return{getElementById:function(){return dE},querySelector:function(){return dE},querySelectorAll:function(){return[]},body:dE}},configurable:true,enumerable:cdD.enumerable})}}catch(e){}})();</script>`
 
-// rewriteHTML moves root-relative references under prefix, drops any <base> the camera set, and injects
-// one <base> (the directory of the current document, which is where the browser would resolve relative
-// URLs anyway) plus the shim script, once.
+// rewriteHTML moves root-relative references under prefix, drops any <base> the camera set, rewrites
+// cross-frame location accesses in inline scripts, and injects one <base> (the directory of the current
+// document, which is where the browser would resolve relative URLs anyway) plus the shim script, once.
 func rewriteHTML(body []byte, prefix, docDir string) []byte {
 	body = baseTagRe.ReplaceAll(body, nil)
 	body = prefixRoot(body, attrRootRe, prefix)
 	body = rewriteCSS(body, prefix)
+	body = rewriteJS(body)
 	inject := []byte(`<base href="` + html.EscapeString(prefix+docDir) + `">` + shimScriptFor(prefix))
 	for _, re := range []*regexp.Regexp{headOpenRe, htmlOpenRe} {
 		if loc := re.FindIndex(body); loc != nil {
