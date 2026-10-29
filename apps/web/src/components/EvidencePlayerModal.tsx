@@ -1,6 +1,5 @@
 import {
   AlertCircle,
-  AlertTriangle,
   Camera,
   Check,
   CheckCircle2,
@@ -566,7 +565,6 @@ function EvidenceVideoTile({
   const [engine] = useState(() => new ImageEnhancementEngineImpl());
   const [enhancementMode, setEnhancementMode] = useState<EnhancementMode>("auto");
   const [adjustments, setAdjustments] = useState<EnhancementAdjustments>(() => engine.getAdjustments());
-  const [codecWarning, setCodecWarning] = useState(false);
   const localVideoRef = useRef<HTMLVideoElement | null>(null);
 
   useEffect(() => {
@@ -733,19 +731,8 @@ function EvidenceVideoTile({
               preload="auto"
               style={videoFilterStyle}
               onTimeUpdate={(e) => onTimeUpdate(item.id, e)}
-              onLoadedMetadata={(e) => {
-                onLoadedMetadata(item.id, e);
-                if (e.currentTarget.videoWidth === 0) {
-                  setCodecWarning(true);
-                }
-              }}
-              onError={() => {
-                setCodecWarning(true);
-              }}
+              onLoadedMetadata={(e) => onLoadedMetadata(item.id, e)}
               onCanPlay={(e) => {
-                if (e.currentTarget.videoWidth === 0) {
-                  setCodecWarning(true);
-                }
                 if (isPlaying) {
                   try {
                     const res = e.currentTarget.play?.();
@@ -778,24 +765,6 @@ function EvidenceVideoTile({
           </>
         )}
       >
-        {/* Codec / Browser Decoding Warning Overlay */}
-        {codecWarning && (
-          <div className="absolute inset-0 z-20 flex flex-col items-center justify-center bg-black/85 p-4 text-center text-xs text-white">
-            <AlertTriangle className="size-6 text-warn mb-1.5 animate-bounce" />
-            <span className="font-semibold text-warn">Códec no soportado directamente en este navegador</span>
-            <span className="text-[11px] text-muted-foreground mt-1 max-w-[280px]">
-              El archivo contiene video HEVC/H.265. El audio reproduce, pero tu navegador requiere códec del sistema o VLC.
-            </span>
-            <a
-              href={videoSrc}
-              download
-              className="mt-3 inline-flex items-center gap-1.5 rounded-m3-md bg-primary hover:bg-primary/90 text-on-primary px-3 py-1.5 text-xs font-semibold transition-all shadow-md"
-            >
-              <Download className="size-3.5" />
-              <span>Descargar cámara</span>
-            </a>
-          </div>
-        )}
         {/* Dynamic Visual Enhancement Controls */}
         <EnhancementControl
           mode={enhancementMode}
