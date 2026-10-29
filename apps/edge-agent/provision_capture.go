@@ -37,9 +37,16 @@ func parseCaptureMode(value string) (captureMode, error) {
 // captureDir is where captures live inside the agent state directory.
 func captureDir(stateDir string) string { return filepath.Join(stateDir, "provision-captures") }
 
-// postsAnywhere sends POSTs on paths nothing else claims to next and answers 404 to the rest.
+// postsAnywhere sends POSTs on paths nothing else claims to next and answers 404 to the rest,
+// but acknowledges GET/HEAD on root "/" with 200 OK so cameras testing connectivity without a path succeed.
 func postsAnywhere(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if (r.Method == http.MethodGet || r.Method == http.MethodHead) && (r.URL.Path == "/" || r.URL.Path == "") {
+			w.Header().Set("Content-Type", "application/json")
+			w.WriteHeader(http.StatusOK)
+			_, _ = w.Write([]byte(`{"status":"ok"}`))
+			return
+		}
 		if r.Method != http.MethodPost {
 			http.NotFound(w, r)
 			return

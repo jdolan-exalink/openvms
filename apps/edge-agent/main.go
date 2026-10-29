@@ -167,8 +167,10 @@ func main() {
 	addr := env("OPENVMS_AGENT_LISTEN", "0.0.0.0:7419")
 	// Camera web view: the control plane reaches a camera's own web interface through this route.
 	mountCameraWeb(mux, auth, camproxy.New(camproxy.Config{BlockedPorts: ownListenPorts(addr, os.Getenv("OPENVMS_AGENT_ONVIF_TLS_LISTEN"))}))
-	if capture == captureEverything {
-		log.Warn("Provision-ISR capture-all is on: POSTs on any path are accepted and kept; turn it off once the camera protocol is known")
+	if lprReceiver != nil {
+		if capture == captureEverything {
+			log.Warn("Provision-ISR capture-all is on: POSTs on any path are accepted and kept; turn it off once the camera protocol is known")
+		}
 		mux.Handle("/", postsAnywhere(lprReceiver))
 	}
 	srv := &http.Server{Addr: addr, Handler: mux, ReadHeaderTimeout: 5 * time.Second}
