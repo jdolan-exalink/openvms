@@ -115,6 +115,7 @@ func (m *ExportJobManager) captureRecorderItem(ctx context.Context, j activeJobR
 	if err := os.MkdirAll(jobDir, 0o755); err != nil {
 		return err
 	}
+	_ = os.Chmod(jobDir, 0o775)
 	partPath := filepath.Join(jobDir, it.id.String()+".mp4.part")
 	finalPath := filepath.Join(jobDir, it.id.String()+".mp4")
 	defer func() {
@@ -178,6 +179,7 @@ func sealFile(partPath, finalPath string) (hash string, size int64, err error) {
 	if err := os.Rename(partPath, finalPath); err != nil {
 		return "", 0, err
 	}
+	_ = os.Chmod(finalPath, 0o664)
 	return hex.EncodeToString(h.Sum(nil)), size, nil
 }
 

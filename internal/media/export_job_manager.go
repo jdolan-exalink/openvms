@@ -453,6 +453,7 @@ func (m *ExportJobManager) transferItem(ctx context.Context, j activeJobRow, it 
 	if err := os.MkdirAll(jobDir, 0o755); err != nil {
 		return err
 	}
+	_ = os.Chmod(jobDir, 0o775)
 
 	partPath := filepath.Join(jobDir, fmt.Sprintf("%s.mp4.part", it.id.String()))
 	finalPath := filepath.Join(jobDir, fmt.Sprintf("%s.mp4", it.id.String()))
@@ -528,6 +529,7 @@ WHERE id = $1`, j.id, speedBps, etaSec)
 	if err := os.Rename(partPath, finalPath); err != nil {
 		return err
 	}
+	_ = os.Chmod(finalPath, 0o664)
 
 	hashStr := hex.EncodeToString(hasher.Sum(nil))
 
@@ -662,6 +664,7 @@ ORDER BY e.start_time ASC`, camIDs, j.start, j.end)
 
 	if b, err := json.MarshalIndent(manifestObj, "", "  "); err == nil {
 		_ = os.WriteFile(manifestPath, b, 0o644)
+		_ = os.Chmod(manifestPath, 0o664)
 	}
 
 	bJSON, _ := json.Marshal(manifestObj)
