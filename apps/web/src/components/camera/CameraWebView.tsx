@@ -44,8 +44,22 @@ export function CameraWebView({ cameraId, autoOpen = false }: { cameraId: string
   const [preset, setPreset] = useState("http:80");
   const [customScheme, setCustomScheme] = useState<Scheme>("http");
   const [customPort, setCustomPort] = useState("");
-  const [customUser, setCustomUser] = useState("");
-  const [customPass, setCustomPass] = useState("");
+  const storedUserKey = `openvms_cam_${cameraId}_user`;
+  const storedPassKey = `openvms_cam_${cameraId}_pass`;
+  const [customUser, setCustomUser] = useState(() => {
+    try {
+      return localStorage.getItem(storedUserKey) || "";
+    } catch {
+      return "";
+    }
+  });
+  const [customPass, setCustomPass] = useState(() => {
+    try {
+      return localStorage.getItem(storedPassKey) || "";
+    } catch {
+      return "";
+    }
+  });
   const [showPassword, setShowPassword] = useState(false);
   const [copied, setCopied] = useState(false);
   const [showCredEditor, setShowCredEditor] = useState(false);
@@ -65,17 +79,29 @@ export function CameraWebView({ cameraId, autoOpen = false }: { cameraId: string
     mutationFn: async () => {
       const ch = choice();
       if (!ch) throw new Error("Indicá un puerto entre 1 y 65535.");
+      const u = customUser.trim();
+      const p = customPass;
       const body = {
         ...ch,
-        ...(customUser.trim() ? { username: customUser.trim() } : {}),
-        ...(customPass ? { password: customPass } : {}),
+        ...(u ? { username: u } : {}),
+        ...(p ? { password: p } : {}),
       };
       return unwrap(await api.POST("/api/v1/cameras/{cameraId}/web/session", { params: { path: { cameraId } }, body }));
     },
+    onSuccess: () => {
+      try {
+        if (customUser.trim()) localStorage.setItem(storedUserKey, customUser.trim());
+        if (customPass) localStorage.setItem(storedPassKey, customPass);
+      } catch {
+        // ignore localStorage errors
+      }
+    },
   });
 
-  const activeUser = customUser || open.data?.username || "";
-  const activePass = customPass || open.data?.password || "";
+  const serverUser = open.data?.username && !open.data.username.includes("*") ? open.data.username : "";
+  const serverPass = open.data?.password && !open.data.password.includes("*") ? open.data.password : "";
+  const activeUser = customUser || serverUser || "";
+  const activePass = customPass || serverPass || "";
 
   const copyPassword = async () => {
     if (!activePass) return;
@@ -223,9 +249,17 @@ export function CameraWebView({ cameraId, autoOpen = false }: { cameraId: string
                 type="button"
                 size="sm"
                 disabled={open.isPending}
-                onClick={() => open.mutate()}
+                onClick={() => {
+                  try {
+                    if (customUser.trim()) localStorage.setItem(storedUserKey, customUser.trim());
+                    if (customPass) localStorage.setItem(storedPassKey, customPass);
+                  } catch {
+                    // ignore localStorage errors
+                  }
+                  open.mutate();
+                }}
               >
-                Reconectar
+                Reconectar y Guardar
               </Button>
             </div>
           )}

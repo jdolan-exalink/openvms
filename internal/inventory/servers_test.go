@@ -179,3 +179,37 @@ func TestDiscoverIncludesBirdEyeChannel(t *testing.T) {
 		t.Fatalf("expected birdseye camera in discovered cameras: %+v", res.Cameras)
 	}
 }
+
+func TestExtractCameraStreamHostsRedactedCredentialsIgnored(t *testing.T) {
+	rawPaths := map[string]any{
+		"go2rtc": map[string]any{
+			"streams": map[string]any{
+				"Escuela_main": "rtsp://*:*@10.0.15.107:554/profile1#video=copy",
+			},
+		},
+		"cameras": map[string]any{
+			"Escuela": map[string]any{
+				"onvif": map[string]any{
+					"host":     "10.0.15.107",
+					"user":     "*",
+					"password": "*****",
+				},
+			},
+		},
+	}
+
+	hosts := ExtractCameraStreamHosts(rawPaths)
+	e, ok := hosts["Escuela"]
+	if !ok {
+		t.Fatalf("Escuela not found in hosts")
+	}
+	if e.Host != "10.0.15.107" {
+		t.Errorf("expected host 10.0.15.107, got %q", e.Host)
+	}
+	if e.Username != "" {
+		t.Errorf("expected redacted username to be discarded, got %q", e.Username)
+	}
+	if e.Password != "" {
+		t.Errorf("expected redacted password to be discarded, got %q", e.Password)
+	}
+}
