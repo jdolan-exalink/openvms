@@ -94,6 +94,7 @@ func (s *TCPServer) handleConn(conn net.Conn) {
 		host, _, _ := net.SplitHostPort(conn.RemoteAddr().String())
 		clientIP = host
 	}
+	s.log.Info("provision-isr tcp connection accepted", "ip", clientIP)
 
 	buf := make([]byte, 0, 64*1024)
 	chunk := make([]byte, 4096)
@@ -123,6 +124,12 @@ func (s *TCPServer) handleConn(conn net.Conn) {
 				endIdx += startIdx + len("</config>")
 				xmlBlock := buf[startIdx:endIdx]
 				buf = buf[endIdx:]
+
+				preview := string(bytes.TrimSpace(xmlBlock))
+				if len(preview) > 160 {
+					preview = preview[:160] + "..."
+				}
+				s.log.Info("provision-isr tcp xml block received", "ip", clientIP, "size", len(xmlBlock), "preview", preview)
 
 				now := time.Now()
 				if _, err := s.receiver.HandleRawEvent(clientIP, xmlBlock, now); err != nil {

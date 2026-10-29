@@ -102,6 +102,8 @@ func (r *Receiver) Heartbeat() *HeartbeatManager {
 // ServeHTTP routes incoming requests to the keepalive or event handlers.
 func (r *Receiver) ServeHTTP(w http.ResponseWriter, req *http.Request) {
 	path := req.URL.Path
+	clientIP := extractClientIP(req)
+	r.log.Info("provision-isr incoming HTTP request", "method", req.Method, "path", path, "ip", clientIP, "query", req.URL.RawQuery, "content_length", req.ContentLength)
 
 	switch {
 	case path == "/SendKeepalive" || path == "/v1/provision-lpr/keepalive":
@@ -150,7 +152,7 @@ func (r *Receiver) handleKeepalive(w http.ResponseWriter, req *http.Request) {
 	}
 
 	r.heartbeat.RecordKeepalive(camID, clientIP, now)
-	r.log.Debug("provision-isr keepalive received", "camera_id", camID, "camera_ip", clientIP)
+	r.log.Info("provision-isr keepalive received", "camera_id", camID, "camera_ip", clientIP)
 
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(http.StatusOK)
@@ -175,6 +177,13 @@ func (r *Receiver) handleEvent(w http.ResponseWriter, req *http.Request) {
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(http.StatusOK)
 	_, _ = w.Write([]byte(`{"status":"ok"}`))
+
+	clientIP := extractClientIP(req)
+	preview := string(bytes.TrimSpace(body))
+	if len(preview) > 160 {
+		preview = preview[:160] + "..."
+	}
+	r.log.Info("provision-isr payload received", "ip", clientIP, "path", req.URL.Path, "size", len(body), "preview", preview)
 
 	if len(bytes.TrimSpace(body)) == 0 && req.URL.RawQuery == "" {
 		keepaliveID := req.URL.Query().Get("camera_id")
@@ -371,6 +380,12 @@ func (r *Receiver) HandleRawEvent(clientIP string, body []byte, now time.Time) (
 	}
 	fakeReq.Header.Set("Content-Type", "application/xml")
 	fakeReq.RemoteAddr = net.JoinHostPort(clientIP, "8082")
+
+	preview := string(bytes.TrimSpace(body))
+	if len(preview) > 160 {
+		preview = preview[:160] + "..."
+	}
+	r.log.Info("provision-isr processing raw tcp event", "ip", clientIP, "size", len(body), "preview", preview)
 
 	nullW := &nullResponseWriter{header: make(http.Header)}
 	registered, ok := r.admit(nullW, fakeReq, body, now)
