@@ -58,8 +58,13 @@ func rewriteCSS(body []byte, prefix string) []byte {
 }
 
 // shimScript wraps the calls through which a camera UI usually builds absolute-path URLs. It cannot
-// see assignments to location (the browser does not allow intercepting those).
+// see assignments to location (the browser does not allow intercepting those). It also shims
+// localStorage, sessionStorage and cookie when the sandboxed iframe lacks allow-same-origin.
 const shimScript = `<script>(function(){var P=%q;function f(u){if(typeof u==="string"&&u.charAt(0)==="/"&&u.charAt(1)!=="/"&&u!==P&&u.indexOf(P+"/")!==0)return P+u;return u}
+function S(){var s={};return{getItem:function(k){return Object.prototype.hasOwnProperty.call(s,k)?s[k]:null},setItem:function(k,v){s[k]=String(v)},removeItem:function(k){delete s[k]},clear:function(){s={}},key:function(i){return Object.keys(s)[i]||null},get length(){return Object.keys(s).length}}};
+try{window.localStorage&&window.localStorage.getItem("_")}catch(e){try{var ls=S();Object.defineProperty(window,"localStorage",{get:function(){return ls},configurable:true})}catch(e2){}}
+try{window.sessionStorage&&window.sessionStorage.getItem("_")}catch(e){try{var ss=S();Object.defineProperty(window,"sessionStorage",{get:function(){return ss},configurable:true})}catch(e2){}}
+try{document.cookie}catch(e){try{var c="";Object.defineProperty(document,"cookie",{get:function(){return c},set:function(v){c=v},configurable:true})}catch(e2){}}
 var B;try{B=new URL(document.baseURI).origin}catch(e){}
 var F=window.fetch;if(F)window.fetch=function(i,o){try{if(typeof i==="string")i=f(i);else if(i&&typeof i.url==="string"&&window.Request&&i instanceof Request){var u=new URL(i.url);if(u.origin===B&&f(u.pathname)!==u.pathname)i=new Request(f(u.pathname)+u.search,i)}}catch(e){}return F.call(this,i,o)};
 var X=window.XMLHttpRequest;if(X){var O=X.prototype.open;X.prototype.open=function(){try{arguments[1]=f(arguments[1])}catch(e){}return O.apply(this,arguments)}}

@@ -1,5 +1,5 @@
 import { useMutation } from "@tanstack/react-query";
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { api, ApiError, unwrap } from "@/api/client";
 import { Button, Select, TextInput } from "@/components/ui";
 
@@ -39,7 +39,7 @@ export function cameraWebErrorMessage(err: unknown): string {
 }
 
 /** CameraWebView shows the camera's own web interface, reached through the edge agent. */
-export function CameraWebView({ cameraId }: { cameraId: string }) {
+export function CameraWebView({ cameraId, autoOpen = false }: { cameraId: string; autoOpen?: boolean }) {
   const [preset, setPreset] = useState("http:80");
   const [customScheme, setCustomScheme] = useState<Scheme>("http");
   const [customPort, setCustomPort] = useState("");
@@ -62,6 +62,12 @@ export function CameraWebView({ cameraId }: { cameraId: string }) {
       return unwrap(await api.POST("/api/v1/cameras/{cameraId}/web/session", { params: { path: { cameraId } }, body }));
     },
   });
+
+  useEffect(() => {
+    if (autoOpen && open.isIdle) {
+      open.mutate();
+    }
+  }, [autoOpen, open.isIdle]);
 
   return (
     <section aria-label="Web de la cámara" className="grid gap-3">

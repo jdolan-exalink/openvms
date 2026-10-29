@@ -8,7 +8,7 @@ import type { VitePWAOptions } from "vite-plugin-pwa";
  * those requests always go to the network, and navigations to those paths are excluded from the
  * SPA fallback so a browser never receives index.html in place of an API or media response.
  */
-const NETWORK_ONLY_PATHS = [/^\/api(\/|$)/, /^\/media(\/|$)/, /^\/ws(\/|$)/, /^\/health(\/|$)/, /^\/openapi\.json$/, /^\/docs(\/|$)/];
+const NETWORK_ONLY_PATHS = [/^\/api(\/|$)/, /^\/media(\/|$)/, /^\/ws(\/|$)/, /^\/health(\/|$)/, /^\/openapi\.json$/, /^\/docs(\/|$)/, /^\/camproxy(\/|$)/];
 
 export const pwaOptions: Partial<VitePWAOptions> = {
   // "prompt": a waiting worker never reloads the app mid-shift; the operator confirms the update.
