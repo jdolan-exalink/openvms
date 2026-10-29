@@ -34,6 +34,60 @@ func TestReceiverSendKeepalive(t *testing.T) {
 	}
 }
 
+func TestReceiverSendKeepaliveWithPlatePayloadIsProcessedAsEvent(t *testing.T) {
+	cfg := DefaultConfig()
+	receiver := NewReceiver(cfg, nil)
+
+	var (
+		mu             sync.Mutex
+		receivedEvents []LPREvent
+	)
+	receiver.Subscribe(func(ev LPREvent) {
+		mu.Lock()
+		defer mu.Unlock()
+		receivedEvents = append(receivedEvents, ev)
+	})
+
+	xmlPayload := []byte(`<?xml version="1.0" encoding="utf-8"?>
+<config version="1.0" xmlns="http://www.tvt.net.cn/schemas/config.xsd">
+  <deviceName>Escuela</deviceName>
+  <items>
+    <item>
+      <plateNumber>AF123BC</plateNumber>
+    </item>
+  </items>
+</config>`)
+
+	req := httptest.NewRequest(http.MethodPost, "/SendKeepalive", bytes.NewReader(xmlPayload))
+	req.Header.Set("Content-Type", "application/xml")
+	req.RemoteAddr = "10.0.15.107:54321"
+	rec := httptest.NewRecorder()
+
+	receiver.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("expected 200 OK, got %d", rec.Code)
+	}
+
+	time.Sleep(50 * time.Millisecond)
+
+	mu.Lock()
+	count := len(receivedEvents)
+	var plate string
+	if count > 0 {
+		plate = receivedEvents[0].Plate
+	}
+	mu.Unlock()
+
+	if count != 1 {
+		t.Fatalf("expected 1 event processed, got %d", count)
+	}
+	if plate != "AF123BC" {
+		t.Fatalf("expected plate AF123BC, got %q", plate)
+	}
+}
+
+
 func TestReceiverEventDeduplicationAndSubscription(t *testing.T) {
 	cfg := DefaultConfig()
 	cfg.DeduplicationWindow = 10 * time.Second

@@ -373,3 +373,37 @@ func TestAgentIngestRecordsALongNonASCIIErrorMessage(t *testing.T) {
 		t.Fatal("the failure was not recorded: the truncated message was rejected by the database")
 	}
 }
+
+func TestAgentIngestResolvesCameraByRemoteNameOrIP(t *testing.T) {
+	w := newIngestWorld(t)
+	ctx := context.Background()
+
+	// Update camA to have an ONVIF endpoint with IP 10.0.15.107
+	err := w.st.TxRaw(ctx, store.AllTenants, func(tx pgx.Tx) error {
+		_, err := tx.Exec(ctx, `UPDATE cameras SET onvif_endpoint = 'http://10.0.15.107/onvif/device_service' WHERE id = $1`, w.camA)
+		return err
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// 1. Add reading using camera remote_name "cam-a" instead of UUID
+	w.agent.add("cam-a", "AF111AA", nil, t0)
+	// 2. Add reading using camera IP "10.0.15.107" instead of UUID
+	w.agent.add("10.0.15.107", "BF222BB", nil, t0.Add(time.Minute))
+
+	if err := w.ing.IngestServer(ctx, w.server, w.tenant); err != nil {
+		t.Fatalf("IngestServer: %v", err)
+	}
+
+	reads := w.reads(t)
+	if len(reads) != 2 {
+		t.Fatalf("expected 2 readings resolved and ingested, got %d", len(reads))
+	}
+	for _, r := range reads {
+		if r.camera != w.camA {
+			t.Errorf("expected reading %s attributed to camA %s, got %s", r.plate, w.camA, r.camera)
+		}
+	}
+}
+

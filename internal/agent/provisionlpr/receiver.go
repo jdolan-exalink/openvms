@@ -1,9 +1,13 @@
 package provisionlpr
 
 import (
+	"bytes"
+	"context"
 	"encoding/json"
+	"errors"
 	"io"
 	"log/slog"
+	"net"
 	"net/http"
 	"strings"
 	"sync"
@@ -101,7 +105,12 @@ func (r *Receiver) ServeHTTP(w http.ResponseWriter, req *http.Request) {
 
 	switch {
 	case path == "/SendKeepalive" || path == "/v1/provision-lpr/keepalive":
-		r.handleKeepalive(w, req)
+		if req.Method == http.MethodGet || req.ContentLength == 0 {
+			r.handleKeepalive(w, req)
+			return
+		}
+		// In POST with potential payload, route to handleEvent (parses plate if present, else treats as keepalive)
+		r.handleEvent(w, req)
 	case path == "/v1/provision-lpr/status":
 		r.handleStatus(w, req)
 	case path == "/v1/provision-lpr/captures" || strings.HasPrefix(path, "/v1/provision-lpr/captures/"):
@@ -167,13 +176,40 @@ func (r *Receiver) handleEvent(w http.ResponseWriter, req *http.Request) {
 	w.WriteHeader(http.StatusOK)
 	_, _ = w.Write([]byte(`{"status":"ok"}`))
 
+	if len(bytes.TrimSpace(body)) == 0 && req.URL.RawQuery == "" {
+		keepaliveID := req.URL.Query().Get("camera_id")
+		if keepaliveID == "" {
+			keepaliveID = req.URL.Query().Get("dev_id")
+		}
+		if registered != nil {
+			keepaliveID = registered.CameraID
+		}
+		r.heartbeat.RecordKeepalive(keepaliveID, extractClientIP(req), now)
+		return
+	}
+
 	// Parse in background queue or worker
 	event, err := r.parser.Parse(req, body, now)
 	if err != nil {
+		isKeepaliveEndpoint := req.URL.Path == "/SendKeepalive" || req.URL.Path == "/v1/provision-lpr/keepalive"
+		if isKeepaliveEndpoint && (errors.Is(err, ErrNoPlateFound) || errors.Is(err, ErrEmptyPayload)) {
+			keepaliveID := req.URL.Query().Get("camera_id")
+			if keepaliveID == "" {
+				keepaliveID = req.URL.Query().Get("dev_id")
+			}
+			if registered != nil {
+				keepaliveID = registered.CameraID
+			}
+			r.heartbeat.RecordKeepalive(keepaliveID, extractClientIP(req), now)
+			return
+		}
 		r.log.Warn("provision-isr payload unparseable", "error", err, "path", req.URL.Path, "size", len(body))
 		r.capture(req, body, CaptureUnparsed, err.Error(), now)
 		// Still record keepalive from the camera IP
-		keepaliveID := ""
+		keepaliveID := req.URL.Query().Get("camera_id")
+		if keepaliveID == "" {
+			keepaliveID = req.URL.Query().Get("dev_id")
+		}
 		if registered != nil {
 			keepaliveID = registered.CameraID
 		}
@@ -326,3 +362,70 @@ func (r *Receiver) processEvents() {
 		}
 	}
 }
+
+// HandleRawEvent accepts an event payload directly from a transport like the TCP server.
+func (r *Receiver) HandleRawEvent(clientIP string, body []byte, now time.Time) (LPREvent, error) {
+	fakeReq, err := http.NewRequestWithContext(context.Background(), http.MethodPost, "/v1/provision-lpr/event", bytes.NewReader(body))
+	if err != nil {
+		return LPREvent{}, err
+	}
+	fakeReq.Header.Set("Content-Type", "application/xml")
+	fakeReq.RemoteAddr = net.JoinHostPort(clientIP, "8082")
+
+	nullW := &nullResponseWriter{header: make(http.Header)}
+	registered, ok := r.admit(nullW, fakeReq, body, now)
+	if !ok {
+		return LPREvent{}, errors.New("camera not admitted by registry")
+	}
+
+	event, err := r.parser.Parse(fakeReq, body, now)
+	if err != nil {
+		r.capture(fakeReq, body, CaptureUnparsed, err.Error(), now)
+		keepaliveID := ""
+		if registered != nil {
+			keepaliveID = registered.CameraID
+		}
+		r.heartbeat.RecordKeepalive(keepaliveID, clientIP, now)
+		return LPREvent{}, err
+	}
+
+	if registered != nil && event.CameraID != registered.CameraID {
+		reported := event.CameraID
+		event.ReportedCameraID = &reported
+		event.CameraID = registered.CameraID
+	}
+	if r.captureAll {
+		r.capture(fakeReq, body, CaptureAll, "", now)
+	}
+
+	if r.dedup.IsDuplicate(event.CameraID, event.Plate, now) {
+		r.log.Debug("provision-isr duplicate plate suppressed (tcp)", "camera_id", event.CameraID, "plate", event.Plate)
+		return event, nil
+	}
+
+	r.heartbeat.RecordFullEvent(event, now)
+	r.log.Info("provision-isr lpr event accepted (tcp)", "camera_id", event.CameraID, "plate", event.Plate, "ip", event.CameraIP)
+
+	if r.queue != nil && registered != nil {
+		if _, err := r.queue.Append(event); err != nil {
+			r.log.Error("provision-isr event not queued for central", "error", err, "camera_id", event.CameraID)
+		}
+	}
+
+	select {
+	case r.eventsQueue <- event:
+	default:
+		r.log.Warn("provision-isr events queue full; dropping event", "camera_id", event.CameraID, "plate", event.Plate)
+	}
+	return event, nil
+}
+
+type nullResponseWriter struct {
+	header http.Header
+	code   int
+}
+
+func (w *nullResponseWriter) Header() http.Header { return w.header }
+func (w *nullResponseWriter) Write(b []byte) (int, error) { return len(b), nil }
+func (w *nullResponseWriter) WriteHeader(statusCode int) { w.code = statusCode }
+

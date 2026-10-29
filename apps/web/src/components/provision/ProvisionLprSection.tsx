@@ -445,11 +445,12 @@ export function ProvisionLprSection({ camera, onCameraUpdate }: ProvisionLprSect
             <div className="flex flex-col gap-1.5">
               {[
                 { label: "Dirección IP / Dominio", val: configResult?.parameters?.["Server IP / Domain"] || targetHost || "IP de este servidor", key: "host" },
-                { label: "Puerto del Servidor", val: configResult?.parameters?.["Server Port"] || targetPort || "7419", key: "port" },
-                { label: "Ruta Keepalive / Latido", val: configResult?.parameters?.["Keepalive Endpoint"] || "/SendKeepalive", key: "keepalive" },
-                { label: "Ruta de Evento LPR", val: configResult?.parameters?.["LPR Event Endpoint"] || "/v1/provision-lpr/event", key: "event" },
+                { label: "Puerto HTTP POS", val: configResult?.parameters?.["Server Port"] || targetPort || "7419", key: "port" },
+                { label: "Ruta / Path recomendada", val: "/v1/provision-lpr/event", key: "event" },
+                { label: "Ruta alternativa (Keepalive)", val: "/SendKeepalive", key: "keepalive" },
                 { label: "Intervalo de Latido", val: configResult?.parameters?.["Heartbeat Interval"] || "20 s", key: "interval" },
                 { label: "Protocolo", val: "HTTP POST", key: "proto" },
+                { label: "Alternativa Alarm Server (TCP)", val: "Puerto 8082 (TCP raw)", key: "tcp" },
               ].map((p) => (
                 <div key={p.key} className="flex items-center justify-between rounded-m3-lg bg-surface-2 px-3 py-2 text-xs">
                   <span className="font-medium text-muted">{p.label}:</span>
@@ -466,6 +467,16 @@ export function ProvisionLprSection({ camera, onCameraUpdate }: ProvisionLprSect
                   </div>
                 </div>
               ))}
+            </div>
+
+            <div className="rounded-m3-lg bg-surface-3 p-3 text-[11px] text-muted flex flex-col gap-1.5 border border-outline-variant/30 mt-1">
+              <span className="font-semibold text-on-surface">💡 Guía de compatibilidad de cámaras Provision-ISR:</span>
+              <p>
+                <strong>Modo HTTP POS / API:</strong> Las cámaras Provision-ISR suelen tener un único campo <em>Ruta (Path)</em>. Podés ingresar <code>/v1/provision-lpr/event</code> o <code>/SendKeepalive</code>. El agente OpenVMS recibe y procesa tanto los latidos periódicos como las detecciones de patentes en ambas rutas.
+              </p>
+              <p>
+                <strong>Modo Servidor de Alarma (TCP):</strong> En <em>Configuración ➔ Red ➔ Servidor de Alarma</em>, podés habilitarlo apuntando a la IP de este servidor en el puerto <strong>8082</strong> (TCP). El agente decodifica el stream XML nativo idéntico al script de producción.
+              </p>
             </div>
           </div>
           )}

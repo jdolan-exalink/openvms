@@ -30,6 +30,7 @@ var ErrAgentEventsUnsupported = errors.New("the agent does not support the Provi
 // LPRAgentEvent is the part of an agent's normalized LPR event that central stores.
 type LPRAgentEvent struct {
 	CameraID     string    `json:"camera_id"`
+	CameraIP     string    `json:"camera_ip,omitempty"`
 	Plate        string    `json:"plate"`
 	EventTime    time.Time `json:"event_time"`
 	ReceivedTime time.Time `json:"received_time"`
