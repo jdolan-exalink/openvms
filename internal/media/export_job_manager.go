@@ -73,15 +73,15 @@ func ensureExportDir(dir string) string {
 	if dir == "" {
 		dir = "/mnt/openvms/exports"
 	}
-	if err := os.MkdirAll(dir, 0o700); err == nil {
+	if err := os.MkdirAll(dir, 0o755); err == nil {
 		return dir
 	}
 	fallback := "/var/lib/openvms/exports"
-	if err := os.MkdirAll(fallback, 0o700); err == nil {
+	if err := os.MkdirAll(fallback, 0o755); err == nil {
 		return fallback
 	}
 	local := "./data/exports"
-	_ = os.MkdirAll(local, 0o700)
+	_ = os.MkdirAll(local, 0o755)
 	return local
 }
 
@@ -232,6 +232,7 @@ ORDER BY i.created_at ASC`, j.id)
 
 	allReady := len(items) > 0
 	anyFailed := false
+	readyCount := 0
 	var failedReasons []string
 
 	for idx := range items {
@@ -248,6 +249,7 @@ ORDER BY i.created_at ASC`, j.id)
 			m.ensureTransferring(ctx, j, it)
 		case "failed":
 			anyFailed = true
+			allReady = false
 			camName := it.cameraName
 			if camName == "" {
 				camName = it.cameraID.String()[:8]
@@ -258,7 +260,7 @@ ORDER BY i.created_at ASC`, j.id)
 			}
 			failedReasons = append(failedReasons, fmt.Sprintf("%s: %s", camName, errDesc))
 		case "ready":
-			// Completed item
+			readyCount++
 		default:
 			allReady = false
 		}
@@ -270,16 +272,33 @@ ORDER BY i.created_at ASC`, j.id)
 		return
 	}
 
-	// If any item failed and no items are progressing, fail the job
-	if anyFailed {
-		hasProgressing := false
-		for _, it := range items {
-			if it.status == "queued" || it.status == "preparing" || it.status == "transferring" {
-				hasProgressing = true
-				break
-			}
+	// Check if any items are still progressing
+	hasProgressing := false
+	for _, it := range items {
+		if it.status == "queued" || it.status == "preparing" || it.status == "transferring" {
+			hasProgressing = true
+			break
 		}
-		if !hasProgressing {
+	}
+
+	// If no items are progressing:
+	if !hasProgressing {
+		if readyCount > 0 {
+			// Partial success: at least one camera was exported successfully!
+			// Finalize the job so the ready cameras can be downloaded and played.
+			m.finalizeJob(ctx, j, items)
+			if anyFailed {
+				detailedError := strings.Join(failedReasons, "; ")
+				_ = m.Store.TxRaw(ctx, store.AllTenants, func(tx pgx.Tx) error {
+					_, err := tx.Exec(ctx, `UPDATE export_jobs SET error = $2, updated_at = now() WHERE id = $1`, j.id, detailedError)
+					return err
+				})
+			}
+			return
+		}
+
+		// Only if ALL cameras failed (readyCount == 0), fail the job
+		if anyFailed {
 			detailedError := strings.Join(failedReasons, "; ")
 			if detailedError == "" {
 				detailedError = "at least one camera export failed"
@@ -403,7 +422,7 @@ func (m *ExportJobManager) ensureTransferring(parentCtx context.Context, j activ
 		if err := run(transferCtx, j, it); err != nil {
 			if !errors.Is(err, context.Canceled) {
 				m.Log.WarnContext(parentCtx, "export manager: transfer failed", "item_id", it.id, "error", err)
-				m.failItem(parentCtx, it.id, err.Error())
+				m.failItem(parentCtx, it.id, itemErrorMessage(err))
 			}
 		}
 	}()
@@ -431,15 +450,16 @@ func (m *ExportJobManager) transferItem(ctx context.Context, j activeJobRow, it 
 	}
 
 	jobDir := filepath.Join(m.StorageDir, j.id.String())
-	if err := os.MkdirAll(jobDir, 0o700); err != nil {
+	if err := os.MkdirAll(jobDir, 0o755); err != nil {
 		return err
 	}
+	_ = os.Chmod(jobDir, 0o775)
 
 	partPath := filepath.Join(jobDir, fmt.Sprintf("%s.mp4.part", it.id.String()))
 	finalPath := filepath.Join(jobDir, fmt.Sprintf("%s.mp4", it.id.String()))
 
 	// #nosec G304 -- export path is composed from private storage root and UUID identifiers.
-	f, err := os.OpenFile(partPath, os.O_CREATE|os.O_WRONLY|os.O_TRUNC, 0o600)
+	f, err := os.OpenFile(partPath, os.O_CREATE|os.O_WRONLY|os.O_TRUNC, 0o644)
 	if err != nil {
 		return err
 	}
@@ -509,6 +529,7 @@ WHERE id = $1`, j.id, speedBps, etaSec)
 	if err := os.Rename(partPath, finalPath); err != nil {
 		return err
 	}
+	_ = os.Chmod(finalPath, 0o664)
 
 	hashStr := hex.EncodeToString(hasher.Sum(nil))
 
@@ -541,6 +562,9 @@ func (m *ExportJobManager) finalizeJob(ctx context.Context, j activeJobRow, item
 	hashes := make(map[string]string)
 	camIDs := make([]uuid.UUID, 0, len(items))
 	for _, it := range items {
+		if it.status != "ready" || it.localPath == "" {
+			continue
+		}
 		filename := fmt.Sprintf("%s.mp4", it.id.String())
 		camList = append(camList, cameraManifest{
 			ItemID:     it.id.String(),
@@ -639,7 +663,8 @@ ORDER BY e.start_time ASC`, camIDs, j.start, j.end)
 	}
 
 	if b, err := json.MarshalIndent(manifestObj, "", "  "); err == nil {
-		_ = os.WriteFile(manifestPath, b, 0o600)
+		_ = os.WriteFile(manifestPath, b, 0o644)
+		_ = os.Chmod(manifestPath, 0o664)
 	}
 
 	bJSON, _ := json.Marshal(manifestObj)
@@ -751,6 +776,17 @@ func collectZones(ctx context.Context, cams []zoneCamera, limit int, timeout tim
 	}
 	wg.Wait()
 	return out
+}
+
+func itemErrorMessage(err error) string {
+	if err == nil {
+		return ""
+	}
+	msg := err.Error()
+	if errors.Is(err, ErrNoRecording) || strings.Contains(strings.ToLower(msg), "degraded") || strings.Contains(strings.ToLower(msg), "no recording") {
+		return "Sin datos grabados en esta franja horaria (grabación por movimiento o sin actividad)"
+	}
+	return msg
 }
 
 func (m *ExportJobManager) failItem(_ context.Context, itemID uuid.UUID, errMsg string) {

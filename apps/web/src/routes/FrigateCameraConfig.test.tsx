@@ -802,6 +802,18 @@ describe("FrigateCameraConfig", () => {
       expect(await screen.findByRole("region", { name: "Web de la cámara" })).toBeInTheDocument();
     });
 
+    it("renders General and CameraWeb even when Frigate is unreachable", async () => {
+      mountFull({}, {
+        "/api/v1/cameras/c1/frigate-config": () => json({ code: "frigate_unreachable", message: "connection refused" }, 502),
+        "/api/v1/cameras/c1": () => cam({ display_name: "Quincho" }),
+        "/api/v1/me": () => json({ id: "u", tenant_id: "t", grants: [{ permission: "cameras.web.access", effect: "allow" }] }),
+      });
+      expect(await screen.findByRole("heading", { name: "Quincho" })).toBeInTheDocument();
+      expect(screen.getByText(/El servidor de Frigate no responde/)).toBeInTheDocument();
+      expect(screen.getByRole("tab", { name: "General" })).toBeInTheDocument();
+      expect(screen.getByRole("button", { name: "Abrir interfaz web" })).toBeInTheDocument();
+    });
+
     it("opens the camera web view with cameras.web.access alone and hides it for servers.config only", async () => {
       mountFull({}, { "/api/v1/me": () => json({ id: "u", tenant_id: "t", grants: [{ permission: "cameras.web.access", effect: "allow" }] }) });
       expect(await screen.findByRole("button", { name: "Abrir interfaz web" })).toBeInTheDocument();

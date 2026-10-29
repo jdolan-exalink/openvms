@@ -175,7 +175,10 @@ export const HlsPlayer = forwardRef<
           muted={muted}
           playsInline
           aria-label={ariaLabel}
-          onTimeUpdate={(e) => onTime?.(start + e.currentTarget.currentTime)}
+          onTimeUpdate={(e) => {
+            if (e.currentTarget.seeking) return;
+            onTime?.(start + e.currentTarget.currentTime);
+          }}
         />
         {posterSrc && (
           <img

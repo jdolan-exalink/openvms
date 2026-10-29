@@ -3,6 +3,7 @@ package media
 import (
 	"crypto/sha256"
 	"encoding/hex"
+	"errors"
 	"os"
 	"path/filepath"
 	"testing"
@@ -23,6 +24,10 @@ func TestEnsureExportDir(t *testing.T) {
 	}
 	if !info.IsDir() {
 		t.Fatalf("expected dir, got %v", info)
+	}
+	// Verify directory is readable and traversable by other users/services (e.g. API container).
+	if perm := info.Mode().Perm(); perm&0o005 != 0o005 {
+		t.Fatalf("expected world read/execute permissions (at least 0755), got %v", perm)
 	}
 }
 
@@ -52,5 +57,30 @@ func TestExportPackageForensicHashing(t *testing.T) {
 
 	if actualHash != expectedHash {
 		t.Fatalf("expected SHA-256 %s, got %s", expectedHash, actualHash)
+	}
+}
+
+func TestItemErrorMessage(t *testing.T) {
+	tests := []struct {
+		err      error
+		expected string
+	}{
+		{
+			err:      ErrNoRecording,
+			expected: "Sin datos grabados en esta franja horaria (grabación por movimiento o sin actividad)",
+		},
+		{
+			err:      errors.New("the recorder could not be read: provision NVR: degraded"),
+			expected: "Sin datos grabados en esta franja horaria (grabación por movimiento o sin actividad)",
+		},
+		{
+			err:      errors.New("some other network timeout"),
+			expected: "some other network timeout",
+		},
+	}
+	for _, tc := range tests {
+		if got := itemErrorMessage(tc.err); got != tc.expected {
+			t.Errorf("itemErrorMessage(%v) = %q; want %q", tc.err, got, tc.expected)
+		}
 	}
 }

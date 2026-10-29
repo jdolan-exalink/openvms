@@ -127,8 +127,8 @@ function FrigateCameraConfigScreen({ cameraId }: { cameraId: string }) {
   const me = useQuery(meQuery);
   const doc = useQuery(cameraFrigateDocQuery(cameraId));
   const camera = useQuery(cameraQuery(cameraId));
-  const serverId = doc.data?.server_id;
-  const schema = useQuery(frigateSchemaQuery(serverId));
+  const serverId = doc.data?.server_id ?? camera.data?.server_id;
+  const schema = useQuery({ ...frigateSchemaQuery(serverId), enabled: !!serverId });
   const serverCameras = useQuery({ ...camerasQuery({ server_id: serverId }), enabled: !!serverId && !!doc.data?.editable });
   const [active, setActive] = useState<string>();
   const servers = useQuery(serversQuery);
@@ -338,7 +338,7 @@ function FrigateCameraConfigScreen({ cameraId }: { cameraId: string }) {
 
   const header = (
     <PageHeader
-      title={`Frigate · ${doc.data?.camera_name ?? t("common.camera")}`}
+      title={`Configuración · ${doc.data?.camera_name ?? camera.data?.display_name ?? t("common.camera")}`}
       description={version ? t("settings.cameraConfig", { version }) : undefined}
       actions={
         <LinkButton to="/cameras">
@@ -348,12 +348,27 @@ function FrigateCameraConfigScreen({ cameraId }: { cameraId: string }) {
     />
   );
 
-  if (doc.isLoading || (serverId && schema.isLoading)) {
-    return <div className="mx-auto max-w-6xl">{header}<p className="mt-6 text-sm text-muted">Cargando configuración de Frigate…</p></div>;
+  const hasDoc = Boolean(doc.data && root);
+  const hasCam = Boolean(camera.data);
+
+  if (!hasDoc && !hasCam) {
+    if (doc.isLoading || camera.isLoading || (serverId && schema.isLoading)) {
+      return <div className="mx-auto max-w-6xl">{header}<p className="mt-6 text-sm text-muted">Cargando configuración de la cámara…</p></div>;
+    }
+    return <div className="mx-auto flex max-w-6xl flex-col gap-4">{header}<ErrorNote error={doc.error ?? schema.error ?? camera.error ?? new Error("Configuración de cámara no disponible.")} /></div>;
   }
-  if (doc.error || schema.error || !doc.data || !root) {
-    return <div className="mx-auto flex max-w-6xl flex-col gap-4">{header}<ErrorNote error={doc.error ?? schema.error ?? new Error("Configuración de Frigate no disponible.")} /></div>;
-  }
+
+  const frigateError = doc.error ?? schema.error;
+  const frigateUnavailable = !hasDoc;
+  const effectiveDoc: Schemas["FrigateCameraConfigDoc"] = doc.data ?? {
+    camera_id: cameraId,
+    camera_name: camera.data?.display_name ?? "",
+    server_id: serverId ?? "",
+    frigate_version: "",
+    editable: false,
+    secrets_visible: false,
+    config: {},
+  };
 
   const cam = camera.data;
   const canManageCamera = can(me.data, "cameras.manage");
@@ -363,7 +378,7 @@ function FrigateCameraConfigScreen({ cameraId }: { cameraId: string }) {
   const canChangeCodec = can(me.data, "servers.manage") && can(me.data, "servers.config.secrets");
   const canYaml = canCamera(me.data, "cameras.config.yaml");
   const provision = !!cam && (isProvisionCamera(cam) || !!cam.tags?.includes("provision"));
-  const general: GeneralFrigate = { root, camProps, config, doc: doc.data, ctx, valueOf, setSection };
+  const general: GeneralFrigate = { root: root ?? {}, camProps, config, doc: effectiveDoc, ctx, valueOf, setSection };
   const knowsLpr = knowsSection(general, "lpr");
   const cameraType = cam ? cameraTypeOf(cam.tags, { frigateLpr: knowsLpr ? sectionEnabled(general, "lpr") : undefined, looksProvision: isProvisionCamera(cam) }) : "generic";
   const tabs = buildCameraTabs({
@@ -414,7 +429,7 @@ function FrigateCameraConfigScreen({ cameraId }: { cameraId: string }) {
       value={valueOf(section)}
       onChange={(v) => setEdits((e) => ({ ...e, [section]: v }))}
       ctx={ctx}
-      camera={doc.data}
+      camera={effectiveDoc}
       config={config}
       onEditZones={() => setZoneEditor(true)}
     />
@@ -434,7 +449,7 @@ function FrigateCameraConfigScreen({ cameraId }: { cameraId: string }) {
     <YamlEntryProvider openYaml={canYaml ? openYaml : undefined}>
     <div className="mx-auto flex max-w-7xl flex-col gap-5">
       {needsRestart && (
-        <RestartBanner serverId={doc.data.server_id} canRestart={canRestart} onDone={() => setNeedsRestart(false)} />
+        <RestartBanner serverId={effectiveDoc.server_id} canRestart={canRestart} onDone={() => setNeedsRestart(false)} />
       )}
       {readOnly && (
         <p role="status" className="rounded-m3-lg bg-warn/10 px-4 py-3 text-sm text-warn">
@@ -449,8 +464,14 @@ function FrigateCameraConfigScreen({ cameraId }: { cameraId: string }) {
         error={apply.error ? new Error(`${apply.error.message} Las secciones anteriores pudieron aplicarse: revisa el historial o recarga para ver el estado actual.`) : null}
       />
 
+      {frigateUnavailable && (
+        <p role="status" className="rounded-m3-lg bg-warn/10 px-4 py-3 text-sm text-warn">
+          El servidor de Frigate no responde{frigateError ? ` (${frigateError.message})` : ""}. Las opciones de Frigate están deshabilitadas, pero podés usar la web de la cámara, los ajustes generales y las capacidades ONVIF.
+        </p>
+      )}
+
       <CameraHeader
-        name={doc.data.camera_name}
+        name={effectiveDoc.camera_name}
         serverName={server?.name}
         syncState={change.config.data?.state.sync_state}
         chips={statusChips(cam, config)}
@@ -470,7 +491,7 @@ function FrigateCameraConfigScreen({ cameraId }: { cameraId: string }) {
             />
             {restartingCamera && <RestartCameraDialog cameraId={cameraId} onClose={() => setRestartingCamera(false)} />}
             {deletingCamera && (
-              <DeleteCameraDialog cameraId={cameraId} name={doc.data.camera_name} onClose={() => setDeletingCamera(false)} onDeleted={() => void navigate({ to: "/cameras" })} />
+              <DeleteCameraDialog cameraId={cameraId} name={effectiveDoc.camera_name} onClose={() => setDeletingCamera(false)} onDeleted={() => void navigate({ to: "/cameras" })} />
             )}
           </>
         }
@@ -481,7 +502,7 @@ function FrigateCameraConfigScreen({ cameraId }: { cameraId: string }) {
       )}
 
       <div className="flex flex-col gap-3 lg:flex-row lg:items-stretch">
-        <CameraPreview cameraId={cameraId} name={doc.data.camera_name} serverId={serverId} initialQuality={cam?.default_live_quality} overlay={tab.id === "ptz" && section === PTZ_CONTROL && canPtz ? <PtzOverlay cameraId={cameraId} /> : undefined} />
+        <CameraPreview cameraId={cameraId} name={effectiveDoc.camera_name} serverId={serverId} initialQuality={cam?.default_live_quality} overlay={tab.id === "ptz" && section === PTZ_CONTROL && canPtz ? <PtzOverlay cameraId={cameraId} /> : undefined} />
         <CameraSummaryCards
           origin={[
             { label: "Servidor", value: server?.name || NONE },
@@ -533,7 +554,7 @@ function FrigateCameraConfigScreen({ cameraId }: { cameraId: string }) {
                     value={valueOf(s)}
                     onChange={(v) => setEdits((e) => ({ ...e, [s]: v }))}
                     ctx={ctx}
-                    camera={doc.data}
+                    camera={effectiveDoc}
                     config={config}
                     onEditZones={() => setZoneEditor(true)}
                   />
@@ -562,7 +583,7 @@ function FrigateCameraConfigScreen({ cameraId }: { cameraId: string }) {
         ) : section === GENERAL ? (
           <CameraGeneral cameraId={cameraId} canManage={canManageCamera} frigate={general} onApplyToFrigate={onApplyToFrigate} />
         ) : section === FISHEYE ? (
-          <FisheyeTab cameraId={cameraId} cameraName={doc.data.camera_name} canManage={!readOnly} />
+          <FisheyeTab cameraId={cameraId} cameraName={effectiveDoc.camera_name} canManage={!readOnly} />
         ) : section === ANALYTICS_MODULES ? (
           <AnalyticsTab cameraId={cameraId} modules={change.config.data?.analytics?.modules} patch={change.patch} setPatch={change.setPatch} readOnly={readOnly || !canCamera(me.data, "cameras.config.analytics")} />
         ) : section === PROVISION ? (
@@ -578,7 +599,7 @@ function FrigateCameraConfigScreen({ cameraId }: { cameraId: string }) {
         ) : section === INTEGRATIONS_STATUS ? (
           <IntegrationsTab integrations={change.config.data?.integrations} />
         ) : section === CAMERA_WEB ? (
-          <CameraWebView cameraId={cameraId} />
+          <CameraWebView cameraId={cameraId} autoOpen />
         ) : section === PTZ_CONTROL && tab.id === "ptz" ? (
           <PtzTab cameraId={cameraId} canManage={canPtz} />
         ) : section === ONVIF_INFO || section === PTZ_CONTROL ? (
@@ -594,12 +615,14 @@ function FrigateCameraConfigScreen({ cameraId }: { cameraId: string }) {
           />
         ) : section === HISTORY ? (
           <FrigateHistory
-            serverId={doc.data.server_id}
+            serverId={effectiveDoc.server_id}
             cameraId={cameraId}
             secretsVisible={secretsVisible}
-            canRollback={!readOnly && secretsVisible}
+            canRollback={!readOnly && secretsVisible && !frigateUnavailable}
             onRestored={() => setNeedsRestart(true)}
           />
+        ) : frigateUnavailable ? (
+          <p className="text-sm text-muted">Esta sección requiere conexión con el servidor de Frigate.</p>
         ) : (
           sectionPanel
         )}

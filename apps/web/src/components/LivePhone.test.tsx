@@ -848,6 +848,19 @@ describe("Live phone layouts", () => {
     fireEvent.click(screen.getByRole("button", { name: "Vivo" }));
     expect(await screen.findByTestId("phone-grid")).toBeInTheDocument();
   });
+
+  it("filters out synthetic birdseye cameras in GRABADO mode", async () => {
+    localStorage.clear();
+    stubPhone(true);
+    const cameraList = [
+      { id: "c1", display_name: "Cam 1", remote_name: "cam1", enabled: true, site_id: "s1" },
+      { id: "c2", display_name: "BirdEye", remote_name: "birdseye", enabled: true, site_id: "s1" },
+    ];
+    stubBackend(cameraList as unknown as ReturnType<typeof cams>, { recordings: true });
+    renderPage(Live, REC_URL);
+    await waitFor(() => expect(screen.getAllByTestId("rec-player")).toHaveLength(1));
+    expect(screen.queryByText("BirdEye")).toBeNull();
+  });
 });
 
 describe("Live phone single-view swipe between cameras", () => {

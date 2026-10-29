@@ -172,4 +172,63 @@ describe("Playback", () => {
     expect(screen.getByLabelText("Reproducción HLS de Cámara Acceso Norte")).toBeInTheDocument();
     expect(screen.getByLabelText("Reproducción HLS de Cámara Plaza")).toBeInTheDocument();
   });
+
+  it("filters synthetic birdseye cameras out of the camera options", async () => {
+    vi.resetModules();
+    const camNormal = {
+      id: "c1",
+      display_name: "Cámara Normal",
+      remote_name: "cam_normal",
+      status: "online",
+      server_id: "s1",
+      site_id: "site1",
+      tenant_id: "t1",
+    };
+    const camBirdseye = {
+      id: "c2",
+      display_name: "BirdEye",
+      remote_name: "birdseye",
+      status: "online",
+      server_id: "s1",
+      site_id: "site1",
+      tenant_id: "t1",
+    };
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(
+        stubApi({
+          "/api/v1/me": () =>
+            json({
+              id: "u1",
+              username: "operator",
+              display_name: "Operator",
+              mfa_enabled: false,
+              must_change_password: false,
+              auth_method: "session",
+              tenant_id: "t1",
+              grants: [],
+            }),
+          "/api/v1/cameras": () => json({ items: [camNormal, camBirdseye] }),
+          "/api/v1/recordings": () => json({ items: [] }),
+          "/api/v1/events": () => json({ items: [] }),
+        }),
+      ),
+    );
+    const { routeTree } = await import("../router");
+    const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+    const router = createRouter({
+      routeTree,
+      context: { queryClient },
+      history: createMemoryHistory({ initialEntries: ["/playback"] }),
+    });
+
+    render(
+      <QueryClientProvider client={queryClient}>
+        <RouterProvider router={router} />
+      </QueryClientProvider>,
+    );
+
+    expect(await screen.findByText("Cámara Normal")).toBeInTheDocument();
+    expect(screen.queryByText("BirdEye")).toBeNull();
+  });
 });

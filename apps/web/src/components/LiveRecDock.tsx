@@ -178,7 +178,7 @@ export function LiveRecDock({
         events={events}
         position={position}
         now={now}
-        onSeek={(t, detection) => seek(Math.min(t, liveEdge), detection?.id ? { poster: { cameraId: detection.cameraId, eventId: detection.id } } : undefined)}
+        onSeek={(t, detection) => seek(Math.min(t, liveEdge), { play: playing, ...(detection?.id ? { poster: { cameraId: detection.cameraId, eventId: detection.id } } : {}) })}
         selectedId={selectedId}
         onSelectCamera={onSelectCamera}
         selection={timelineSelection}

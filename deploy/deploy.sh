@@ -69,6 +69,13 @@ else
     docker compose up -d --wait postgres || die "could not start postgres"
   fi
   pg_running || die "postgres is not running"
+
+  # Ensure the exports host directory exists and is writable by non-root containers (appuser 10001:999).
+  exports_dir="${OPENVMS_DATA_DIR:-/mnt/cctv/openvms}/exports"
+  if [ -d "$exports_dir" ] || mkdir -p "$exports_dir" 2>/dev/null; then
+    chown -R 10001:999 "$exports_dir" 2>/dev/null || true
+    chmod 775 "$exports_dir" 2>/dev/null || true
+  fi
 fi
 
 # --- 2. Metadata ------------------------------------------------------------

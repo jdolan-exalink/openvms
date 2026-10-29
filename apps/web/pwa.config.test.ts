@@ -32,7 +32,7 @@ describe("pwa options", () => {
   });
 
   it("never serves API, media or realtime paths as the SPA shell", () => {
-    for (const path of ["/api/x", "/api/v1/me", "/media/x", "/ws", "/ws/feed", "/health/x", "/openapi.json", "/docs"]) {
+    for (const path of ["/api/x", "/api/v1/me", "/media/x", "/ws", "/ws/feed", "/health/x", "/openapi.json", "/docs", "/camproxy/abc123/index.html"]) {
       expect(denied(path), path).toBe(true);
     }
     for (const path of ["/live", "/maps", "/events", "/account"]) expect(denied(path), path).toBe(false);

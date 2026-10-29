@@ -504,6 +504,42 @@ func TestHTMLAndCSSRewriting(t *testing.T) {
 	}
 }
 
+func TestJavaScriptLocationRewriting(t *testing.T) {
+	e := newEnv(t, Config{})
+	var body, ctype string
+	e.cam.HandleFunc("/", func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Content-Type", ctype)
+		_, _ = w.Write([]byte(body))
+	})
+	prefix := e.open()
+
+	// JS file with Content-Type application/javascript
+	ctype = "application/javascript"
+	body = `var o=window.top.location.protocol; n=r(window.top.location.hostname); if(top.location!=self.location){desktop.location=1;$top.location=2;a.top.location=3;top.locations=4;}`
+	rec := e.get(prefix, "/chunk.js")
+	want := `var o=window.location.protocol; n=r(window.location.hostname); if(location!=self.location){desktop.location=1;$top.location=2;a.top.location=3;top.locations=4;}`
+	if got := rec.Body.String(); got != want {
+		t.Fatalf("chunk.js rewrite mismatch:\ngot:  %s\nwant: %s", got, want)
+	}
+
+	// JS file without Content-Type or generic application/octet-stream, identified by .js extension
+	ctype = "application/octet-stream"
+	body = `s=window.top.location.protocol+"//"+i;window.parent.location.href="/x";parent.location="/y";`
+	rec = e.get(prefix, "/app.js")
+	want = `s=window.location.protocol+"//"+i;window.location.href="/x";location="/y";`
+	if got := rec.Body.String(); got != want {
+		t.Fatalf("app.js rewrite mismatch:\ngot:  %s\nwant: %s", got, want)
+	}
+
+	// Inline script in HTML
+	ctype = "text/html"
+	body = `<html><head><script>var p=window.top.location.port;</script></head><body></body></html>`
+	rec = e.get(prefix, "/index.html")
+	if !strings.Contains(rec.Body.String(), `var p=window.location.port;`) {
+		t.Fatalf("inline script in HTML not rewritten:\n%s", rec.Body.String())
+	}
+}
+
 func TestNonTextAndOversizedBodiesAreStreamedUntouched(t *testing.T) {
 	e := newEnv(t, Config{RewriteLimit: 64})
 	payload := `src="/a" url(/b)` + strings.Repeat("\x00\xff", 50)
@@ -562,7 +598,7 @@ func TestPathCannotChangeTheTarget(t *testing.T) {
 }
 
 func TestLimitsAndMethods(t *testing.T) {
-	e := newEnv(t, Config{MaxRequestBody: 8, PerSessionConcurrency: 2})
+	e := newEnv(t, Config{MaxRequestBody: 8, PerSessionConcurrency: 2, QueueTimeout: 20 * time.Millisecond})
 	release := make(chan struct{})
 	started := make(chan struct{}, 4)
 	e.cam.HandleFunc("/slow", func(_ http.ResponseWriter, _ *http.Request) { started <- struct{}{}; <-release })
@@ -597,6 +633,47 @@ func TestLimitsAndMethods(t *testing.T) {
 	assertHardened(t, rec, "429")
 	close(release)
 	wg.Wait()
+}
+
+func TestConcurrencyQueueing(t *testing.T) {
+	e := newEnv(t, Config{PerSessionConcurrency: 1, QueueTimeout: 200 * time.Millisecond})
+	unblock := make(chan struct{})
+	e.cam.HandleFunc("/hold", func(_ http.ResponseWriter, _ *http.Request) {
+		<-unblock
+	})
+	e.cam.HandleFunc("/quick", func(w http.ResponseWriter, _ *http.Request) {
+		w.WriteHeader(http.StatusOK)
+	})
+	prefix := e.open()
+
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		_ = e.get(prefix, "/hold")
+	}()
+
+	time.Sleep(10 * time.Millisecond)
+
+	// Second request arrives while first is holding the single slot. It queues.
+	queuedDone := make(chan int)
+	go func() {
+		rec := e.get(prefix, "/quick")
+		queuedDone <- rec.Code
+	}()
+
+	// Release first request after 30ms. The queued request should acquire the slot and succeed (200).
+	time.Sleep(30 * time.Millisecond)
+	close(unblock)
+	<-done
+
+	select {
+	case code := <-queuedDone:
+		if code != http.StatusOK {
+			t.Errorf("queued request got %d, want 200", code)
+		}
+	case <-time.After(500 * time.Millisecond):
+		t.Fatal("queued request timed out")
+	}
 }
 
 func TestCORSPreflightIsAnsweredLocally(t *testing.T) {

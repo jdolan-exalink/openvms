@@ -341,9 +341,17 @@ export function Exports() {
                           </div>
                         </div>
                       ) : job.status === "ready" ? (
-                        <div className="flex items-center gap-1.5 text-ok text-xs">
-                          <Icon icon={CheckCircle2} size="xs" />
-                          <span>Paquete generado y verificado con SHA-256</span>
+                        <div className="flex flex-col gap-1">
+                          <div className="flex items-center gap-1.5 text-ok text-xs">
+                            <Icon icon={CheckCircle2} size="xs" />
+                            <span>Paquete generado y verificado con SHA-256</span>
+                          </div>
+                          {job.error && (
+                            <div className="text-[11px] text-amber-500 dark:text-amber-400 flex items-center gap-1">
+                              <Icon icon={AlertCircle} size="xs" />
+                              <span>{job.error}</span>
+                            </div>
+                          )}
                         </div>
                       ) : job.error ? (
                         <div role="alert" className="text-xs text-bad flex items-start gap-1 font-mono">
@@ -448,9 +456,9 @@ export function Exports() {
                                 )}
 
                                 {it.error && (
-                                  <div className="text-[11px] text-bad flex items-center gap-1 font-mono">
+                                  <div className="text-[11px] text-amber-500 dark:text-amber-400 flex items-center gap-1 font-medium">
                                     <Icon icon={AlertCircle} size="xs" />
-                                    <span>Error: {it.error}</span>
+                                    <span>{it.error}</span>
                                   </div>
                                 )}
                               </div>
