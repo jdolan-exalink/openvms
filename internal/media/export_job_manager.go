@@ -73,15 +73,15 @@ func ensureExportDir(dir string) string {
 	if dir == "" {
 		dir = "/mnt/openvms/exports"
 	}
-	if err := os.MkdirAll(dir, 0o700); err == nil {
+	if err := os.MkdirAll(dir, 0o755); err == nil {
 		return dir
 	}
 	fallback := "/var/lib/openvms/exports"
-	if err := os.MkdirAll(fallback, 0o700); err == nil {
+	if err := os.MkdirAll(fallback, 0o755); err == nil {
 		return fallback
 	}
 	local := "./data/exports"
-	_ = os.MkdirAll(local, 0o700)
+	_ = os.MkdirAll(local, 0o755)
 	return local
 }
 
@@ -431,7 +431,7 @@ func (m *ExportJobManager) transferItem(ctx context.Context, j activeJobRow, it 
 	}
 
 	jobDir := filepath.Join(m.StorageDir, j.id.String())
-	if err := os.MkdirAll(jobDir, 0o700); err != nil {
+	if err := os.MkdirAll(jobDir, 0o755); err != nil {
 		return err
 	}
 
@@ -439,7 +439,7 @@ func (m *ExportJobManager) transferItem(ctx context.Context, j activeJobRow, it 
 	finalPath := filepath.Join(jobDir, fmt.Sprintf("%s.mp4", it.id.String()))
 
 	// #nosec G304 -- export path is composed from private storage root and UUID identifiers.
-	f, err := os.OpenFile(partPath, os.O_CREATE|os.O_WRONLY|os.O_TRUNC, 0o600)
+	f, err := os.OpenFile(partPath, os.O_CREATE|os.O_WRONLY|os.O_TRUNC, 0o644)
 	if err != nil {
 		return err
 	}
@@ -639,7 +639,7 @@ ORDER BY e.start_time ASC`, camIDs, j.start, j.end)
 	}
 
 	if b, err := json.MarshalIndent(manifestObj, "", "  "); err == nil {
-		_ = os.WriteFile(manifestPath, b, 0o600)
+		_ = os.WriteFile(manifestPath, b, 0o644)
 	}
 
 	bJSON, _ := json.Marshal(manifestObj)

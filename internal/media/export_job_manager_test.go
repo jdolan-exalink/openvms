@@ -24,6 +24,10 @@ func TestEnsureExportDir(t *testing.T) {
 	if !info.IsDir() {
 		t.Fatalf("expected dir, got %v", info)
 	}
+	// Verify directory is readable and traversable by other users/services (e.g. API container).
+	if perm := info.Mode().Perm(); perm&0o005 != 0o005 {
+		t.Fatalf("expected world read/execute permissions (at least 0755), got %v", perm)
+	}
 }
 
 func TestExportPackageForensicHashing(t *testing.T) {

@@ -746,6 +746,11 @@ func (g *Gateway) exportJobItemDownload(w http.ResponseWriter, r *http.Request) 
 
 	f, err := os.Open(targetItem.LocalPath)
 	if err != nil {
+		if errors.Is(err, os.ErrPermission) {
+			g.Svc.Log.ErrorContext(r.Context(), "exportJobItemDownload: permission denied reading video file", "path", targetItem.LocalPath, "error", err)
+			writeErr(w, http.StatusInternalServerError, "permission_denied", "permission denied reading video file")
+			return
+		}
 		writeErr(w, http.StatusNotFound, "not_found", "video file not found on disk")
 		return
 	}
@@ -807,6 +812,11 @@ func (g *Gateway) exportJobItemVideo(w http.ResponseWriter, r *http.Request) {
 
 	f, err := os.Open(targetItem.LocalPath)
 	if err != nil {
+		if errors.Is(err, os.ErrPermission) {
+			g.Svc.Log.ErrorContext(r.Context(), "exportJobItemVideo: permission denied reading video file", "path", targetItem.LocalPath, "error", err)
+			writeErr(w, http.StatusInternalServerError, "permission_denied", "permission denied reading video file")
+			return
+		}
 		writeErr(w, http.StatusNotFound, "not_found", "video file not found on disk")
 		return
 	}
@@ -1011,6 +1021,11 @@ func (g *Gateway) publicShareItemVideo(w http.ResponseWriter, r *http.Request) {
 
 	f, err := os.Open(targetItem.LocalPath)
 	if err != nil {
+		if errors.Is(err, os.ErrPermission) {
+			g.Svc.Log.ErrorContext(r.Context(), "publicShareItemVideo: permission denied reading video file", "path", targetItem.LocalPath, "error", err)
+			writeErr(w, http.StatusInternalServerError, "permission_denied", "permission denied reading video file")
+			return
+		}
 		writeErr(w, http.StatusNotFound, "not_found", "video file not found on disk")
 		return
 	}

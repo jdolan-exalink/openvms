@@ -105,7 +105,7 @@ func (m *ExportJobManager) captureRecorderItem(ctx context.Context, j activeJobR
 		}
 	}
 	jobDir := filepath.Join(m.StorageDir, j.id.String())
-	if err := os.MkdirAll(jobDir, 0o700); err != nil {
+	if err := os.MkdirAll(jobDir, 0o755); err != nil {
 		return err
 	}
 	partPath := filepath.Join(jobDir, it.id.String()+".mp4.part")
