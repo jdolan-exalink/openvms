@@ -69,6 +69,8 @@ var B;try{B=new URL(document.baseURI).origin}catch(e){}
 var F=window.fetch;if(F)window.fetch=function(i,o){try{if(typeof i==="string")i=f(i);else if(i&&typeof i.url==="string"&&window.Request&&i instanceof Request){var u=new URL(i.url);if(u.origin===B&&f(u.pathname)!==u.pathname)i=new Request(f(u.pathname)+u.search,i)}}catch(e){}return F.call(this,i,o)};
 var X=window.XMLHttpRequest;if(X){var O=X.prototype.open;X.prototype.open=function(){try{arguments[1]=f(arguments[1])}catch(e){}return O.apply(this,arguments)}}
 var W=window.open;if(W)window.open=function(){try{arguments[0]=f(arguments[0])}catch(e){}return W.apply(this,arguments)};
+var PS=window.history&&window.history.pushState;if(PS)window.history.pushState=function(s,t,u){try{if(typeof u==="string")u=f(u)}catch(e){}return PS.call(this,s,t,u)};
+var RS=window.history&&window.history.replaceState;if(RS)window.history.replaceState=function(s,t,u){try{if(typeof u==="string")u=f(u)}catch(e){}return RS.call(this,s,t,u)};
 var SA=Element.prototype.setAttribute;Element.prototype.setAttribute=function(n,v){try{if(/^(src|href|action|data-src|poster)$/i.test(n))v=f(v)}catch(e){}return SA.call(this,n,v)};
 [["HTMLImageElement","src"],["HTMLScriptElement","src"],["HTMLLinkElement","href"],["HTMLAnchorElement","href"],["HTMLIFrameElement","src"],["HTMLFormElement","action"],["HTMLSourceElement","src"],["HTMLMediaElement","src"],["HTMLEmbedElement","src"]].forEach(function(p){try{var pr=window[p[0]].prototype,d=Object.getOwnPropertyDescriptor(pr,p[1]);if(d&&d.set)Object.defineProperty(pr,p[1],{get:d.get,set:function(v){d.set.call(this,f(v))},configurable:true,enumerable:d.enumerable})}catch(e){}})})();</script>`
 

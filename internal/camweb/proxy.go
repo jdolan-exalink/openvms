@@ -9,6 +9,7 @@ import (
 	"net/http"
 	"net/url"
 	"strings"
+	"time"
 
 	"github.com/jdolan-exalink/openvms/internal/agent/camproxy"
 )
@@ -160,10 +161,15 @@ func (s *Service) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		plain(w, http.StatusRequestURITooLong, "")
 		return
 	}
+	timer := time.NewTimer(s.cfg.QueueTimeout)
+	defer timer.Stop()
+
 	select {
 	case sess.sem <- struct{}{}:
 		defer func() { <-sess.sem }()
-	default:
+	case <-r.Context().Done():
+		return
+	case <-timer.C:
 		w.Header().Set("Retry-After", "1")
 		plain(w, http.StatusTooManyRequests, "too many concurrent requests")
 		return

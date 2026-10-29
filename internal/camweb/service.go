@@ -55,7 +55,8 @@ type Config struct {
 	MaxPerUser            int           // default 4; the oldest session is replaced
 	MaxTotal              int           // default 1024
 	ReauthEvery           time.Duration // permission re-check interval, default 60s
-	PerSessionConcurrency int           // default 8
+	PerSessionConcurrency int           // default 32
+	QueueTimeout          time.Duration // wait for a concurrency slot, default 15s
 	MaxRequestBody        int64         // default 10 MiB
 	MaxResponseBody       int64         // default 64 MiB
 	RewriteLimit          int64         // largest HTML/CSS body rewritten, default 5 MiB
@@ -81,7 +82,10 @@ func (c *Config) defaults() {
 		c.ReauthEvery = 60 * time.Second
 	}
 	if c.PerSessionConcurrency <= 0 {
-		c.PerSessionConcurrency = 8
+		c.PerSessionConcurrency = 32
+	}
+	if c.QueueTimeout <= 0 {
+		c.QueueTimeout = 15 * time.Second
 	}
 	if c.MaxRequestBody <= 0 {
 		c.MaxRequestBody = 10 << 20

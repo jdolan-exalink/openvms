@@ -562,7 +562,7 @@ func TestPathCannotChangeTheTarget(t *testing.T) {
 }
 
 func TestLimitsAndMethods(t *testing.T) {
-	e := newEnv(t, Config{MaxRequestBody: 8, PerSessionConcurrency: 2})
+	e := newEnv(t, Config{MaxRequestBody: 8, PerSessionConcurrency: 2, QueueTimeout: 20 * time.Millisecond})
 	release := make(chan struct{})
 	started := make(chan struct{}, 4)
 	e.cam.HandleFunc("/slow", func(_ http.ResponseWriter, _ *http.Request) { started <- struct{}{}; <-release })
@@ -597,6 +597,47 @@ func TestLimitsAndMethods(t *testing.T) {
 	assertHardened(t, rec, "429")
 	close(release)
 	wg.Wait()
+}
+
+func TestConcurrencyQueueing(t *testing.T) {
+	e := newEnv(t, Config{PerSessionConcurrency: 1, QueueTimeout: 200 * time.Millisecond})
+	unblock := make(chan struct{})
+	e.cam.HandleFunc("/hold", func(_ http.ResponseWriter, _ *http.Request) {
+		<-unblock
+	})
+	e.cam.HandleFunc("/quick", func(w http.ResponseWriter, _ *http.Request) {
+		w.WriteHeader(http.StatusOK)
+	})
+	prefix := e.open()
+
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		_ = e.get(prefix, "/hold")
+	}()
+
+	time.Sleep(10 * time.Millisecond)
+
+	// Second request arrives while first is holding the single slot. It queues.
+	queuedDone := make(chan int)
+	go func() {
+		rec := e.get(prefix, "/quick")
+		queuedDone <- rec.Code
+	}()
+
+	// Release first request after 30ms. The queued request should acquire the slot and succeed (200).
+	time.Sleep(30 * time.Millisecond)
+	close(unblock)
+	<-done
+
+	select {
+	case code := <-queuedDone:
+		if code != http.StatusOK {
+			t.Errorf("queued request got %d, want 200", code)
+		}
+	case <-time.After(500 * time.Millisecond):
+		t.Fatal("queued request timed out")
+	}
 }
 
 func TestCORSPreflightIsAnsweredLocally(t *testing.T) {
