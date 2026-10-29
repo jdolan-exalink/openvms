@@ -2,9 +2,11 @@ package camweb
 
 import (
 	"bytes"
+	"fmt"
 	"html"
 	"net/url"
 	"regexp"
+	"strconv"
 	"strings"
 )
 
@@ -94,12 +96,13 @@ try{var cdD=Object.getOwnPropertyDescriptor(HTMLIFrameElement.prototype,"content
 // rewriteHTML moves root-relative references under prefix, drops any <base> the camera set, rewrites
 // cross-frame location accesses in inline scripts, and injects one <base> (the directory of the current
 // document, which is where the browser would resolve relative URLs anyway) plus the shim script, once.
-func rewriteHTML(body []byte, prefix, docDir string) []byte {
+// If username or password are provided, it also injects an autofill helper into the shim.
+func rewriteHTML(body []byte, prefix, docDir, username, password string) []byte {
 	body = baseTagRe.ReplaceAll(body, nil)
 	body = prefixRoot(body, attrRootRe, prefix)
 	body = rewriteCSS(body, prefix)
 	body = rewriteJS(body)
-	inject := []byte(`<base href="` + html.EscapeString(prefix+docDir) + `">` + shimScriptFor(prefix))
+	inject := []byte(`<base href="` + html.EscapeString(prefix+docDir) + `">` + shimScriptFor(prefix, username, password))
 	for _, re := range []*regexp.Regexp{headOpenRe, htmlOpenRe} {
 		if loc := re.FindIndex(body); loc != nil {
 			out := make([]byte, 0, len(body)+len(inject))
@@ -111,9 +114,15 @@ func rewriteHTML(body []byte, prefix, docDir string) []byte {
 	return append(inject, body...)
 }
 
-func shimScriptFor(prefix string) string {
+func shimScriptFor(prefix, username, password string) string {
 	// %q yields a Go-quoted string, which is also a valid JS string for the hex-and-slash prefix.
-	return strings.Replace(shimScript, "%q", `"`+strings.NewReplacer(`\`, ``, `"`, ``, `<`, ``).Replace(prefix)+`"`, 1)
+	base := strings.Replace(shimScript, "%q", `"`+strings.NewReplacer(`\`, ``, `"`, ``, `<`, ``).Replace(prefix)+`"`, 1)
+	if username == "" && password == "" {
+		return base
+	}
+	autofill := fmt.Sprintf(`;(function(){var u=%s;var p=%s;if(u||p){function af(){try{var pws=document.querySelectorAll('input[type="password"]');if(!pws.length)return false;var ok=false;for(var i=0;i<pws.length;i++){var pw=pws[i];if(p&&!pw.value){pw.value=p;pw.dispatchEvent(new Event('input',{bubbles:true}));pw.dispatchEvent(new Event('change',{bubbles:true}));ok=true;}var f=pw.form||pw.closest('form')||document;var un=f.querySelector('input[type="text"],input[name*="user" i],input[name*="login" i],input[name*="name" i],input[id*="user" i],input[id*="login" i]');if(un&&u&&(!un.value||un.value==="admin")){un.value=u;un.dispatchEvent(new Event('input',{bubbles:true}));un.dispatchEvent(new Event('change',{bubbles:true}));ok=true;}}return ok;}catch(e){return false;}}if(!af()){var att=0;var timer=setInterval(function(){att++;if(af()||att>30)clearInterval(timer);},400);}}})();`,
+		strconv.Quote(username), strconv.Quote(password))
+	return strings.Replace(base, "</script>", autofill+"</script>", 1)
 }
 
 // rewriteLocation maps a Location header of the camera into the prefix. ok is false when the

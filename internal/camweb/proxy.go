@@ -3,6 +3,7 @@ package camweb
 import (
 	"bytes"
 	"context"
+	"encoding/base64"
 	"errors"
 	"io"
 	"mime"
@@ -175,13 +176,15 @@ func (s *Service) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	var data []byte
 	var body io.Reader
 	if r.Body != nil && r.Body != http.NoBody {
 		if r.ContentLength > s.cfg.MaxRequestBody {
 			plain(w, http.StatusRequestEntityTooLarge, "request too large")
 			return
 		}
-		data, err := io.ReadAll(io.LimitReader(r.Body, s.cfg.MaxRequestBody+1))
+		var err error
+		data, err = io.ReadAll(io.LimitReader(r.Body, s.cfg.MaxRequestBody+1))
 		if err != nil || int64(len(data)) > s.cfg.MaxRequestBody {
 			plain(w, http.StatusRequestEntityTooLarge, "request too large")
 			return
@@ -253,6 +256,30 @@ func (s *Service) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		}
 		return
 	}
+	// If the camera challenges with 401 Basic Auth and we have stored camera credentials, retry once.
+	if resp.StatusCode == http.StatusUnauthorized && sess.username != "" && sess.password != "" && r.Header.Get("Authorization") == "" {
+		isBasic := false
+		for _, v := range resp.Header.Values("Www-Authenticate") {
+			if strings.HasPrefix(strings.ToLower(strings.TrimSpace(v)), "basic") {
+				isBasic = true
+				break
+			}
+		}
+		if isBasic {
+			authVal := "Basic " + base64.StdEncoding.EncodeToString([]byte(sess.username+":"+sess.password))
+			retryHdr := hdr.Clone()
+			retryHdr.Set(camproxy.HeaderForwardAuthorization, authVal)
+			var retryBody io.Reader
+			if len(data) > 0 {
+				retryBody = bytes.NewReader(data)
+			}
+			if retryResp, retryErr := s.fwd.Forward(ctx, sess.actor, sess.serverID, r.Method, retryHdr, retryBody); retryErr == nil && retryResp.Header.Get(camproxy.HeaderProxy) == "1" && retryResp.Header.Get(camproxy.HeaderProxyError) == "" {
+				resp.Body.Close()
+				resp = retryResp
+				defer resp.Body.Close()
+			}
+		}
+	}
 	sess.storeCookies(cleaned, resp.Header.Values(camproxy.HeaderSetCookie))
 
 	out := w.Header()
@@ -316,7 +343,7 @@ func (s *Service) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	}
 	switch rewrite {
 	case "text/html":
-		buf = rewriteHTML(buf, prefix, docDir(cleaned))
+		buf = rewriteHTML(buf, prefix, docDir(cleaned), sess.username, sess.password)
 	case "text/css":
 		buf = rewriteCSS(buf, prefix)
 	case "application/javascript":

@@ -112,13 +112,18 @@ export function CameraWebView({ cameraId, autoOpen = false }: { cameraId: string
 
       {open.data && !open.isPending && (
         <div className="grid gap-2">
-          <div className="flex flex-wrap items-center gap-3 text-sm">
-            <Button type="button" variant="tonal" onClick={() => setReloadKey((k) => k + 1)}>
-              Recargar
-            </Button>
-            <a className="underline" href={open.data.url} target="_blank" rel="noopener noreferrer">
-              Abrir en otra pestaña
-            </a>
+          <div className="flex flex-wrap items-center justify-between gap-3 text-sm">
+            <div className="flex items-center gap-3">
+              <Button type="button" variant="tonal" onClick={() => setReloadKey((k) => k + 1)}>
+                Recargar
+              </Button>
+              <a className="underline" href={open.data.url} target="_blank" rel="noopener noreferrer">
+                Abrir en otra pestaña
+              </a>
+            </div>
+            <span className="text-xs text-muted">
+              Auto-login: las credenciales configuradas se rellenan automáticamente vía proxy.
+            </span>
           </div>
           <iframe
             key={reloadKey}

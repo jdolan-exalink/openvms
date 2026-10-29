@@ -112,6 +112,8 @@ type Camera struct {
 	ID       uuid.UUID
 	ServerID uuid.UUID
 	Host     string
+	Username string
+	Password string
 }
 
 // Opened is the result of Open.
@@ -133,6 +135,8 @@ type session struct {
 	cameraID  uuid.UUID
 	serverID  uuid.UUID
 	target    target
+	username  string
+	password  string
 	jar       *cookiejar.Jar
 	sem       chan struct{}
 	created   time.Time
@@ -199,7 +203,7 @@ func (s *Service) Open(ctx context.Context, actor authz.Actor, cam Camera, schem
 	now := s.cfg.Now()
 	sess := &session{
 		hash: sha256.Sum256([]byte(id)), id: id, actor: actor, cameraID: cam.ID, serverID: cam.ServerID,
-		target: tgt, jar: jar, sem: make(chan struct{}, s.cfg.PerSessionConcurrency),
+		target: tgt, username: cam.Username, password: cam.Password, jar: jar, sem: make(chan struct{}, s.cfg.PerSessionConcurrency),
 		created: now, expires: now.Add(s.cfg.TTL), lastUsed: now, lastAuthz: now,
 	}
 	s.mu.Lock()

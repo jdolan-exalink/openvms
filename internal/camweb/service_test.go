@@ -102,6 +102,15 @@ func (e *env) open() (prefix string) {
 	return e.openAs(e.actor)
 }
 
+func (e *env) openWithCreds(user, pass string) string {
+	e.t.Helper()
+	o, err := e.svc.Open(context.Background(), e.actor, Camera{ID: uuid.New(), ServerID: uuid.New(), Host: "10.0.0.5", Username: user, Password: pass}, "http", 80)
+	if err != nil {
+		e.t.Fatalf("Open: %v", err)
+	}
+	return strings.TrimSuffix(o.URL, "/")
+}
+
 func (e *env) openAs(a authz.Actor) string {
 	e.t.Helper()
 	o, err := e.svc.Open(context.Background(), a, Camera{ID: uuid.New(), ServerID: uuid.New(), Host: "10.0.0.5"}, "http", 80)
@@ -719,5 +728,46 @@ func TestServiceNeedsNoBackgroundGoroutines(t *testing.T) {
 	e.openAs(e.actor) // opening sweeps the expired ones
 	if n := e.svc.count(); n != 1 {
 		t.Fatalf("%d sessions kept after expiry", n)
+	}
+}
+
+func TestBasicAuthAutoLoginWithStoredCredentials(t *testing.T) {
+	e := newEnv(t, Config{})
+	e.cam.HandleFunc("/protected", func(w http.ResponseWriter, r *http.Request) {
+		u, p, ok := r.BasicAuth()
+		if !ok || u != "admin" || p != "cam12345" {
+			w.Header().Set("WWW-Authenticate", `Basic realm="Camera"`)
+			w.WriteHeader(http.StatusUnauthorized)
+			return
+		}
+		w.Header().Set("Content-Type", "text/plain")
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write([]byte("logged in"))
+	})
+	prefix := e.openWithCreds("admin", "cam12345")
+	rec := e.get(prefix, "/protected")
+	if rec.Code != http.StatusOK {
+		t.Fatalf("expected auto-login status 200, got %d", rec.Code)
+	}
+	if rec.Body.String() != "logged in\n" && rec.Body.String() != "logged in" {
+		t.Fatalf("expected 'logged in', got %q", rec.Body.String())
+	}
+}
+
+func TestHTMLAutofillScriptInjected(t *testing.T) {
+	e := newEnv(t, Config{})
+	e.cam.HandleFunc("/login.html", func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Content-Type", "text/html")
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write([]byte(`<!DOCTYPE html><html><head></head><body><form><input type="text" name="user"><input type="password" name="pwd"></form></body></html>`))
+	})
+	prefix := e.openWithCreds("admin", "secretpass")
+	rec := e.get(prefix, "/login.html")
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status: %d", rec.Code)
+	}
+	body := rec.Body.String()
+	if !strings.Contains(body, "admin") || !strings.Contains(body, "secretpass") {
+		t.Fatalf("expected injected autofill script containing credentials, got %s", body)
 	}
 }
