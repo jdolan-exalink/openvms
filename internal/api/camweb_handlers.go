@@ -7,6 +7,7 @@ import (
 	"io"
 	"net/http"
 	"net/url"
+	"strings"
 
 	"github.com/google/uuid"
 
@@ -70,10 +71,18 @@ func (h *Handlers) CreateCameraWebSession(ctx context.Context, r gen.CreateCamer
 		}
 	}
 	_, user, pass := h.resolveCameraOnvifCredentials(ctx, a, cam, nil, nil, nil)
-	if host == "" {
+	if strings.Trim(user, "*") == "" || user == "*:*" {
+		user = ""
+	}
+	if strings.Trim(pass, "*") == "" {
+		pass = ""
+	}
+	if host == "" || user == "" {
 		if hosts, herr := h.Inv.GetServerCameraStreamHosts(ctx, a, cam.ServerID); herr == nil {
 			info := findStreamInfo(hosts, cam.RemoteName, cam.DisplayName)
-			host = info.Host
+			if host == "" {
+				host = info.Host
+			}
 			if user == "" && info.Username != "" {
 				user = info.Username
 				pass = info.Password

@@ -883,7 +883,7 @@ func ExtractCameraStreamHosts(rawPaths map[string]any) map[string]CameraStreamHo
 				user, _ := onvifMap["user"].(string)
 				pass, _ := onvifMap["password"].(string)
 				if host != "" && !isLocalHost(host) {
-					updateCameraInfo(camName, CameraStreamHostInfo{Host: host, Username: user, Password: pass})
+					updateCameraInfo(camName, CameraStreamHostInfo{Host: host, Username: cleanCredential(user), Password: cleanCredential(pass)})
 				}
 			}
 			// Check ffmpeg inputs
@@ -949,6 +949,14 @@ func isLocalHost(host string) bool {
 	return false
 }
 
+func cleanCredential(s string) string {
+	s = strings.TrimSpace(s)
+	if s == "" || strings.Trim(s, "*") == "" || s == "*:*" {
+		return ""
+	}
+	return s
+}
+
 func parseRTSPStreamInfo(raw string) CameraStreamHostInfo {
 	if idx := strings.Index(raw, "#"); idx != -1 {
 		raw = raw[:idx]
@@ -964,8 +972,9 @@ func parseRTSPStreamInfo(raw string) CameraStreamHostInfo {
 	}
 	var user, pass string
 	if u.User != nil {
-		user = u.User.Username()
-		pass, _ = u.User.Password()
+		user = cleanCredential(u.User.Username())
+		rawPass, _ := u.User.Password()
+		pass = cleanCredential(rawPass)
 	}
 	return CameraStreamHostInfo{Host: host, Username: user, Password: pass}
 }
