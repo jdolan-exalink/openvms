@@ -34,3 +34,20 @@ describe("clampToNow", () => {
     expect(end).toBeGreaterThan(start);
   });
 });
+
+describe("isRecordableCamera", () => {
+  it("filters out synthetic birdseye cameras by remote name or display name", async () => {
+    const { isRecordableCamera } = await import("./recordings");
+    expect(isRecordableCamera({ remote_name: "birdseye", display_name: "BirdEye" })).toBe(false);
+    expect(isRecordableCamera({ remote_name: "birdseye", display_name: "Vista general" })).toBe(false);
+    expect(isRecordableCamera({ remote_name: "cam_01", display_name: "BirdEye" })).toBe(false);
+    expect(isRecordableCamera({ remote_name: "cam_01", display_name: "bireye" })).toBe(false);
+  });
+
+  it("keeps standard physical cameras and other cameras", async () => {
+    const { isRecordableCamera } = await import("./recordings");
+    expect(isRecordableCamera({ remote_name: "cam_01", display_name: "Entrada" })).toBe(true);
+    expect(isRecordableCamera({ remote_name: "pajaros", display_name: "Jaula Pájaros" })).toBe(true);
+    expect(isRecordableCamera({})).toBe(true);
+  });
+});

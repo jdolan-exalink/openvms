@@ -14,7 +14,7 @@ import { useRecorderCameraIds } from "@/lib/useRecorderCameras";
 import { RecordingTimeline } from "@/components/RecordingTimeline";
 import { Button, ErrorNote, Field, IconButton, PageHeader, RemovableChip, Select, TextInput } from "@/components/ui";
 import { fmtDateTime, toLocalInput } from "@/lib/format";
-import { clampToNow, vodWindowForInstant } from "@/lib/recordings";
+import { clampToNow, isRecordableCamera, vodWindowForInstant } from "@/lib/recordings";
 import { useSyncedPlayback } from "@/lib/useSyncedPlayback";
 import { can } from "@/lib/perm";
 
@@ -151,7 +151,7 @@ export function Playback() {
   // Available cameras that can still be added (up to max 4)
   const availableToAdd = useMemo(() => {
     if (!cameras.data || selectedCameraIds.length >= 4) return [];
-    return cameras.data.filter((c) => !selectedCameraIds.includes(c.id));
+    return cameras.data.filter((c) => !selectedCameraIds.includes(c.id) && isRecordableCamera(c));
   }, [cameras.data, selectedCameraIds]);
 
   return (
@@ -167,7 +167,7 @@ export function Playback() {
             onChange={(e) => handleSelectFirstCamera(e.target.value)}
           >
             <option value="">{t("live.chooseCamera")}</option>
-            {cameras.data?.map((c) => (
+            {cameras.data?.filter(isRecordableCamera).map((c) => (
               <option key={c.id} value={c.id}>
                 {c.display_name}
               </option>

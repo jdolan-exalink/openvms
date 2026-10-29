@@ -25,6 +25,8 @@ import { isHorizontalSwipe, useHorizontalSwipe } from "@/lib/useHorizontalSwipe"
 import type { RecTransport } from "@/lib/useRecPlayback";
 import { useImmersive, useIsLandscape } from "@/lib/useImmersive";
 import { useRecSession } from "@/lib/useRecSession";
+import { isRecordableCamera } from "@/lib/recordings";
+import { parseRecSearch } from "@/lib/liveRec";
 
 type Camera = Schemas["Camera"];
 
@@ -82,6 +84,8 @@ export function LivePhone() {
   const me = useQuery(meQuery);
   const navigate = useNavigate();
   const search = useSearch({ strict: false }) as Record<string, unknown>;
+  const { rec: urlRec } = parseRecSearch(search);
+  const isRec = Boolean(urlRec && can(me.data, "recordings.view"));
   const [siteId, setSiteId] = useState<string | null>(null);
   const [page, setPage] = useState(0);
   const [sheetOpen, setSheetOpen] = useState(false);
@@ -102,9 +106,9 @@ export function LivePhone() {
   const all = useMemo(
     () =>
       (cameras.data ?? [])
-        .filter((camera) => camera.enabled)
+        .filter((camera) => camera.enabled && (!isRec || isRecordableCamera(camera)))
         .sort((a, b) => (siteName.get(a.site_id) ?? "").localeCompare(siteName.get(b.site_id) ?? "") || a.display_name.localeCompare(b.display_name)),
-    [cameras.data, siteName],
+    [cameras.data, siteName, isRec],
   );
   const shown = useMemo(() => (siteId ? all.filter((camera) => camera.site_id === siteId) : all), [all, siteId]);
 

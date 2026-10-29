@@ -4,6 +4,7 @@ import { assignRecPlayers, parseRecSearch, pickMaster, REC_ENTRY_OFFSET_S, recSe
 import { useRecData } from "@/lib/useRecData";
 import { useRecPlayback } from "@/lib/useRecPlayback";
 import { useSyncedPlayback } from "@/lib/useSyncedPlayback";
+import { isRecordableCamera } from "@/lib/recordings";
 
 /** How often the shared REC time is written to the URL while playing. */
 const URL_SYNC_MS = 15_000;
@@ -55,7 +56,16 @@ export function useRecSession({
   const masterId = pickMaster(syncIds, selectedId, hasCoverage);
   useSyncedPlayback(rec ? masterId : "", syncIds, (id) => transport.players.current.get(id)?.video);
   const timelineCameras = useMemo(
-    () => cameraIds.filter((id) => !denied.has(id)).map((id) => ({ id, name: cameraById.get(id)?.display_name ?? id, spans: recData.spans[id] ?? [], live: cameraById.get(id)?.status === "online" })),
+    () =>
+      cameraIds
+        .filter((id) => !denied.has(id))
+        .map((id) => ({
+          id,
+          name: cameraById.get(id)?.display_name ?? id,
+          spans: recData.spans[id] ?? [],
+          live: cameraById.get(id)?.status === "online",
+        }))
+        .filter((c) => isRecordableCamera({ display_name: c.name })),
     [cameraIds, denied, cameraById, recData.spans],
   );
 

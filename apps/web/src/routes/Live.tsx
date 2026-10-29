@@ -875,6 +875,7 @@ function LiveDesktop() {
   const canShareView = can(me.data, "views.create_shared");
   const sidebarContent = (
     <LiveExplorer
+      rec={rec}
       cameras={cameras.data ?? []}
       gridCameraIds={gridCameraIds}
       sites={sites.data ?? []}

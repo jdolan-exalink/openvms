@@ -14,3 +14,14 @@ export function vodWindowForInstant(instant: number, dayStart: number, now: numb
   const start = Math.max(instant - 60, dayStart);
   return { start, end: Math.min(start + MAX_VOD_WINDOW_SECONDS, now) };
 }
+
+/**
+ * isRecordableCamera returns false for cameras or synthetic channels that do not produce
+ * recordings, such as Frigate's synthetic birdseye view.
+ */
+export function isRecordableCamera(cam: { remote_name?: string; display_name?: string }): boolean {
+  const remote = (cam.remote_name ?? "").toLowerCase();
+  const display = (cam.display_name ?? "").toLowerCase();
+  if (remote === "birdseye" || remote === "birdeye" || display === "birdseye" || display === "birdeye" || display === "bireye") return false;
+  return true;
+}

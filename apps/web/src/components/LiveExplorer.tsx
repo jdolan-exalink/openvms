@@ -25,6 +25,7 @@ import type { useCameraFolders } from "@/lib/useCameraFolders";
 import { LongPressTracker } from "@/lib/touch";
 import { useTouchDoubleTap } from "@/lib/useTouchDoubleTap";
 import { FACES_CHANNEL_ID, LPR_CHANNEL_ID } from "@/lib/detectionChannels";
+import { isRecordableCamera } from "@/lib/recordings";
 
 type FolderApi = ReturnType<typeof useCameraFolders>;
 
@@ -169,6 +170,7 @@ export function LiveExplorer({
   noticeTone = "warn",
   actions,
   error,
+  rec = false,
 }: {
   cameras: Camera[];
   gridCameraIds: string[];
@@ -203,6 +205,7 @@ export function LiveExplorer({
   noticeTone?: "ok" | "warn";
   actions: ExplorerActions;
   error?: unknown;
+  rec?: boolean;
 }) {
   const t = useT();
   const [q, setQ] = useState("");
@@ -219,15 +222,16 @@ export function LiveExplorer({
   const isOpen = (key: string) => query !== "" || !prefs.closed[key];
   const toggle = (key: string) => update((p) => ({ ...p, closed: { ...p.closed, [key]: !p.closed[key] } }));
 
+  const displayCameras = useMemo(() => (rec ? cameras.filter(isRecordableCamera) : cameras), [cameras, rec]);
   const tree = useMemo(
-    () => buildTree({ cameras, folders: folderApi.folders, sites, servers, manageable: folderApi.manageable, query: q }),
-    [cameras, folderApi.folders, sites, servers, folderApi.manageable, q],
+    () => buildTree({ cameras: displayCameras, folders: folderApi.folders, sites, servers, manageable: folderApi.manageable, query: q }),
+    [displayCameras, folderApi.folders, sites, servers, folderApi.manageable, q],
   );
   const total = tree.reduce((n, s) => n + s.count, 0);
   const placedViews = useMemo(() => placeViews(views, tree, sites, query), [views, tree, sites, query]);
   const filteredVirtualSources = useMemo(
-    () => VIRTUAL_VISION_SOURCES.filter((s) => !query || s.name.toLowerCase().includes(query)),
-    [query],
+    () => (rec ? [] : VIRTUAL_VISION_SOURCES.filter((s) => !query || s.name.toLowerCase().includes(query))),
+    [query, rec],
   );
   const saveViewItem = (): MenuItem[] => (canCreateView ? [{ id: "save-view", label: t("live.saveGridAsView"), icon: LayoutGrid, onSelect: onCreateView }] : []);
 
@@ -318,22 +322,24 @@ export function LiveExplorer({
       {tab === "detections" && <LiveDetectionsPanel canEvents={canEvents} onPick={onPick} />}
       {tab === "lpr" && <LiveLprPanel canLpr={canLpr} onPick={onPick} />}
       {tab === "cameras" && <div className="flex min-h-0 min-w-0 flex-1 flex-col gap-2 overflow-y-auto overflow-x-hidden">
-        <Section
-          title="Fuentes Virtuales"
-          icon={Sparkles}
-          open={prefs.sections.virtual ?? true}
-          onToggle={() => update((p) => ({ ...p, sections: { ...p.sections, virtual: !(p.sections.virtual ?? true) } }))}
-          count={filteredVirtualSources.length}
-        >
-          <div className="flex min-w-0 flex-col gap-0.5">
-            {filteredVirtualSources.map((source) => (
-              <VirtualSourceRow key={source.id} source={source} onPlace={onPlaceVision} />
-            ))}
-            {filteredVirtualSources.length === 0 && (
-              <p className="py-2 text-xs text-muted">{query ? t("live.noResults") : "No hay fuentes virtuales"}</p>
-            )}
-          </div>
-        </Section>
+        {!rec && (
+          <Section
+            title="Fuentes Virtuales"
+            icon={Sparkles}
+            open={prefs.sections.virtual ?? true}
+            onToggle={() => update((p) => ({ ...p, sections: { ...p.sections, virtual: !(p.sections.virtual ?? true) } }))}
+            count={filteredVirtualSources.length}
+          >
+            <div className="flex min-w-0 flex-col gap-0.5">
+              {filteredVirtualSources.map((source) => (
+                <VirtualSourceRow key={source.id} source={source} onPlace={onPlaceVision} />
+              ))}
+              {filteredVirtualSources.length === 0 && (
+                <p className="py-2 text-xs text-muted">{query ? t("live.noResults") : "No hay fuentes virtuales"}</p>
+              )}
+            </div>
+          </Section>
+        )}
         <Section
           title={t("live.cameras")}
           icon={FolderTree}
