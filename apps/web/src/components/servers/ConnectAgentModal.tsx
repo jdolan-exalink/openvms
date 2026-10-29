@@ -24,6 +24,20 @@ const scopeRows: { key: keyof ConnectResult["scopes"]; label: string }[] = [
   { key: "control", label: "Control (ONVIF y registro de cámaras)" },
 ];
 
+export function defaultAgentUrl(baseUrl?: string): string {
+  if (!baseUrl) return "";
+  try {
+    const parsed = new URL(baseUrl);
+    const host = parsed.hostname;
+    if (host) {
+      return `http://${host}:7419`;
+    }
+  } catch {
+    // not a valid URL
+  }
+  return "";
+}
+
 /**
  * ConnectAgentModal registers an agent that is already running somewhere OpenVMS can reach: its
  * address (a LAN or VPN address, or a name published through a tunnel) and a token created on the agent
@@ -31,14 +45,24 @@ const scopeRows: { key: keyof ConnectResult["scopes"]; label: string }[] = [
  */
 export function ConnectAgentModal({ server, onClose }: { server: Schemas["Server"]; onClose: () => void }) {
   const qc = useQueryClient();
-  const [url, setUrl] = useState("");
+  const [url, setUrl] = useState(() => defaultAgentUrl(server.base_url));
   const [token, setToken] = useState("");
+  const [copiedCmd, setCopiedCmd] = useState<string | null>(null);
   const [rows, setRows] = useState<HeaderRow[]>([{ name: "", value: "" }]);
   const [ca, setCa] = useState("");
   const [needsReplace, setNeedsReplace] = useState(false);
   const [replace, setReplace] = useState(false);
   const [localError, setLocalError] = useState("");
   const [result, setResult] = useState<ConnectResult | null>(null);
+
+  const copy = (text: string, id: string) => {
+    if (typeof navigator !== "undefined" && navigator.clipboard?.writeText) {
+      void navigator.clipboard.writeText(text).then(() => {
+        setCopiedCmd(id);
+        setTimeout(() => setCopiedCmd((cur) => (cur === id ? null : cur)), 2000);
+      });
+    }
+  };
 
   const connect = useMutation({
     mutationFn: () => {
@@ -99,11 +123,47 @@ export function ConnectAgentModal({ server, onClose }: { server: Schemas["Server
         </div>
       ) : (
         <div className="flex flex-col gap-3">
-          <p className="text-xs text-on-surface-variant">
-            Para un agente que ya está instalado (por ejemplo con el comando curl de GitHub). OpenVMS se conecta al agente; el equipo del agente no necesita llegar a OpenVMS. El token se
-            crea en ese equipo con <span className="font-mono">openvms-agent connection</span>.
-          </p>
-          <Field label="Dirección del agente" hint="http://10.8.0.5:7419 en una LAN o VPN, https://agente.ejemplo.com si lo publicás por un túnel.">
+          <div className="flex flex-col gap-2.5 rounded-m3-lg bg-surface-2 p-3 text-xs">
+            <span className="font-semibold text-surface-on">
+              Instrucciones para instalar y conectar el agente desde la consola del servidor:
+            </span>
+            <div className="flex flex-col gap-1">
+              <span className="text-muted">1. En la consola del servidor (SSH o terminal), ejecutá el instalador:</span>
+              <div className="flex items-center gap-2">
+                <code className="flex-1 rounded bg-surface-3 px-2 py-1 font-mono text-[11px] text-surface-on select-all overflow-x-auto">
+                  curl -fsSL https://github.com/jdolan-exalink/openvms/releases/latest/download/install-agent.sh | sudo bash
+                </code>
+                <Button
+                  size="sm"
+                  variant="outlined"
+                  type="button"
+                  onClick={() => copy("curl -fsSL https://github.com/jdolan-exalink/openvms/releases/latest/download/install-agent.sh | sudo bash", "curl")}
+                >
+                  {copiedCmd === "curl" ? "Copiado" : "Copiar"}
+                </Button>
+              </div>
+            </div>
+            <div className="flex flex-col gap-1">
+              <span className="text-muted">2. Obtené el token (API Key) generado en el equipo:</span>
+              <div className="flex items-center gap-2">
+                <code className="flex-1 rounded bg-surface-3 px-2 py-1 font-mono text-[11px] text-surface-on select-all">
+                  sudo cat /etc/openvms/openvms.apikey
+                </code>
+                <Button
+                  size="sm"
+                  variant="outlined"
+                  type="button"
+                  onClick={() => copy("sudo cat /etc/openvms/openvms.apikey", "apikey")}
+                >
+                  {copiedCmd === "apikey" ? "Copiado" : "Copiar"}
+                </Button>
+              </div>
+              <span className="text-[11px] text-muted">
+                (O ejecutá <code className="font-mono">sudo openvms-agent connection</code> para ver el estado, o <code className="font-mono">sudo openvms-agent token rotate openvms</code> para rotarlo).
+              </span>
+            </div>
+          </div>
+          <Field label="Dirección del agente" hint="Dirección HTTP/HTTPS donde escucha el agente (predeterminado en puerto 7419).">
             <TextInput value={url} onChange={(e) => setUrl(e.target.value)} placeholder="https://agente.ejemplo.com" autoComplete="off" spellCheck={false} />
           </Field>
           <Field label="Token del agente" hint="Se guarda cifrado y no se vuelve a mostrar.">

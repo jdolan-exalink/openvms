@@ -11,6 +11,7 @@ import { ConfirmDialog } from "@/components/ConfirmDialog";
 import { Icon } from "@/components/Icon";
 import { Modal } from "@/components/Modal";
 import { AgentUpdateButton } from "@/components/servers/AgentUpdateButton";
+import { ConnectAgentModal } from "@/components/servers/ConnectAgentModal";
 import { NewProvisionNvr } from "@/components/servers/NewProvisionNvr";
 import { ProvisionNvrModal } from "@/components/servers/ProvisionNvrModal";
 import { ServerActionsPanel } from "@/components/servers/ServerActionsPanel";
@@ -856,6 +857,7 @@ function AgentInstallDialog({
   const tracked = jobs.find((entry) => entry.kind === "install" && entry.serverId === server.id && entry.job.id === job?.id);
   const snapshot = tracked?.job ?? job;
   const outcomeUnknown = tracked?.outcome === "unknown";
+  const [showManual, setShowManual] = useState(false);
   const [dismissedJobId, setDismissedJobId] = useState<string | null>(null);
   const defaultHost = extractServerHost(server.base_url);
   const [form, setForm] = useState({ host: defaultHost, port: "22", confirmed: false, replaceConfirmed: false });
@@ -911,6 +913,9 @@ function AgentInstallDialog({
   }, []);
 
   if (!open) return null;
+  if (showManual) {
+    return <ConnectAgentModal server={server} onClose={() => { setShowManual(false); close(); }} />;
+  }
   return (
     <Modal title={t("servers.agentInstallTitle", { server: server.name })} onClose={close}>
       {!hasSubmitted ? (
@@ -957,12 +962,23 @@ function AgentInstallDialog({
             start.mutate({ host: form.host, port: Number(form.port), password });
           }}
         >
+          <div className="flex flex-wrap items-center justify-between gap-2 rounded-m3-md bg-surface-2 p-2.5 text-xs">
+            <span className="text-muted">¿Preferís instalar vía terminal o tu host no tiene SSH habilitado?</span>
+            <Button type="button" size="sm" variant="tonal" onClick={() => setShowManual(true)}>
+              Instalar con curl y conectar
+            </Button>
+          </div>
           {!secureBrowser && (
             <div className="flex flex-col gap-2">
               <p role="alert" className="rounded-m3-lg bg-bad/10 p-3 text-sm text-bad">{t("servers.agentInstallHttpsRequired")}</p>
-              <Button type="button" variant="outlined" disabled={httpsRedirect.pending} onClick={() => { void httpsRedirect.redirect(); }}>
-                {httpsRedirect.pending ? t("servers.agentHttpsRedirectChecking") : t("servers.agentHttpsRedirectAction")}
-              </Button>
+              <div className="flex flex-wrap gap-2">
+                <Button type="button" variant="outlined" disabled={httpsRedirect.pending} onClick={() => { void httpsRedirect.redirect(); }}>
+                  {httpsRedirect.pending ? t("servers.agentHttpsRedirectChecking") : t("servers.agentHttpsRedirectAction")}
+                </Button>
+                <Button type="button" size="sm" variant="tonal" onClick={() => setShowManual(true)}>
+                  Instalar con curl y conectar
+                </Button>
+              </div>
               {httpsRedirect.failed && <p role="alert" className="text-sm text-bad">{t("servers.agentHttpsRedirectFailed")}</p>}
             </div>
           )}

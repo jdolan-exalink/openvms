@@ -115,4 +115,24 @@ describe("ConnectAgentModal", () => {
     expect(await screen.findByRole("alert")).toHaveTextContent(/dirección y el token/i);
     expect(calls).toHaveLength(0);
   });
+
+  it("auto-populates the agent URL using the host from server.base_url", async () => {
+    const serverWithBase = { ...server, base_url: "http://10.1.1.252:5000" } as unknown as Schemas["Server"];
+    renderPage(() => <ConnectAgentModal server={serverWithBase} onClose={() => {}} />);
+    const input = (await screen.findByLabelText(/^Dirección del agente/)) as HTMLInputElement;
+    expect(input.value).toBe("http://10.1.1.252:7419");
+  });
+
+  it("displays curl install command and apikey command with copy functionality", async () => {
+    const writeText = vi.fn().mockResolvedValue(undefined);
+    Object.assign(navigator, { clipboard: { writeText } });
+    renderPage(() => <ConnectAgentModal server={server} onClose={() => {}} />);
+    expect(await screen.findByText(/install-agent\.sh/)).toBeInTheDocument();
+    expect(screen.getByText(/openvms\.apikey/)).toBeInTheDocument();
+
+    const copyButtons = screen.getAllByRole("button", { name: /Copiar/i });
+    expect(copyButtons.length).toBeGreaterThanOrEqual(2);
+    fireEvent.click(copyButtons[0]!);
+    expect(writeText).toHaveBeenCalledWith(expect.stringContaining("install-agent.sh"));
+  });
 });
