@@ -90,3 +90,24 @@ func TestCaptureAllAcceptsPostsOnUnknownPathsWithoutBreakingKnownRoutes(t *testi
 		t.Fatalf("POST /SendKeepalive = %d, want 200", got)
 	}
 }
+
+func TestRootPathAcceptsPostAndGetKeepaliveWithoutPath(t *testing.T) {
+	receiver := provisionlpr.NewReceiver(provisionlpr.DefaultConfig(), nil)
+	mux := buildMux("agent-secret", "test", nil, nil, nil, nil, receiver, func(*http.Request) error { return nil }, func() {})
+	mux.Handle("/", postsAnywhere(receiver))
+
+	do := func(method, path string) int {
+		req := httptest.NewRequest(method, path, strings.NewReader("vendor bytes"))
+		req.RemoteAddr = "10.0.15.107:5000"
+		rec := httptest.NewRecorder()
+		mux.ServeHTTP(rec, req)
+		return rec.Code
+	}
+
+	if got := do(http.MethodGet, "/"); got != http.StatusOK {
+		t.Fatalf("GET / on root = %d, want 200 OK for camera test button", got)
+	}
+	if got := do(http.MethodPost, "/"); got != http.StatusOK {
+		t.Fatalf("POST / on root = %d, want 200 OK for camera event with empty path", got)
+	}
+}
