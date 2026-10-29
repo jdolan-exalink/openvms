@@ -60,17 +60,22 @@ func rewriteCSS(body []byte, prefix string) []byte {
 // shimScript wraps the calls through which a camera UI usually builds absolute-path URLs. It cannot
 // see assignments to location (the browser does not allow intercepting those). It also shims
 // localStorage, sessionStorage and cookie when the sandboxed iframe lacks allow-same-origin.
-const shimScript = `<script>(function(){var P=%q;function f(u){if(typeof u==="string"&&u.charAt(0)==="/"&&u.charAt(1)!=="/"&&u!==P&&u.indexOf(P+"/")!==0)return P+u;return u}
+const shimScript = `<script>(function(){var P=%q;var B;try{B=new URL(document.baseURI).origin}catch(e){}
+function f(u){if(!u)return u;try{var H=window.location.host;if(typeof u==="object"&&u instanceof URL){if(u.host===H||(B&&u.origin===B)){var pn=u.pathname;if(pn!==P&&pn.indexOf(P+"/")!==0)return new URL(P+pn+u.search+u.hash,window.location.href)}return u}}catch(e){}if(typeof u!=="string")return u;if(u.charAt(0)==="/"&&u.charAt(1)!=="/"){if(u!==P&&u.indexOf(P+"/")!==0)return P+u;return u}try{var H=window.location.host;var parsed=new URL(u,window.location.href);if(parsed.host===H||(B&&parsed.origin===B)){var pn=parsed.pathname;if(pn!==P&&pn.indexOf(P+"/")!==0)return P+pn+parsed.search+parsed.hash}}catch(e){}return u}
 function S(){var s={};return{getItem:function(k){return Object.prototype.hasOwnProperty.call(s,k)?s[k]:null},setItem:function(k,v){s[k]=String(v)},removeItem:function(k){delete s[k]},clear:function(){s={}},key:function(i){return Object.keys(s)[i]||null},get length(){return Object.keys(s).length}}};
 try{window.localStorage&&window.localStorage.getItem("_")}catch(e){try{var ls=S();Object.defineProperty(window,"localStorage",{get:function(){return ls},configurable:true})}catch(e2){}}
 try{window.sessionStorage&&window.sessionStorage.getItem("_")}catch(e){try{var ss=S();Object.defineProperty(window,"sessionStorage",{get:function(){return ss},configurable:true})}catch(e2){}}
 try{document.cookie}catch(e){try{var c="";Object.defineProperty(document,"cookie",{get:function(){return c},set:function(v){c=v},configurable:true})}catch(e2){}}
-var B;try{B=new URL(document.baseURI).origin}catch(e){}
-var F=window.fetch;if(F)window.fetch=function(i,o){try{if(typeof i==="string")i=f(i);else if(i&&typeof i.url==="string"&&window.Request&&i instanceof Request){var u=new URL(i.url);if(u.origin===B&&f(u.pathname)!==u.pathname)i=new Request(f(u.pathname)+u.search,i)}}catch(e){}return F.call(this,i,o)};
+var F=window.fetch;if(F)window.fetch=function(i,o){try{if(typeof i==="string")i=f(i);else if(i&&typeof i.url==="string"&&window.Request&&i instanceof Request){var u=new URL(i.url);if((u.host===window.location.host||(B&&u.origin===B))&&f(u.pathname)!==u.pathname)i=new Request(f(i.url),i)}}catch(e){}return F.call(this,i,o)};
 var X=window.XMLHttpRequest;if(X){var O=X.prototype.open;X.prototype.open=function(){try{arguments[1]=f(arguments[1])}catch(e){}return O.apply(this,arguments)}}
 var W=window.open;if(W)window.open=function(){try{arguments[0]=f(arguments[0])}catch(e){}return W.apply(this,arguments)};
 var PS=window.history&&window.history.pushState;if(PS)window.history.pushState=function(s,t,u){try{if(typeof u==="string")u=f(u)}catch(e){}return PS.call(this,s,t,u)};
 var RS=window.history&&window.history.replaceState;if(RS)window.history.replaceState=function(s,t,u){try{if(typeof u==="string")u=f(u)}catch(e){}return RS.call(this,s,t,u)};
+try{var LA=window.location.assign;if(LA)window.location.assign=function(u){return LA.call(window.location,f(u))}}catch(e){}
+try{var LR=window.location.replace;if(LR)window.location.replace=function(u){return LR.call(window.location,f(u))}}catch(e){}
+function rw(s){if(typeof s!=="string")return s;return s.replace(/(src|href|action)=["'](\/[^"'\/][^"']*)["']/gi,function(m,a,p){return a+'="'+f(p)+'"'}).replace(/(src|href|action)=["']https?:\/\/[^\/]+(\/[^"']*)["']/gi,function(m,a,p){return a+'="'+f(p)+'"'})}
+try{var DW=document.write;if(DW)document.write=function(){try{for(var i=0;i<arguments.length;i++){if(typeof arguments[i]==="string")arguments[i]=rw(arguments[i])}}catch(e){}return DW.apply(this,arguments)}}catch(e){}
+try{var DWL=document.writeln;if(DWL)document.writeln=function(){try{for(var i=0;i<arguments.length;i++){if(typeof arguments[i]==="string")arguments[i]=rw(arguments[i])}}catch(e){}return DWL.apply(this,arguments)}}catch(e){}
 var SA=Element.prototype.setAttribute;Element.prototype.setAttribute=function(n,v){try{if(/^(src|href|action|data-src|poster)$/i.test(n))v=f(v)}catch(e){}return SA.call(this,n,v)};
 [["HTMLImageElement","src"],["HTMLScriptElement","src"],["HTMLLinkElement","href"],["HTMLAnchorElement","href"],["HTMLIFrameElement","src"],["HTMLFormElement","action"],["HTMLSourceElement","src"],["HTMLMediaElement","src"],["HTMLEmbedElement","src"]].forEach(function(p){try{var pr=window[p[0]].prototype,d=Object.getOwnPropertyDescriptor(pr,p[1]);if(d&&d.set)Object.defineProperty(pr,p[1],{get:d.get,set:function(v){d.set.call(this,f(v))},configurable:true,enumerable:d.enumerable})}catch(e){}})})();</script>`
 
