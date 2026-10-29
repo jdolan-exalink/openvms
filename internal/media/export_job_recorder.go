@@ -10,6 +10,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strings"
 	"time"
 
 	"github.com/google/uuid"
@@ -89,13 +90,19 @@ func (m *ExportJobManager) captureRecorderItem(ctx context.Context, j activeJobR
 	cam := Camera{ID: it.cameraID, RemoteName: it.remoteName, Server: it.serverRow}
 	footage, err := m.NVR.RecordedWithin(ctx, cam, j.start, j.end)
 	if err != nil {
+		if strings.Contains(strings.ToLower(err.Error()), "degraded") || errors.Is(err, ErrNoRecording) {
+			return errors.New("Sin datos grabados en esta franja horaria (grabación por movimiento o sin actividad)")
+		}
 		return fmt.Errorf("the recorder could not be read: %w", err)
 	}
 	if footage <= 0 {
-		return ErrNoRecording
+		return errors.New("Sin datos grabados en esta franja horaria (grabación por movimiento o sin actividad)")
 	}
 	rtsp, err := m.NVR.ReplayURL(ctx, cam, j.start, j.end, "main")
 	if err != nil {
+		if strings.Contains(strings.ToLower(err.Error()), "degraded") || errors.Is(err, ErrNoRecording) {
+			return errors.New("Sin datos grabados en esta franja horaria (grabación por movimiento o sin actividad)")
+		}
 		return err
 	}
 	ffmpeg := m.FFmpeg

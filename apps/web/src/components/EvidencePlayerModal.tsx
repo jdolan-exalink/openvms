@@ -1,4 +1,5 @@
 import {
+  AlertCircle,
   AlertTriangle,
   Camera,
   Check,
@@ -19,6 +20,7 @@ import {
   SkipBack,
   SkipForward,
   Sparkles,
+  VideoOff,
   Volume2,
   VolumeX,
 } from "lucide-react";
@@ -26,6 +28,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { api, unwrap, type Schemas } from "@/api/client";
 import { cameraFrigateDocQuery } from "@/api/queries";
+import { cn } from "@/lib/cn";
 import { EnhancementControl } from "@/components/EnhancementControl";
 import { ZoomFrame } from "@/components/DigitalZoom";
 import { ForensicComparisonModal } from "@/components/ForensicComparisonModal";
@@ -58,6 +61,8 @@ export interface EvidencePlayerCameraItem {
   sha256_hash?: string;
   total_bytes: number;
   status: string;
+  error?: string;
+  local_path?: string;
   video_url?: string;
 }
 
@@ -617,6 +622,75 @@ function EvidenceVideoTile({
 
   const cssFilter = generateCssFilterString(adjustments);
   const videoFilterStyle = cssFilter !== "none" ? { filter: cssFilter } : undefined;
+
+  const isNoData =
+    item.status === "failed" ||
+    item.status === "cancelled" ||
+    (item.status !== "ready" && !item.video_url) ||
+    item.error?.toLowerCase().includes("movimiento") ||
+    item.error?.toLowerCase().includes("sin datos") ||
+    item.error?.toLowerCase().includes("no recording") ||
+    item.error?.toLowerCase().includes("degraded");
+
+  if (isNoData) {
+    const errorMsg = item.error || "";
+    const isMotionOnly =
+      errorMsg.toLowerCase().includes("movimiento") ||
+      errorMsg.toLowerCase().includes("motion") ||
+      errorMsg.toLowerCase().includes("degraded") ||
+      errorMsg.toLowerCase().includes("no recording") ||
+      item.status === "failed";
+
+    return (
+      <div className="relative flex flex-col bg-surface-1 rounded-m3-lg border border-outline-variant/60 overflow-hidden shadow-sm">
+        {/* Camera Header Badge */}
+        <div className="flex items-center justify-between px-3 py-1.5 bg-surface-2/80 border-b border-outline-variant/40 text-xs">
+          <span className="font-semibold text-on-surface">{item.camera_name}</span>
+          <div className="flex items-center gap-2">
+            {item.server_name && (
+              <span className="text-[11px] text-muted font-mono">{item.server_name}</span>
+            )}
+            <button
+              type="button"
+              onClick={onToggleMaximize}
+              className="p-1 rounded hover:bg-surface-3 text-muted hover:text-on-surface transition-colors cursor-pointer"
+              title={isMaximized ? "Volver a cuadrícula" : "Maximizar esta cámara"}
+            >
+              <Icon icon={isMaximized ? Minimize2 : Maximize2} size="xs" />
+            </button>
+          </div>
+        </div>
+
+        {/* Informative Placeholder */}
+        <div className="relative w-full aspect-video min-h-[160px] bg-surface-0 flex flex-col items-center justify-center p-4 text-center select-none border-b border-outline-variant/20">
+          <div className="size-10 rounded-full bg-surface-2 flex items-center justify-center text-muted mb-2 border border-outline-variant/40">
+            <VideoOff className="size-5 text-muted" />
+          </div>
+          <span className="text-xs font-semibold text-on-surface">
+            {isMotionOnly ? "Sin datos grabados en esta franja horaria" : "Cámara sin grabación disponible"}
+          </span>
+          <span className="text-[11px] text-muted max-w-[320px] mt-1 leading-relaxed">
+            {isMotionOnly
+              ? "Esta cámara está configurada con grabación por movimiento y no registró actividad durante el período seleccionado."
+              : errorMsg || "No se encontraron fragmentos de video para el intervalo solicitado."}
+          </span>
+          <span className="mt-2.5 inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-[10px] font-medium bg-amber-500/10 text-amber-600 dark:text-amber-400 border border-amber-500/20">
+            <Clock className="size-3" />
+            <span>Grabación por movimiento / Sin eventos</span>
+          </span>
+        </div>
+
+        {/* Camera Forensic Integrity Footer */}
+        <div className="flex items-center justify-between px-3 py-1.5 bg-surface-1 border-t border-outline-variant/40 text-[11px] font-mono">
+          <span className="text-warn font-medium flex items-center gap-1">
+            <AlertCircle className="size-3 text-warn" />
+            <span>Sin datos en el intervalo</span>
+          </span>
+          <span className="text-muted">0 B</span>
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div className="relative flex flex-col bg-surface-1 rounded-m3-lg border border-outline-variant/60 overflow-hidden shadow-sm">
@@ -1355,78 +1429,95 @@ export function EvidencePlayerModal({
             {items.map((it) => {
               const camEvents = allEvents.filter((e) => e.camera_id === it.camera_id);
               const maxD = duration > 0 ? duration : expectedDuration;
+              const isNoData =
+                it.status === "failed" ||
+                it.status === "cancelled" ||
+                (it.status !== "ready" && !it.video_url) ||
+                it.error?.toLowerCase().includes("movimiento") ||
+                it.error?.toLowerCase().includes("sin datos") ||
+                it.error?.toLowerCase().includes("no recording") ||
+                it.error?.toLowerCase().includes("degraded");
 
               return (
                 <div key={it.id} className="flex items-center gap-1.5">
                   {/* Camera Name Label */}
                   <div
                     className="w-20 sm:w-28 text-[11px] font-medium text-on-surface truncate shrink-0 flex items-center gap-1 select-none"
-                    title={it.camera_name}
+                    title={`${it.camera_name}${isNoData ? " — Sin datos grabados" : ""}`}
                   >
-                    <Icon icon={Camera} size="xs" className="text-muted shrink-0 size-3" />
-                    <span className="truncate">{it.camera_name}</span>
+                    <Icon icon={isNoData ? VideoOff : Camera} size="xs" className="text-muted shrink-0 size-3" />
+                    <span className={cn("truncate", isNoData && "text-muted italic")}>{it.camera_name}</span>
                   </div>
 
                   {/* Camera Timeline Track */}
                   <div
                     className="relative flex-1 h-5 bg-surface-3/80 rounded-[3px] overflow-hidden cursor-pointer border border-outline-variant/30 hover:border-primary/50 transition-colors"
                     onClick={(e) => {
+                      if (isNoData) return;
                       const rect = e.currentTarget.getBoundingClientRect();
                       const pct = (e.clientX - rect.left) / rect.width;
                       seekTo(pct * maxD);
                     }}
-                    title={`Línea de tiempo de ${it.camera_name} — Clic para reproducir`}
+                    title={isNoData ? `${it.camera_name}: Sin datos grabados en esta franja` : `Línea de tiempo de ${it.camera_name} — Clic para reproducir`}
                   >
-                    {/* Continuous recording coverage */}
-                    <div className="absolute inset-0 bg-primary/15" />
+                    {isNoData ? (
+                      <div className="absolute inset-0 flex items-center justify-center text-[10px] text-muted italic select-none bg-surface-2/40">
+                        Sin datos (grabación por movimiento)
+                      </div>
+                    ) : (
+                      <>
+                        {/* Continuous recording coverage */}
+                        <div className="absolute inset-0 bg-primary/15" />
 
-                    {/* Detection blocks */}
-                    {camEvents.map((ev, evIdx) => {
-                      const st =
-                        new Date(ev.start_time).getTime() / 1000 - clipStartUnix;
-                      const et =
-                        (ev.end_time
-                          ? new Date(ev.end_time).getTime() / 1000
-                          : new Date(ev.start_time).getTime() / 1000 + 4) -
-                        clipStartUnix;
-                      const leftPct = Math.min(100, Math.max(0, (st / maxD) * 100));
-                      const widthPct = Math.min(
-                        100 - leftPct,
-                        Math.max(1.5, ((et - st) / maxD) * 100)
-                      );
+                        {/* Detection blocks */}
+                        {camEvents.map((ev, evIdx) => {
+                          const st =
+                            new Date(ev.start_time).getTime() / 1000 - clipStartUnix;
+                          const et =
+                            (ev.end_time
+                              ? new Date(ev.end_time).getTime() / 1000
+                              : new Date(ev.start_time).getTime() / 1000 + 4) -
+                            clipStartUnix;
+                          const leftPct = Math.min(100, Math.max(0, (st / maxD) * 100));
+                          const widthPct = Math.min(
+                            100 - leftPct,
+                            Math.max(1.5, ((et - st) / maxD) * 100)
+                          );
 
-                      const isAlert = ev.severity === "alert";
-                      const isPerson = ev.labels.some((l) => l === "person");
-                      const isCar = ev.labels.some(
-                        (l) => l === "car" || l === "truck" || l === "motorcycle"
-                      );
-                      const hasPlate = ev.plates && ev.plates.length > 0;
+                          const isAlert = ev.severity === "alert";
+                          const isPerson = ev.labels.some((l) => l === "person");
+                          const isCar = ev.labels.some(
+                            (l) => l === "car" || l === "truck" || l === "motorcycle"
+                          );
+                          const hasPlate = ev.plates && ev.plates.length > 0;
 
-                      const bgColor = isAlert
-                        ? "bg-bad text-white"
-                        : hasPlate
-                        ? "bg-[#a855f7] text-white"
-                        : isCar
-                        ? "bg-[#eab308] text-black"
-                        : isPerson
-                        ? "bg-[#06b6d4] text-white"
-                        : "bg-primary text-white";
+                          const bgColor = isAlert
+                            ? "bg-bad text-white"
+                            : hasPlate
+                            ? "bg-[#a855f7] text-white"
+                            : isCar
+                            ? "bg-[#eab308] text-black"
+                            : isPerson
+                            ? "bg-[#06b6d4] text-white"
+                            : "bg-primary text-white";
 
-                      return (
-                        <div
-                          key={`${ev.id}-${evIdx}`}
-                          style={{ left: `${leftPct}%`, width: `${widthPct}%` }}
-                          className={`absolute top-0.5 bottom-0.5 rounded-[2px] ${bgColor} opacity-95 hover:opacity-100 flex items-center justify-center text-[9px] font-mono font-bold overflow-hidden z-10 shadow-xs`}
-                          title={`${fmtTime(ev.start_time)} · ${ev.labels
-                            .map(labelName)
-                            .join(", ")}${
-                            hasPlate ? ` · Patente: ${ev.plates?.[0]}` : ""
-                          }${ev.zones?.length ? ` · Zonas: ${ev.zones.join(", ")}` : ""}`}
-                        >
-                          {hasPlate ? ev.plates?.[0] : isCar ? "🚗" : isPerson ? "👤" : ""}
-                        </div>
-                      );
-                    })}
+                          return (
+                            <div
+                              key={`${ev.id}-${evIdx}`}
+                              style={{ left: `${leftPct}%`, width: `${widthPct}%` }}
+                              className={`absolute top-0.5 bottom-0.5 rounded-[2px] ${bgColor} opacity-95 hover:opacity-100 flex items-center justify-center text-[9px] font-mono font-bold overflow-hidden z-10 shadow-xs`}
+                              title={`${fmtTime(ev.start_time)} · ${ev.labels
+                                .map(labelName)
+                                .join(", ")}${
+                                hasPlate ? ` · Patente: ${ev.plates?.[0]}` : ""
+                              }${ev.zones?.length ? ` · Zonas: ${ev.zones.join(", ")}` : ""}`}
+                            >
+                              {hasPlate ? ev.plates?.[0] : isCar ? "🚗" : isPerson ? "👤" : ""}
+                            </div>
+                          );
+                        })}
+                      </>
+                    )}
 
                     {/* Synchronized Vertical Playhead Needle */}
                     <div
