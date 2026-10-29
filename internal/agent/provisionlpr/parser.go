@@ -25,6 +25,26 @@ var (
 	ErrNoPlateFound    = errors.New("no license plate detected in payload")
 	labeledPlateRegex  = regexp.MustCompile(`(?i)(?:plate|patente|matricula|licence|license)[^\w]*([A-Z0-9]{5,10})`)
 	alphaNumPlateRegex = regexp.MustCompile(`\b([A-Z]{1,4}[0-9]{1,4}[A-Z0-9]{1,4})\b`)
+
+	provisionPlateColorMap = map[string]string{
+		"0": "Desconocido",
+		"1": "Amarillo",
+		"2": "Azul",
+		"3": "Negro",
+		"4": "Blanco",
+		"5": "Verde",
+	}
+	provisionVehicleColorMap = map[string]string{
+		"0": "Desconocido",
+		"1": "Blanco",
+		"2": "Gris",
+		"3": "Amarillo",
+		"4": "Rosa",
+		"5": "Rojo",
+		"6": "Verde",
+		"7": "Azul",
+		"8": "Negro",
+	}
 )
 
 // Parser parses incoming HTTP requests from Provision-ISR / TVT cameras into normalized LPREvent.
@@ -176,7 +196,7 @@ func (p *Parser) parseXML(data []byte, ev *LPREvent) (bool, error) {
 			switch {
 			case isPlateKey(name):
 				var plate string
-				if err := decoder.DecodeElement(&plate, &se); err == nil {
+				if err := decoder.DecodeElement(&plate, &se); err == nil && plate != "" {
 					ev.Plate = plate
 				}
 			case isTimeKey(name):
@@ -192,9 +212,17 @@ func (p *Parser) parseXML(data []byte, ev *LPREvent) (bool, error) {
 					ev.CameraID = camID
 				}
 			case isConfidenceKey(name):
-				var conf float64
-				if err := decoder.DecodeElement(&conf, &se); err == nil {
-					ev.Confidence = &conf
+				countAttr := getXMLAttr(se.Attr, "count")
+				if countAttr != "" {
+					if c, err := strconv.ParseFloat(countAttr, 64); err == nil {
+						c = max(0.001, min(1.0, c/100.0))
+						ev.Confidence = &c
+					}
+				} else {
+					var conf float64
+					if err := decoder.DecodeElement(&conf, &se); err == nil {
+						ev.Confidence = &conf
+					}
 				}
 			case isListStatusKey(name):
 				var listStatus string
@@ -212,9 +240,23 @@ func (p *Parser) parseXML(data []byte, ev *LPREvent) (bool, error) {
 					ev.PanoramicImage = &img
 				}
 			case isColorKey(name):
-				var s string
-				if err := decoder.DecodeElement(&s, &se); err == nil && s != "" {
-					ev.VehicleColor = &s
+				countAttr := getXMLAttr(se.Attr, "count")
+				if countAttr != "" {
+					if strings.Contains(name, "plate") {
+						if c, ok := provisionPlateColorMap[countAttr]; ok {
+							// Kept if metadata or other field needs it
+							_ = c
+						}
+					} else {
+						if c, ok := provisionVehicleColorMap[countAttr]; ok {
+							ev.VehicleColor = &c
+						}
+					}
+				} else {
+					var s string
+					if err := decoder.DecodeElement(&s, &se); err == nil && s != "" {
+						ev.VehicleColor = &s
+					}
 				}
 			case isBrandKey(name):
 				var s string
@@ -377,11 +419,13 @@ func isTimeKey(k string) bool {
 
 func isCameraKey(k string) bool {
 	return k == "camera_id" || k == "cameraid" || k == "device_id" || k == "deviceid" ||
-		k == "dev_id" || k == "channel" || k == "cam_id" || k == "cameraname" || k == "camera_name"
+		k == "dev_id" || k == "channel" || k == "cam_id" || k == "cameraname" || k == "camera_name" ||
+		k == "devicename" || k == "device_name"
 }
 
 func isConfidenceKey(k string) bool {
-	return k == "confidence" || k == "accuracy" || k == "score" || k == "plate_confidence"
+	return k == "confidence" || k == "accuracy" || k == "score" || k == "plate_confidence" ||
+		k == "plateconfidence"
 }
 
 func isListStatusKey(k string) bool {
@@ -390,7 +434,8 @@ func isListStatusKey(k string) bool {
 }
 
 func isCropKey(k string) bool {
-	return k == "plate_crop" || k == "platecrop" || k == "cutout" || k == "close_up" || k == "plate_image"
+	return k == "plate_crop" || k == "platecrop" || k == "cutout" || k == "close_up" || k == "plate_image" ||
+		k == "targetbase64data"
 }
 
 func isPanoramaKey(k string) bool {
@@ -399,7 +444,7 @@ func isPanoramaKey(k string) bool {
 
 func isColorKey(k string) bool {
 	return k == "color" || k == "vehicle_color" || k == "vehiclecolor" || k == "car_color" ||
-		k == "carcolor" || k == "plate_color" || k == "color_name"
+		k == "carcolor" || k == "plate_color" || k == "color_name" || k == "vehicecolor" || k == "vehice_color"
 }
 
 func isBrandKey(k string) bool {
@@ -454,6 +499,15 @@ func extractClientIP(r *http.Request) string {
 // agent's own interface, not the camera.
 func canonicalAddr(a netip.Addr) string { return a.Unmap().WithZone("").String() }
 
+func getXMLAttr(attrs []xml.Attr, name string) string {
+	for _, a := range attrs {
+		if strings.EqualFold(a.Name.Local, name) {
+			return a.Value
+		}
+	}
+	return ""
+}
+
 func parseTime(raw string) (time.Time, error) {
 	formats := []string{
 		time.RFC3339Nano,
@@ -468,9 +522,12 @@ func parseTime(raw string) (time.Time, error) {
 			return t, nil
 		}
 	}
-	// Try epoch seconds or milliseconds
+	// Try epoch seconds, milliseconds, or microseconds
 	if n, err := strconv.ParseInt(raw, 10, 64); err == nil {
-		if n > 1e12 {
+		if n > 1e14 {
+			return time.UnixMicro(n), nil
+		}
+		if n > 1e11 {
 			return time.UnixMilli(n), nil
 		}
 		return time.Unix(n, 0), nil

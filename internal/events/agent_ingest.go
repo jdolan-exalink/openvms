@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"net/url"
 	"strings"
 	"sync"
 	"time"
@@ -193,7 +194,7 @@ func (a *AgentIngestor) storePage(ctx context.Context, serverID, tenantID uuid.U
 	err := a.Store.TxRaw(ctx, store.AllTenants, func(tx pgx.Tx) error {
 		ingested, skipped = 0, 0
 		through = cursor
-		sites, err := serverCameras(ctx, tx, serverID, tenantID)
+		resolver, err := serverCameras(ctx, tx, serverID, tenantID)
 		if err != nil {
 			return err
 		}
@@ -202,15 +203,14 @@ func (a *AgentIngestor) storePage(ctx context.Context, serverID, tenantID uuid.U
 				continue
 			}
 			through = max(through, e.Seq)
-			cam, plate := uuid.Nil, NormalizePlate(e.Event.Plate)
-			if id, err := uuid.Parse(e.Event.CameraID); err == nil {
-				cam = id
-			}
-			siteID, known := sites[cam]
+			plate := NormalizePlate(e.Event.Plate)
+			ref, known := resolver.resolve(e.Event.CameraID, e.Event.CameraIP)
 			if !known || plate == "" || e.ID == "" {
 				skipped++
 				continue
 			}
+			cam := ref.id
+			siteID := ref.siteID
 			var score *float32
 			if e.Event.Confidence != nil {
 				v := float32(*e.Event.Confidence)
@@ -250,23 +250,76 @@ ON CONFLICT (server_id) DO UPDATE SET
 	return through, nil
 }
 
+type agentCameraRef struct {
+	id     uuid.UUID
+	siteID uuid.UUID
+}
+
+type cameraResolver struct {
+	byID   map[uuid.UUID]agentCameraRef
+	byIP   map[string]agentCameraRef
+	byName map[string]agentCameraRef
+}
+
+func (r *cameraResolver) resolve(cameraID, cameraIP string) (agentCameraRef, bool) {
+	if id, err := uuid.Parse(cameraID); err == nil {
+		if ref, ok := r.byID[id]; ok {
+			return ref, true
+		}
+	}
+	if cameraIP != "" {
+		if ref, ok := r.byIP[cameraIP]; ok {
+			return ref, true
+		}
+	}
+	if cameraID != "" {
+		if ref, ok := r.byIP[cameraID]; ok {
+			return ref, true
+		}
+		if ref, ok := r.byName[strings.ToLower(cameraID)]; ok {
+			return ref, true
+		}
+	}
+	return agentCameraRef{}, false
+}
+
 // serverCameras returns the cameras central knows for the server, with their site: the only ones a
 // reading may be attributed to. An agent cannot file a reading under a camera of another server.
-func serverCameras(ctx context.Context, tx pgx.Tx, serverID, tenantID uuid.UUID) (map[uuid.UUID]uuid.UUID, error) {
-	rows, err := tx.Query(ctx, `SELECT id, site_id FROM cameras WHERE server_id = $1 AND tenant_id = $2 AND deleted_at IS NULL`, serverID, tenantID)
+func serverCameras(ctx context.Context, tx pgx.Tx, serverID, tenantID uuid.UUID) (*cameraResolver, error) {
+	rows, err := tx.Query(ctx, `SELECT id, site_id, coalesce(onvif_endpoint, ''), remote_name, display_name FROM cameras WHERE server_id = $1 AND tenant_id = $2 AND deleted_at IS NULL`, serverID, tenantID)
 	if err != nil {
 		return nil, err
 	}
 	defer rows.Close()
-	out := map[uuid.UUID]uuid.UUID{}
+	res := &cameraResolver{
+		byID:   map[uuid.UUID]agentCameraRef{},
+		byIP:   map[string]agentCameraRef{},
+		byName: map[string]agentCameraRef{},
+	}
 	for rows.Next() {
-		var id, site uuid.UUID
-		if err := rows.Scan(&id, &site); err != nil {
+		var (
+			id, site     uuid.UUID
+			endpoint     string
+			remote, disp string
+		)
+		if err := rows.Scan(&id, &site, &endpoint, &remote, &disp); err != nil {
 			return nil, err
 		}
-		out[id] = site
+		ref := agentCameraRef{id: id, siteID: site}
+		res.byID[id] = ref
+		if endpoint != "" {
+			if u, err := url.Parse(endpoint); err == nil && u.Hostname() != "" {
+				res.byIP[u.Hostname()] = ref
+			}
+		}
+		if remote != "" {
+			res.byName[strings.ToLower(remote)] = ref
+		}
+		if disp != "" {
+			res.byName[strings.ToLower(disp)] = ref
+		}
 	}
-	return out, rows.Err()
+	return res, rows.Err()
 }
 
 // saveCursorOnly moves the cursor without touching the counters.

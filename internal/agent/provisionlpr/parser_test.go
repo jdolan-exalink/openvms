@@ -210,3 +210,63 @@ func TestParserVehicleAttributes(t *testing.T) {
 		t.Errorf("Direction = %v, want North", event.Direction)
 	}
 }
+
+func TestParserProvisionISRXMLRealPayload(t *testing.T) {
+	parser := NewParser()
+	xmlPayload := []byte(`<?xml version="1.0" encoding="utf-8"?>
+<config version="1.0" xmlns="http://www.tvt.net.cn/schemas/config.xsd">
+  <deviceName>Escuela</deviceName>
+  <mac>00:11:22:33:44:55</mac>
+  <snapTime>1715000000000000</snapTime>
+  <items>
+    <item>
+      <plateNumber>AF123BC</plateNumber>
+      <plateColor count="4"/>
+      <vehiceColor count="1"/>
+      <PlateConfidence count="95"/>
+      <targetImageData>
+        <targetBase64Data>/9j/4AAQSkZJRg==</targetBase64Data>
+      </targetImageData>
+    </item>
+  </items>
+</config>`)
+
+	req := httptest.NewRequest(http.MethodPost, "/SendKeepalive", bytes.NewReader(xmlPayload))
+	req.Header.Set("Content-Type", "application/xml")
+	req.RemoteAddr = "10.0.15.107:54321"
+
+	now := time.Now()
+	event, err := parser.Parse(req, xmlPayload, now)
+	if err != nil {
+		t.Fatalf("Parse error: %v", err)
+	}
+
+	if event.Plate != "AF123BC" {
+		t.Errorf("Plate = %q, want AF123BC", event.Plate)
+	}
+	if event.CameraID != "Escuela" {
+		t.Errorf("CameraID = %q, want Escuela", event.CameraID)
+	}
+	if event.CameraIP != "10.0.15.107" {
+		t.Errorf("CameraIP = %q, want 10.0.15.107", event.CameraIP)
+	}
+	// 1715000000000000 us = 1715000000 seconds = 2024-05-06 12:53:20 UTC
+	expectedYear := 2024
+	if event.EventTime.Year() != expectedYear {
+		t.Errorf("EventTime.Year = %d, want %d (event.EventTime=%v)", event.EventTime.Year(), expectedYear, event.EventTime)
+	}
+	if event.Confidence == nil || *event.Confidence != 0.95 {
+		t.Errorf("Confidence = %v, want 0.95", event.Confidence)
+	}
+	if event.VehicleColor == nil || *event.VehicleColor != "Blanco" {
+		t.Errorf("VehicleColor = %v, want Blanco", event.VehicleColor)
+	}
+	if event.PlateCrop == nil || *event.PlateCrop != "/9j/4AAQSkZJRg==" {
+		got := "<nil>"
+		if event.PlateCrop != nil {
+			got = *event.PlateCrop
+		}
+		t.Errorf("PlateCrop = %q, want /9j/4AAQSkZJRg==", got)
+	}
+}
+

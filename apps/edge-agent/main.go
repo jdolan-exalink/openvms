@@ -133,6 +133,18 @@ func main() {
 			lprReceiver.SetCaptures(store, capture == captureEverything)
 		}
 	}
+	tcpPortStr := env("OPENVMS_AGENT_PROVISION_TCP_PORT", "8082")
+	if tcpPortStr != "" && tcpPortStr != "0" && tcpPortStr != "off" {
+		tcpServer, err := provisionlpr.NewTCPServer("0.0.0.0:"+tcpPortStr, lprReceiver, log)
+		if err != nil {
+			log.Warn("provision-isr tcp server initialization failed", "error", err)
+		} else if err := tcpServer.Start(); err != nil {
+			log.Warn("provision-isr tcp server failed to bind", "port", tcpPortStr, "error", err)
+		} else {
+			log.Info("provision-isr tcp alarm server listening", "port", tcpPortStr)
+			defer func() { _ = tcpServer.Close() }()
+		}
+	}
 	updater, err := newUpdater(stateDir)
 	if err != nil {
 		log.Error("agent updater unavailable: updates over the API are disabled", "error", err)

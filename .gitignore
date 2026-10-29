@@ -35,3 +35,7 @@ docker-compose.override.yml
 /deploy/docker/local-tls/
 # Local Compose persistent data (bind-mounted Postgres data directory).
 /data/
+
+# User provided files
+/PROVISION/
+
