@@ -25,3 +25,10 @@
 - [x] T2.3 — Update `camweb/rewrite.go` (`shimScript`) to auto-populate login form fields if credentials are provided.
 - [x] T2.4 — Add credential preview & copy button in `CameraWebView.tsx`.
 - [x] T2.5 — Add unit tests for camweb auth handling and `CameraWebView.test.tsx`.
+
+### Slice 3: Provision-ISR SPA & POS Compatibility Fixes
+- [x] T3.1 — Prevent `TypeError: Cannot read properties of undefined (reading 'toString')` in chunk 48 by rewriting `.wssPort.toString()` with safe fallback.
+- [x] T3.2 — Inject `__camProto` matching camera target scheme (`http:` vs `https:`) and `__camLoc.protocol` so `"http:" === location.protocol` evaluates true on HTTP cameras.
+- [x] T3.3 — Intercept `location.href = ` and `location = ` assignments in camera scripts, rewriting them to `__camLoc.href = ` to prevent escaping to root and violating CSP `frame-ancestors 'self'`.
+- [x] T3.4 — In `shimScript`, protect default `admin` username from being overwritten with a non-admin RTSP stream username (e.g. `frigate`), allowing password autofill to authenticate as `admin`.
+- [x] T3.5 — Support custom `username` and `password` in OpenAPI contract `CameraWebSessionRequest` and `CameraWebSessionResponse`, with credential editor and 1-click "Probar con 'admin'" in `CameraWebView`.

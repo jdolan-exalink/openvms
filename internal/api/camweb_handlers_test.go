@@ -136,3 +136,30 @@ func TestCamproxyRouteNeedsNoCookieButSessionsAreOpaque(t *testing.T) {
 		t.Errorf("unauthenticated createCameraWebSession = %d, want 401", rec.Code)
 	}
 }
+
+func TestCreateCameraWebSessionWithExplicitCredentials(t *testing.T) {
+	cam := camweb.Camera{ID: uuid.New(), ServerID: uuid.New(), Host: "192.168.1.40", Username: "origUser", Password: "origPassword"}
+	a := authz.Actor{UserID: uuid.New()}
+	fwd := &recordingForwarder{proxied: true}
+	h := cameraWebHandlers(fwd, okCam, okFn)
+
+	user := "admin"
+	pass := "customPass"
+	got, err := h.openCameraWeb(context.Background(), a, cam, &gen.CreateCameraWebSessionJSONRequestBody{
+		Username: &user,
+		Password: &pass,
+	})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	ok, isOK := got.(gen.CreateCameraWebSession200JSONResponse)
+	if !isOK {
+		t.Fatalf("expected 200 response, got %#v", got)
+	}
+	if ok.Username == nil || *ok.Username != "admin" {
+		t.Errorf("expected username 'admin', got %v", ok.Username)
+	}
+	if ok.Password == nil || *ok.Password != "customPass" {
+		t.Errorf("expected password 'customPass', got %v", ok.Password)
+	}
+}

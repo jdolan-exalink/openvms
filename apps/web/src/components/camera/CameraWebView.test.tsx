@@ -94,4 +94,24 @@ describe("CameraWebView", () => {
     await waitFor(() => expect(screen.getByTitle("Web de la cámara")).not.toBe(first));
     expect(sessionRequests(fetchMock)).toHaveLength(1);
   });
+
+  it("displays credentials with copy button and allows editing credentials to reopen session", async () => {
+    const credSession = {
+      ...session,
+      username: "admin",
+      password: "Daytona1309$",
+    };
+    const writeText = vi.fn().mockResolvedValue(undefined);
+    Object.assign(navigator, { clipboard: { writeText } });
+
+    await setup({ [`POST ${URL_PATH}`]: () => json(credSession) });
+    fireEvent.click(screen.getByRole("button", { name: "Abrir" }));
+    await screen.findByTitle("Web de la cámara");
+    expect(screen.getByText("Usuario:")).toBeInTheDocument();
+    expect(screen.getByText("admin")).toBeInTheDocument();
+
+    const copyBtn = screen.getByRole("button", { name: "Copiar contraseña" });
+    fireEvent.click(copyBtn);
+    expect(writeText).toHaveBeenCalledWith("Daytona1309$");
+  });
 });

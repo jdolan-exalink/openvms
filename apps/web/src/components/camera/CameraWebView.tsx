@@ -1,4 +1,5 @@
 import { useMutation } from "@tanstack/react-query";
+import { Check, Copy, Eye, EyeOff } from "lucide-react";
 import { useEffect, useState } from "react";
 import { api, ApiError, unwrap } from "@/api/client";
 import { Button, Select, TextInput } from "@/components/ui";
@@ -43,6 +44,11 @@ export function CameraWebView({ cameraId, autoOpen = false }: { cameraId: string
   const [preset, setPreset] = useState("http:80");
   const [customScheme, setCustomScheme] = useState<Scheme>("http");
   const [customPort, setCustomPort] = useState("");
+  const [customUser, setCustomUser] = useState("");
+  const [customPass, setCustomPass] = useState("");
+  const [showPassword, setShowPassword] = useState(false);
+  const [copied, setCopied] = useState(false);
+  const [showCredEditor, setShowCredEditor] = useState(false);
   const [reloadKey, setReloadKey] = useState(0);
 
   const choice = (): { scheme: Scheme; port: number } | null => {
@@ -57,11 +63,30 @@ export function CameraWebView({ cameraId, autoOpen = false }: { cameraId: string
 
   const open = useMutation({
     mutationFn: async () => {
-      const body = choice();
-      if (!body) throw new Error("Indicá un puerto entre 1 y 65535.");
+      const ch = choice();
+      if (!ch) throw new Error("Indicá un puerto entre 1 y 65535.");
+      const body = {
+        ...ch,
+        ...(customUser.trim() ? { username: customUser.trim() } : {}),
+        ...(customPass ? { password: customPass } : {}),
+      };
       return unwrap(await api.POST("/api/v1/cameras/{cameraId}/web/session", { params: { path: { cameraId } }, body }));
     },
   });
+
+  const activeUser = customUser || open.data?.username || "";
+  const activePass = customPass || open.data?.password || "";
+
+  const copyPassword = async () => {
+    if (!activePass) return;
+    try {
+      await navigator.clipboard.writeText(activePass);
+      setCopied(true);
+      setTimeout(() => setCopied(false), 2000);
+    } catch {
+      // clipboard write might be blocked in some contexts
+    }
+  };
 
   useEffect(() => {
     if (autoOpen && open.isIdle) {
@@ -121,10 +146,96 @@ export function CameraWebView({ cameraId, autoOpen = false }: { cameraId: string
                 Abrir en otra pestaña
               </a>
             </div>
-            <span className="text-xs text-muted">
+
+            <div className="flex flex-wrap items-center gap-2">
+              {activeUser && (
+                <span className="text-xs bg-surface-2 px-2.5 py-1 rounded-m3-md font-mono flex items-center gap-1.5 border border-outline/20">
+                  <span className="text-muted font-sans font-normal">Usuario:</span> <strong>{activeUser}</strong>
+                </span>
+              )}
+              {activePass && (
+                <div className="flex items-center gap-1 bg-surface-2 px-2.5 py-1 rounded-m3-md font-mono text-xs border border-outline/20">
+                  <span className="text-muted font-sans font-normal">Contraseña:</span>
+                  <span>{showPassword ? activePass : "••••••••"}</span>
+                  <button
+                    type="button"
+                    aria-label={showPassword ? "Ocultar contraseña" : "Ver contraseña"}
+                    onClick={() => setShowPassword((s) => !s)}
+                    className="ml-1 text-muted hover:text-foreground p-0.5"
+                  >
+                    {showPassword ? <EyeOff className="size-3.5" /> : <Eye className="size-3.5" />}
+                  </button>
+                  <button
+                    type="button"
+                    aria-label="Copiar contraseña"
+                    onClick={copyPassword}
+                    className="ml-1 text-muted hover:text-foreground p-0.5 flex items-center gap-1"
+                  >
+                    {copied ? <Check className="size-3.5 text-good" /> : <Copy className="size-3.5" />}
+                    {copied ? <span className="text-[10px] text-good font-sans">Copiada</span> : null}
+                  </button>
+                </div>
+              )}
+              <button
+                type="button"
+                className="text-xs text-primary underline ml-1 cursor-pointer"
+                onClick={() => setShowCredEditor((e) => !e)}
+              >
+                {showCredEditor ? "Cerrar credenciales" : "Cambiar credenciales"}
+              </button>
+            </div>
+          </div>
+
+          {showCredEditor && (
+            <div className="flex flex-wrap items-end gap-3 p-3 bg-surface-2 rounded-m3-md border border-outline/20 text-sm">
+              <label className="grid gap-1">
+                <span className="text-xs text-muted">Usuario para la cámara</span>
+                <TextInput
+                  aria-label="Usuario para la cámara"
+                  value={customUser || activeUser}
+                  onChange={(e) => setCustomUser(e.target.value)}
+                  placeholder="admin"
+                />
+              </label>
+              <label className="grid gap-1">
+                <span className="text-xs text-muted">Contraseña para la cámara</span>
+                <TextInput
+                  aria-label="Contraseña para la cámara"
+                  type="password"
+                  value={customPass || activePass}
+                  onChange={(e) => setCustomPass(e.target.value)}
+                />
+              </label>
+              {activeUser !== "admin" && (
+                <Button
+                  type="button"
+                  variant="tonal"
+                  size="sm"
+                  onClick={() => {
+                    setCustomUser("admin");
+                    open.mutate();
+                  }}
+                >
+                  Probar con &apos;admin&apos;
+                </Button>
+              )}
+              <Button
+                type="button"
+                size="sm"
+                disabled={open.isPending}
+                onClick={() => open.mutate()}
+              >
+                Reconectar
+              </Button>
+            </div>
+          )}
+
+          <div className="flex items-center justify-between text-xs text-muted">
+            <span>
               Auto-login: las credenciales configuradas se rellenan automáticamente vía proxy.
             </span>
           </div>
+
           <iframe
             key={reloadKey}
             title="Web de la cámara"

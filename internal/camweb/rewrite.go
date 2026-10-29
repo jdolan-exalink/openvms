@@ -26,6 +26,9 @@ var (
 
 	jsWindowTopLocRe = regexp.MustCompile(`([^a-zA-Z0-9_$.]|^)window\.(?:top|parent)\.location\b`)
 	jsTopLocRe       = regexp.MustCompile(`([^a-zA-Z0-9_$.]|^)(?:top|parent)\.location\b`)
+	jsLocPropRe      = regexp.MustCompile(`([^a-zA-Z0-9_$.]|^)(?:window\.|document\.)?location\.(href|protocol|assign|replace)\b`)
+	jsLocAssignRe    = regexp.MustCompile(`([^a-zA-Z0-9_$.]|^)(?:window\.|document\.)?location\s*=\s*([^=]|$)`)
+	jsWssPortRe      = regexp.MustCompile(`([a-zA-Z0-9_$.]+)\.wssPort\.toString\(\)`)
 )
 
 // prefixRoot inserts prefix before the final "/" of every match of re (each match ends in the "/" that
@@ -65,15 +68,20 @@ func rewriteCSS(body []byte, prefix string) []byte {
 
 func rewriteJS(body []byte) []byte {
 	body = jsWindowTopLocRe.ReplaceAll(body, []byte("${1}window.location"))
-	return jsTopLocRe.ReplaceAll(body, []byte("${1}location"))
+	body = jsTopLocRe.ReplaceAll(body, []byte("${1}location"))
+	body = jsLocPropRe.ReplaceAll(body, []byte("${1}__camLoc.${2}"))
+	body = jsLocAssignRe.ReplaceAll(body, []byte("${1}__camLoc.href = ${2}"))
+	return jsWssPortRe.ReplaceAll(body, []byte("(${1}.wssPort?${1}.wssPort.toString():(${1}.wsPort?${1}.wsPort.toString():\"80\"))"))
 }
 
 // shimScript wraps the calls through which a camera UI usually builds absolute-path URLs. It cannot
-// see assignments to location (the browser does not allow intercepting those). It also shims
-// localStorage, sessionStorage and cookie when the sandboxed iframe lacks allow-same-origin, and
-// provides safe fallbacks for nested cross-origin iframe DOM accesses.
+// see assignments to location (the browser does not allow intercepting those), so location mutations
+// are rewritten to __camLoc helpers. It also shims localStorage, sessionStorage and cookie when the
+// sandboxed iframe lacks allow-same-origin, and provides safe fallbacks for nested cross-origin iframe DOM accesses.
 const shimScript = `<script>(function(){var P=%q;var B;try{B=new URL(document.baseURI).origin}catch(e){}
 function f(u){if(!u)return u;try{var H=window.location.host;if(typeof u==="object"&&u instanceof URL){if(u.host===H||(B&&u.origin===B)){var pn=u.pathname;if(pn!==P&&pn.indexOf(P+"/")!==0)return new URL(P+pn+u.search+u.hash,window.location.href)}return u}}catch(e){}if(typeof u!=="string")return u;if(u.charAt(0)==="/"&&u.charAt(1)!=="/"){if(u!==P&&u.indexOf(P+"/")!==0)return P+u;return u}try{var H=window.location.host;var parsed=new URL(u,window.location.href);if(parsed.host===H||(B&&parsed.origin===B)){var pn=parsed.pathname;if(pn!==P&&pn.indexOf(P+"/")!==0)return P+pn+parsed.search+parsed.hash}}catch(e){}return u}
+var __camProto=%p;window.__camProto=__camProto;
+var __camLoc=window.__camLoc={get href(){return window.location.href},set href(u){window.location.href=f(u)},get protocol(){return __camProto||window.location.protocol},set protocol(v){try{window.location.protocol=v}catch(e){}},get host(){return window.location.host},get hostname(){return window.location.hostname},get port(){return window.location.port},get pathname(){return window.location.pathname},get search(){return window.location.search},get hash(){return window.location.hash},assign:function(u){try{window.location.assign(f(u))}catch(e){window.location.href=f(u)}},replace:function(u){try{window.location.replace(f(u))}catch(e){window.location.href=f(u)}},reload:function(){window.location.reload()}};
 function S(){var s={};return{getItem:function(k){return Object.prototype.hasOwnProperty.call(s,k)?s[k]:null},setItem:function(k,v){s[k]=String(v)},removeItem:function(k){delete s[k]},clear:function(){s={}},key:function(i){return Object.keys(s)[i]||null},get length(){return Object.keys(s).length}}};
 try{window.localStorage&&window.localStorage.getItem("_")}catch(e){try{var ls=S();Object.defineProperty(window,"localStorage",{get:function(){return ls},configurable:true})}catch(e2){}}
 try{window.sessionStorage&&window.sessionStorage.getItem("_")}catch(e){try{var ss=S();Object.defineProperty(window,"sessionStorage",{get:function(){return ss},configurable:true})}catch(e2){}}
@@ -97,12 +105,12 @@ try{var cdD=Object.getOwnPropertyDescriptor(HTMLIFrameElement.prototype,"content
 // cross-frame location accesses in inline scripts, and injects one <base> (the directory of the current
 // document, which is where the browser would resolve relative URLs anyway) plus the shim script, once.
 // If username or password are provided, it also injects an autofill helper into the shim.
-func rewriteHTML(body []byte, prefix, docDir, username, password string) []byte {
+func rewriteHTML(body []byte, prefix, docDir, scheme, username, password string) []byte {
 	body = baseTagRe.ReplaceAll(body, nil)
 	body = prefixRoot(body, attrRootRe, prefix)
 	body = rewriteCSS(body, prefix)
 	body = rewriteJS(body)
-	inject := []byte(`<base href="` + html.EscapeString(prefix+docDir) + `">` + shimScriptFor(prefix, username, password))
+	inject := []byte(`<base href="` + html.EscapeString(prefix+docDir) + `">` + shimScriptFor(prefix, scheme, username, password))
 	for _, re := range []*regexp.Regexp{headOpenRe, htmlOpenRe} {
 		if loc := re.FindIndex(body); loc != nil {
 			out := make([]byte, 0, len(body)+len(inject))
@@ -114,13 +122,18 @@ func rewriteHTML(body []byte, prefix, docDir, username, password string) []byte 
 	return append(inject, body...)
 }
 
-func shimScriptFor(prefix, username, password string) string {
+func shimScriptFor(prefix, scheme, username, password string) string {
 	// %q yields a Go-quoted string, which is also a valid JS string for the hex-and-slash prefix.
 	base := strings.Replace(shimScript, "%q", `"`+strings.NewReplacer(`\`, ``, `"`, ``, `<`, ``).Replace(prefix)+`"`, 1)
+	proto := "http:"
+	if scheme == "https" {
+		proto = "https:"
+	}
+	base = strings.Replace(base, "%p", `"`+proto+`"`, 1)
 	if username == "" && password == "" {
 		return base
 	}
-	autofill := fmt.Sprintf(`;(function(){var u=%s;var p=%s;if(u||p){function af(){try{var pws=document.querySelectorAll('input[type="password"]');if(!pws.length)return false;var ok=false;for(var i=0;i<pws.length;i++){var pw=pws[i];if(p&&!pw.value){pw.value=p;pw.dispatchEvent(new Event('input',{bubbles:true}));pw.dispatchEvent(new Event('change',{bubbles:true}));ok=true;}var f=pw.form||pw.closest('form')||document;var un=f.querySelector('input[type="text"],input[name*="user" i],input[name*="login" i],input[name*="name" i],input[id*="user" i],input[id*="login" i]');if(un&&u&&(!un.value||un.value==="admin")){un.value=u;un.dispatchEvent(new Event('input',{bubbles:true}));un.dispatchEvent(new Event('change',{bubbles:true}));ok=true;}}return ok;}catch(e){return false;}}if(!af()){var att=0;var timer=setInterval(function(){att++;if(af()||att>30)clearInterval(timer);},400);}}})();`,
+	autofill := fmt.Sprintf(`;(function(){var u=%s;var p=%s;if(u||p){function af(){try{var pws=document.querySelectorAll('input[type="password"]');if(!pws.length)return false;var ok=false;for(var i=0;i<pws.length;i++){var pw=pws[i];if(p&&!pw.value){pw.value=p;pw.dispatchEvent(new Event('input',{bubbles:true}));pw.dispatchEvent(new Event('change',{bubbles:true}));ok=true;}var f=pw.form||pw.closest('form')||document;var un=f.querySelector('input[type="text"],input[name*="user" i],input[name*="login" i],input[name*="name" i],input[id*="user" i],input[id*="login" i]');if(un&&u&&(!un.value||(un.value==="admin"&&u==="admin"))){un.value=u;un.dispatchEvent(new Event('input',{bubbles:true}));un.dispatchEvent(new Event('change',{bubbles:true}));ok=true;}}return ok;}catch(e){return false;}}if(!af()){var att=0;var timer=setInterval(function(){att++;if(af()||att>30)clearInterval(timer);},400);}}})();`,
 		strconv.Quote(username), strconv.Quote(password))
 	return strings.Replace(base, "</script>", autofill+"</script>", 1)
 }

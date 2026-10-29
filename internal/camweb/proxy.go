@@ -343,7 +343,7 @@ func (s *Service) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	}
 	switch rewrite {
 	case "text/html":
-		buf = rewriteHTML(buf, prefix, docDir(cleaned), sess.username, sess.password)
+		buf = rewriteHTML(buf, prefix, docDir(cleaned), sess.target.scheme, sess.username, sess.password)
 	case "text/css":
 		buf = rewriteCSS(buf, prefix)
 	case "application/javascript":

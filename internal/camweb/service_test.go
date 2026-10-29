@@ -526,7 +526,7 @@ func TestJavaScriptLocationRewriting(t *testing.T) {
 	ctype = "application/javascript"
 	body = `var o=window.top.location.protocol; n=r(window.top.location.hostname); if(top.location!=self.location){desktop.location=1;$top.location=2;a.top.location=3;top.locations=4;}`
 	rec := e.get(prefix, "/chunk.js")
-	want := `var o=window.location.protocol; n=r(window.location.hostname); if(location!=self.location){desktop.location=1;$top.location=2;a.top.location=3;top.locations=4;}`
+	want := `var o=__camLoc.protocol; n=r(window.location.hostname); if(location!=self.location){desktop.location=1;$top.location=2;a.top.location=3;top.locations=4;}`
 	if got := rec.Body.String(); got != want {
 		t.Fatalf("chunk.js rewrite mismatch:\ngot:  %s\nwant: %s", got, want)
 	}
@@ -535,7 +535,7 @@ func TestJavaScriptLocationRewriting(t *testing.T) {
 	ctype = "application/octet-stream"
 	body = `s=window.top.location.protocol+"//"+i;window.parent.location.href="/x";parent.location="/y";`
 	rec = e.get(prefix, "/app.js")
-	want = `s=window.location.protocol+"//"+i;window.location.href="/x";location="/y";`
+	want = `s=__camLoc.protocol+"//"+i;__camLoc.href="/x";__camLoc.href = "/y";`
 	if got := rec.Body.String(); got != want {
 		t.Fatalf("app.js rewrite mismatch:\ngot:  %s\nwant: %s", got, want)
 	}
@@ -769,5 +769,84 @@ func TestHTMLAutofillScriptInjected(t *testing.T) {
 	body := rec.Body.String()
 	if !strings.Contains(body, "admin") || !strings.Contains(body, "secretpass") {
 		t.Fatalf("expected injected autofill script containing credentials, got %s", body)
+	}
+}
+
+func TestRewriteJSProvisionISRFixes(t *testing.T) {
+	cases := []struct {
+		name     string
+		input    string
+		contains string
+	}{
+		{
+			name:     "rewrite wssPort to safe fallback",
+			input:    `f="http:"===location.protocol?c.config.port.wsPort.toString():c.config.port.wssPort.toString()`,
+			contains: `(c.config.port.wssPort?c.config.port.wssPort.toString():(c.config.port.wsPort?c.config.port.wsPort.toString():"80"))`,
+		},
+		{
+			name:     "rewrite location.protocol to __camLoc.protocol",
+			input:    `"http:" === location.protocol`,
+			contains: `"http:" === __camLoc.protocol`,
+		},
+		{
+			name:     "rewrite window.location.href assignment",
+			input:    `window.location.href="/index.html"`,
+			contains: `__camLoc.href="/index.html"`,
+		},
+		{
+			name:     "rewrite window.location.href root assignment",
+			input:    `window.location.href="/"`,
+			contains: `__camLoc.href="/"`,
+		},
+		{
+			name:     "rewrite location assignment",
+			input:    `location = "/login"`,
+			contains: `__camLoc.href = "/login"`,
+		},
+		{
+			name:     "rewrite location.replace",
+			input:    `location.replace("/home")`,
+			contains: `__camLoc.replace("/home")`,
+		},
+		{
+			name:     "rewrite location.assign",
+			input:    `location.assign("/home")`,
+			contains: `__camLoc.assign("/home")`,
+		},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			out := string(rewriteJS([]byte(tc.input)))
+			if !strings.Contains(out, tc.contains) {
+				t.Fatalf("expected output to contain %q, got %q", tc.contains, out)
+			}
+		})
+	}
+}
+
+func TestRewriteJSPreservesNonLocationAssignments(t *testing.T) {
+	input := `if (location == x || location === y) { other.location.href = z; }`
+	out := string(rewriteJS([]byte(input)))
+	if strings.Contains(out, "__camLoc.href =") {
+		t.Fatalf("equality comparison should not be rewritten as assignment: %s", out)
+	}
+	if strings.Contains(out, "other.__camLoc.href") {
+		t.Fatalf("other.location.href should not be rewritten: %s", out)
+	}
+}
+
+func TestShimScriptInjectsCamLocAndCamProto(t *testing.T) {
+	shim := shimScriptFor("/camproxy/test1234", "http", "admin", "secret")
+	if !strings.Contains(shim, `var __camProto="http:";`) {
+		t.Fatalf("expected __camProto to be injected with 'http:', got %s", shim)
+	}
+	if !strings.Contains(shim, `var __camLoc=window.__camLoc=`) {
+		t.Fatalf("expected __camLoc definition in shim, got %s", shim)
+	}
+	// Verify that if username in form is already 'admin', autofill does NOT overwrite it with a different user 'frigate'
+	shimFrigate := shimScriptFor("/camproxy/test1234", "http", "frigate", "secret")
+	if !strings.Contains(shimFrigate, `u==="admin"`) && strings.Contains(shimFrigate, `un.value==="admin"`) {
+		t.Fatalf("autofill must not overwrite existing admin username with a non-admin username like frigate")
 	}
 }

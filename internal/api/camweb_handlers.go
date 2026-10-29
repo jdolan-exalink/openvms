@@ -92,6 +92,12 @@ func (h *Handlers) openCameraWeb(ctx context.Context, a authz.Actor, cam camweb.
 		if body.Port != nil {
 			port = *body.Port
 		}
+		if body.Username != nil && *body.Username != "" {
+			cam.Username = *body.Username
+		}
+		if body.Password != nil && *body.Password != "" {
+			cam.Password = *body.Password
+		}
 	}
 	if port == 0 {
 		port = 80
@@ -119,7 +125,14 @@ func (h *Handlers) openCameraWeb(ctx context.Context, a authz.Actor, cam camweb.
 		return nil, err
 	}
 	h.auditCameraWebSession(ctx, a, cam, scheme, port, "opened")
-	return gen.CreateCameraWebSession200JSONResponse{Url: opened.URL, ExpiresAt: opened.ExpiresAt}, nil
+	res := gen.CreateCameraWebSession200JSONResponse{Url: opened.URL, ExpiresAt: opened.ExpiresAt}
+	if cam.Username != "" {
+		res.Username = &cam.Username
+	}
+	if cam.Password != "" {
+		res.Password = &cam.Password
+	}
+	return res, nil
 }
 
 // auditCameraWebSession records who tried to open which camera, how and with what result (PRD §41). Credentials and cookies never pass here.

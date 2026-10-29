@@ -5131,12 +5131,16 @@ export interface components {
             /** @enum {string} */
             scheme?: "http" | "https";
             port?: number;
+            username?: string;
+            password?: string;
         };
         CameraWebSession: {
             /** @description Same-origin path of the proxied camera interface */
             url: string;
             /** Format: date-time */
             expires_at: string;
+            username?: string;
+            password?: string;
         };
         ServerCheckCamerasOnvifRequest: {
             interface_name?: string;

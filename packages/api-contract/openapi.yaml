@@ -6502,12 +6502,16 @@ components:
       properties:
         scheme: { type: string, enum: [http, https] }
         port: { type: integer, minimum: 1, maximum: 65535 }
+        username: { type: string }
+        password: { type: string }
     CameraWebSession:
       type: object
       required: [url, expires_at]
       properties:
         url: { type: string, description: Same-origin path of the proxied camera interface, to load in a sandboxed iframe }
         expires_at: { type: string, format: date-time }
+        username: { type: string }
+        password: { type: string }
     ServerCheckCamerasOnvifRequest:
       type: object
       additionalProperties: false
