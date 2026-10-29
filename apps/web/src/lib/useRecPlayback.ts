@@ -71,6 +71,7 @@ export function useRecPlayback({ active, seedT, now }: { active: boolean; seedT:
 
   const players = useRef(new Map<string, HlsPlayerHandle | null>());
   const latest = useRef({ win, playing, speed, day });
+  const seekingUntil = useRef(0);
   useEffect(() => {
     latest.current = { win, playing, speed, day };
   });
@@ -92,7 +93,8 @@ export function useRecPlayback({ active, seedT, now }: { active: boolean; seedT:
   const seek = useCallback(
     (t: number, options?: { play?: boolean; poster?: Omit<RecPoster, "key"> }) => {
       const cur = latest.current;
-      const play = options?.play ?? true;
+      const play = options?.play ?? cur.playing;
+      seekingUntil.current = Date.now() + 600;
       store.set(t);
       setDay(startOfLocalDay(t));
       setPlaying(play);
@@ -138,6 +140,7 @@ export function useRecPlayback({ active, seedT, now }: { active: boolean; seedT:
   /** onMasterTime receives the master tile's clock (unix seconds) and rolls the window over near its end. */
   const onMasterTime = useCallback(
     (unix: number) => {
+      if (Date.now() < seekingUntil.current && Math.abs(unix - store.get()) > 2) return;
       store.set(unix);
       const cur = latest.current;
       if (unix >= cur.day + 24 * 3600) setDay(startOfLocalDay(unix));

@@ -299,7 +299,7 @@ export function DayTimeline({
   const [followed, setFollowed] = useState(position);
   if (followed !== position) {
     setFollowed(position);
-    if (!interacting && position >= bounds.start && position <= bounds.end && (position < view.start || position > view.end)) {
+    if (!interacting && !marks?.placing && position >= bounds.start && position <= bounds.end && (position < view.start || position > view.end)) {
       setView(centerView(view, position, bounds));
     }
   }
@@ -348,6 +348,20 @@ export function DayTimeline({
 
   const shownPosition = scrub ?? position;
 
+  const effectiveSelection = useMemo(() => {
+    if (marks?.placing === "end" && marks.start !== undefined) {
+      const s = Math.min(marks.start, shownPosition);
+      const e = Math.max(marks.start, shownPosition);
+      return e > s ? { start: s, end: e } : undefined;
+    }
+    if (marks?.placing === "start" && marks.end !== undefined) {
+      const s = Math.min(shownPosition, marks.end);
+      const e = Math.max(shownPosition, marks.end);
+      return e > s ? { start: s, end: e } : undefined;
+    }
+    return selection;
+  }, [selection, marks?.placing, marks?.start, marks?.end, shownPosition]);
+
   const setupCanvas = (el: HTMLCanvasElement, height: number) => {
     const ctx = el.getContext("2d");
     if (!ctx) return null;
@@ -393,10 +407,10 @@ export function DayTimeline({
       ctx.lineTo(px, RULER_H - 1);
       ctx.fill();
     }
-    if (selection && selection.end > selection.start) {
+    if (effectiveSelection && effectiveSelection.end > effectiveSelection.start) {
       const accent = cssVar(host, "--md-primary", "#f38d70");
-      const sx1 = Math.max(0, x(selection.start));
-      const sx2 = Math.min(width, x(selection.end));
+      const sx1 = Math.max(0, x(effectiveSelection.start));
+      const sx2 = Math.min(width, x(effectiveSelection.end));
       if (sx2 > sx1) {
         ctx.fillStyle = accent;
         ctx.globalAlpha = 0.25;
@@ -417,12 +431,12 @@ export function DayTimeline({
     if (marks) {
       const accent = cssVar(host, "--md-primary", "#f38d70");
       for (const kind of ["start", "end"] as const) {
-        const t = marks[kind];
+        const t = marks.placing === kind ? shownPosition : marks[kind];
         if (t !== undefined && t >= view.start && t <= view.end) drawMark(ctx, x(t), RULER_H, kind, accent, marks.placing === kind);
       }
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [view, width, shownPosition, selection, marks]);
+  }, [view, width, shownPosition, effectiveSelection, marks]);
 
   // Rows: gridlines, coverage bars, detections and the playhead.
   useEffect(() => {
@@ -557,9 +571,9 @@ export function DayTimeline({
       ctx.lineWidth = 1;
     }
 
-    if (selection && selection.end > selection.start) {
-      const sx1 = Math.max(0, x(selection.start));
-      const sx2 = Math.min(width, x(selection.end));
+    if (effectiveSelection && effectiveSelection.end > effectiveSelection.start) {
+      const sx1 = Math.max(0, x(effectiveSelection.start));
+      const sx2 = Math.min(width, x(effectiveSelection.end));
       if (sx2 > sx1) {
         ctx.fillStyle = accent;
         ctx.globalAlpha = 0.12;
@@ -579,12 +593,12 @@ export function DayTimeline({
     }
     if (marks) {
       for (const kind of ["start", "end"] as const) {
-        const t = marks[kind];
+        const t = marks.placing === kind ? shownPosition : marks[kind];
         if (t !== undefined && t >= view.start && t <= view.end) drawMark(ctx, x(t), rowsH, kind, accent, marks.placing === kind);
       }
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [view, width, rowsH, rows, shownPosition, liveNow, selectedId, frame, selection, marks]);
+  }, [view, width, rowsH, rows, shownPosition, liveNow, selectedId, frame, effectiveSelection, marks]);
 
   // Tooltip: follows the pointer, clamped to the viewport, above the pointer unless there is no room.
   useLayoutEffect(() => {
@@ -616,10 +630,15 @@ export function DayTimeline({
   const onPointerDown = (event: React.PointerEvent<HTMLDivElement>) => {
     if (event.button !== 0 || width <= 0) return;
     const px = localX(event);
-    drag.current = event.shiftKey || nearPlayhead(px) ? { kind: "scrub", startX: px, moved: false } : { kind: "pan", startX: px, view, moved: false };
+    const isRuler = event.currentTarget === rulerEl.current;
+    const isPlacing = Boolean(marks?.placing);
+    drag.current = isRuler || isPlacing || event.shiftKey || nearPlayhead(px) ? { kind: "scrub", startX: px, moved: false } : { kind: "pan", startX: px, view, moved: false };
     event.currentTarget.setPointerCapture?.(event.pointerId);
     setTip(null);
     setInteracting(true);
+    if (drag.current.kind === "scrub") {
+      setScrub(clampTime(xToTime(px, view, width)));
+    }
   };
 
   const onPointerMove = (event: React.PointerEvent<HTMLDivElement>) => {

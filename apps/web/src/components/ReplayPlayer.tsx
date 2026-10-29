@@ -179,7 +179,10 @@ export const ReplayPlayer = forwardRef<HlsPlayerHandle, ReplayPlayerProps>(funct
         muted={muted}
         playsInline
         aria-label={ariaLabel}
-        onTimeUpdate={(e) => onTime?.(from + e.currentTarget.currentTime)}
+        onTimeUpdate={(e) => {
+          if (e.currentTarget.seeking) return;
+          onTime?.(from + e.currentTarget.currentTime);
+        }}
       />
     )}>
       {status === "connecting" && (
