@@ -48,7 +48,7 @@ func updateRequestHeaders(token string, binary []byte, version string) http.Head
 func pushUpdateVia(ctx context.Context, client AgentProbeDoer, token string, binary []byte, version string) error {
 	resp, err := client.Do(ctx, http.MethodPost, "/v1/update", updateRequestHeaders(token, binary, version), bytes.NewReader(binary))
 	if err != nil {
-		return ErrAgentProbeUnavailable
+		return errors.Join(ErrAgentProbeUnavailable, err)
 	}
 	defer resp.Body.Close()
 	switch resp.StatusCode {

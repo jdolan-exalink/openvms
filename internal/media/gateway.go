@@ -424,6 +424,22 @@ func (g *Gateway) lprReadSnapshot(w http.ResponseWriter, r *http.Request) {
 				return
 			}
 		}
+		// Fallback to camera frame from Frigate recordings at the read's timestamp.
+		if ad, err := g.Svc.Adapters.Get(r.Context(), cam.Server); err == nil {
+			ts := strconv.FormatInt(lr.SeenAt.Unix(), 10)
+			resp, err := ad.Media().Open(r.Context(), "/api/"+url.PathEscape(cam.RemoteName)+"/"+ts+"/snapshot.jpg", nil, r.Header)
+			if err == nil {
+				if resp.StatusCode == http.StatusOK {
+					if isDownload {
+						g.lprReadSnapshotDownload(w, r, a, cam, lr, resp)
+						return
+					}
+					relay(w, resp, "private, max-age=3600")
+					return
+				}
+				_ = resp.Body.Close()
+			}
+		}
 		writeErr(w, http.StatusNotFound, "not_found", "snapshot not found")
 		return
 	}
@@ -599,7 +615,25 @@ func (g *Gateway) lprReadClip(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if strings.HasPrefix(lr.RemoteEventID, "agent:") {
-		writeErr(w, http.StatusNotFound, "not_found", "clips are not supported for edge agent plate readings")
+		ad, err := g.Svc.Adapters.Get(r.Context(), cam.Server)
+		if err != nil {
+			g.fail(w, r, a, err)
+			return
+		}
+		start := strconv.FormatInt(lr.SeenAt.Add(-10*time.Second).Unix(), 10)
+		end := strconv.FormatInt(lr.SeenAt.Add(10*time.Second).Unix(), 10)
+		path := "/api/" + url.PathEscape(cam.RemoteName) + "/start/" + start + "/end/" + end + "/clip.mp4"
+		resp, err := ad.Media().Open(r.Context(), path, nil, r.Header)
+		if err != nil {
+			g.fail(w, r, a, err)
+			return
+		}
+		if resp.StatusCode != http.StatusOK {
+			defer resp.Body.Close()
+			writeErr(w, http.StatusNotFound, "not_found", "clip not available for this time range")
+			return
+		}
+		relay(w, resp, "private, max-age=3600")
 		return
 	}
 	ad, err := g.Svc.Adapters.Get(r.Context(), cam.Server)

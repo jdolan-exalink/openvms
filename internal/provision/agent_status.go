@@ -141,9 +141,11 @@ func (s *Service) UpdateAgent(ctx context.Context, actor authz.Actor, serverID u
 			return AgentView{}, err
 		}
 		if err := pushUpdateVia(ctx, client, clientToken, binary, version); err != nil {
+			s.logger().ErrorContext(ctx, "agent update upload via endpoint failed", "server_id", serverID, "error", err)
 			return AgentView{}, err
 		}
 	} else if err := pushUpdate(ctx, row.Host, row.Port, string(token), binary, version); err != nil {
+		s.logger().ErrorContext(ctx, "agent update upload via host failed", "server_id", serverID, "error", err)
 		return AgentView{}, err
 	}
 	// The agent checks the binary, restarts and has to confirm itself; if it cannot, it puts the
