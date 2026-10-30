@@ -463,7 +463,8 @@ func isPanoramaKey(k string) bool {
 		k == "vehicleimage" || k == "vehicle_image" || k == "vehiclepic" || k == "vehicle_pic" ||
 		k == "carimage" || k == "car_image" || k == "carpic" || k == "car_pic" ||
 		k == "bkgimage" || k == "bkg_image" || k == "bkgpic" || k == "bkg_pic" ||
-		k == "originalimage" || k == "original_image"
+		k == "originalimage" || k == "original_image" ||
+		k == "originalbase64data" || k == "original_base64_data"
 }
 
 func isPlaceholderPlate(p string) bool {
