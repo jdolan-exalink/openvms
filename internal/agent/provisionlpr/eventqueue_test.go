@@ -4,6 +4,7 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 )
@@ -151,7 +152,7 @@ func TestEventQueueIgnoresATornLastLineAndKeepsWorking(t *testing.T) {
 	}
 }
 
-func TestEventQueueFileIsPrivateAndHoldsNoImages(t *testing.T) {
+func TestEventQueueFileIsPrivateAndPreservesBoundedImages(t *testing.T) {
 	dir := t.TempDir()
 	q := openQueue(t, dir, 100)
 	img := "BASE64IMAGEDATA"
@@ -161,8 +162,11 @@ func TestEventQueueFileIsPrivateAndHoldsNoImages(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if qe.Event.PanoramicImage != nil || qe.Event.PlateCrop != nil {
-		t.Fatalf("images must not be queued: %+v", qe.Event)
+	if qe.Event.PanoramicImage == nil || *qe.Event.PanoramicImage != img {
+		t.Fatalf("panoramic image must be preserved: %+v", qe.Event)
+	}
+	if qe.Event.PlateCrop == nil || *qe.Event.PlateCrop != img {
+		t.Fatalf("plate crop must be preserved: %+v", qe.Event)
 	}
 	info, err := os.Stat(filepath.Join(dir, eventQueueFile))
 	if err != nil {
@@ -170,6 +174,17 @@ func TestEventQueueFileIsPrivateAndHoldsNoImages(t *testing.T) {
 	}
 	if info.Mode().Perm() != 0o600 {
 		t.Fatalf("queue file mode = %v, want 0600", info.Mode().Perm())
+	}
+
+	huge := strings.Repeat("A", 850<<10)
+	ev2 := queueEvent("A2")
+	ev2.PanoramicImage = &huge
+	qe2, err := q.Append(ev2)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if qe2.Event.PanoramicImage != nil {
+		t.Fatalf("oversized panoramic image must be dropped: %+v", qe2.Event)
 	}
 }
 

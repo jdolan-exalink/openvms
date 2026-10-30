@@ -19,8 +19,8 @@ import (
 
 const (
 	provisionEventsPath = "/v1/provision-lpr/events"
-	// maxProvisionEventsBody bounds one page from the agent: 500 events of a few hundred bytes each.
-	maxProvisionEventsBody = 4 << 20
+	// maxProvisionEventsBody bounds one page from the agent: up to 25 events with base64 images.
+	maxProvisionEventsBody = 32 << 20
 )
 
 // ErrAgentEventsUnsupported means the edge agent answered 404 to the event queue routes, which is
@@ -29,14 +29,20 @@ var ErrAgentEventsUnsupported = errors.New("the agent does not support the Provi
 
 // LPRAgentEvent is the part of an agent's normalized LPR event that central stores.
 type LPRAgentEvent struct {
-	EventType    string    `json:"event_type,omitempty"`
-	CameraID     string    `json:"camera_id"`
-	CameraIP     string    `json:"camera_ip,omitempty"`
-	ChannelID    *int      `json:"channel_id,omitempty"`
-	Plate        string    `json:"plate"`
-	EventTime    time.Time `json:"event_time"`
-	ReceivedTime time.Time `json:"received_time"`
-	Confidence   *float64  `json:"confidence,omitempty"`
+	EventType      string    `json:"event_type,omitempty"`
+	CameraID       string    `json:"camera_id"`
+	CameraIP       string    `json:"camera_ip,omitempty"`
+	ChannelID      *int      `json:"channel_id,omitempty"`
+	Plate          string    `json:"plate"`
+	EventTime      time.Time `json:"event_time"`
+	ReceivedTime   time.Time `json:"received_time"`
+	Confidence     *float64  `json:"confidence,omitempty"`
+	VehicleColor   *string   `json:"vehicle_color,omitempty"`
+	VehicleBrand   *string   `json:"vehicle_brand,omitempty"`
+	VehicleModel   *string   `json:"vehicle_model,omitempty"`
+	VehicleType    *string   `json:"vehicle_type,omitempty"`
+	PlateCrop      *string   `json:"plate_crop,omitempty"`
+	PanoramicImage *string   `json:"panoramic_image,omitempty"`
 }
 
 // LPRQueuedEvent is one event waiting in an agent's queue. Seq is the agent's cursor; ID is random,

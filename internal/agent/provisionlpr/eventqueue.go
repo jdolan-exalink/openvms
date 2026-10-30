@@ -20,10 +20,10 @@ const (
 	// DefaultEventQueueMaxEvents and DefaultEventQueueMaxBytes bound what the agent keeps for central
 	// while it is unreachable. When full the oldest events are dropped and counted.
 	DefaultEventQueueMaxEvents = 10000
-	DefaultEventQueueMaxBytes  = 32 << 20
+	DefaultEventQueueMaxBytes  = 64 << 20
 
 	// maxQueueLine bounds one stored record so a corrupt file cannot make the agent read without limit.
-	maxQueueLine = 1 << 20
+	maxQueueLine = 4 << 20
 )
 
 // QueuedEvent is an LPR event waiting for central to collect it. Seq grows by one per event and is
@@ -169,10 +169,14 @@ func (q *EventQueue) load() (bool, error) {
 	return dirty, nil
 }
 
-// Append stores the event and returns it with its sequence and ID. Images are not queued: central
-// does not take them in this version and a base64 image would make the queue unbounded in practice.
+// Append stores the event and returns it with its sequence and ID. Images are preserved within bounds.
 func (q *EventQueue) Append(ev LPREvent) (QueuedEvent, error) {
-	ev.PanoramicImage, ev.PlateCrop = nil, nil
+	if ev.PanoramicImage != nil && len(*ev.PanoramicImage) > 800<<10 {
+		ev.PanoramicImage = nil
+	}
+	if ev.PlateCrop != nil && len(*ev.PlateCrop) > 400<<10 {
+		ev.PlateCrop = nil
+	}
 	id, err := newQueueID()
 	if err != nil {
 		return QueuedEvent{}, err
