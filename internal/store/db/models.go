@@ -637,6 +637,7 @@ type LprRead struct {
 	UpdatedAt       time.Time
 	CropKey         string
 	CropAttempts    int32
+	SnapshotKey     string
 }
 
 type MapBuilding struct {
@@ -1082,6 +1083,8 @@ type VehicleAttribute struct {
 	ProcessedAt            time.Time
 	TrailerColor           string
 	TrailerColorConfidence float32
+	Brand                  string
+	Model                  string
 }
 
 type VehicleAttributeJob struct {

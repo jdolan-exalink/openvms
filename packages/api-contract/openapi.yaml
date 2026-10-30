@@ -8175,6 +8175,12 @@ components:
         color: { type: string, example: black }
         color_confidence: { type: number, format: float, minimum: 0, maximum: 1 }
         color_quality: { type: string, enum: [good, medium, low] }
+        brand:
+          type: string
+          description: Vehicle brand or make.
+        model:
+          type: string
+          description: Vehicle model.
         trailer_color:
           type: string
           description: Color of the trailer when the type is a truck with a trailer. Empty otherwise.
