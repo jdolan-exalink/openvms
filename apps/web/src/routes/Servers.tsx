@@ -317,6 +317,9 @@ function AgentSSHControls({ server, mode }: { server: Schemas["Server"]; mode: "
   }
   const agent = status.data;
   if (mode === "panel") {
+    if (agent?.installed && agent.binary_status === "update_available" && hasServerInstallPermission(me.data, "servers.manage", server)) {
+      return <AgentUpdateButton key={`update-${server.id}`} server={server} />;
+    }
     // The install dialog stays mounted after the agent shows up so its result is not cut off.
     return installOpen ? (
       <AgentInstallDialog

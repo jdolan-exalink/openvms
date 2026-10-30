@@ -45,10 +45,11 @@ describe("ServerSummaryTab", () => {
     expect(screen.getByText("Lectura de patentes").closest("li")).toHaveAttribute("data-enabled", "true");
   });
 
-  it("marks an agent with a newer bundled version as an update", async () => {
+  it("marks an agent with a newer bundled version as an update and shows update button", async () => {
     stub(updatable);
     renderPage(() => <ServerSummaryTab server={server()} onEditCameras={() => {}} />);
     expect(await screen.findByText("0.4.4")).toHaveAttribute("data-version-tone", "warn");
+    expect(screen.getByRole("button", { name: "Actualizar agente" })).toBeInTheDocument();
   });
 
   it("says when there is no agent", async () => {
