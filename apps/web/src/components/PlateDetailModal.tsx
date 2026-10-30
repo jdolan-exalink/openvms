@@ -283,7 +283,7 @@ export function PlateDetailModal({ read, onClose }: { read: Schemas["PlateRead"]
           <div id={panelId("clip")} role="tabpanel" aria-labelledby={tabId("clip")} tabIndex={0} className="flex flex-col gap-4">
             {canViewClip ? (
               <div className="relative overflow-hidden rounded-m3-lg">
-                <video controls preload="metadata" className="max-h-[70vh] w-full bg-video" src={`/media/v1/lpr/reads/${read.id}/clip.mp4`}>
+                <video controls autoPlay playsInline preload="metadata" className="max-h-[70vh] w-full bg-video" src={`/media/v1/lpr/reads/${read.id}/clip.mp4`}>
                   {tr("plates.clipUnsupported")}
                 </video>
                 <WatermarkOverlay tenantId={tenantId} hasLogo={hasLogo} ownerName={ownerName} seenAt={read.seen_at} timezone={timezone} />
