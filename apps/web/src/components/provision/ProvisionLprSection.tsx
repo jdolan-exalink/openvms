@@ -205,7 +205,9 @@ export function ProvisionLprSection({ camera, onCameraUpdate }: ProvisionLprSect
   };
 
   const recentEvents = status?.recent_events ?? [];
+  const recentPlates = status?.recent_plates ?? [];
   const latestEvent = recentEvents[0];
+  const fallbackPlate = !latestEvent && recentPlates.length > 0 ? recentPlates[0] : null;
 
   return (
     <div className="flex flex-col gap-6">
@@ -502,11 +504,11 @@ export function ProvisionLprSection({ camera, onCameraUpdate }: ProvisionLprSect
         </div>
 
         {/* Latest Reading Highlight Box */}
-        {latestEvent ? (
+        {latestEvent || fallbackPlate ? (
           <div className="rounded-m3-2xl border border-primary/40 bg-surface-2 p-5 flex flex-col md:flex-row gap-6 items-start">
             {/* Visual Images (Plate Crop & Panorama) */}
             <div className="flex flex-col gap-2 w-full md:w-72 shrink-0">
-              {latestEvent.plate_crop ? (
+              {latestEvent?.plate_crop ? (
                 <div
                   className="group relative cursor-pointer overflow-hidden rounded-m3-xl border border-outline-variant/60 bg-black"
                   onClick={() => setSelectedImage(`data:image/jpeg;base64,${latestEvent.plate_crop}`)}
@@ -520,7 +522,7 @@ export function ProvisionLprSection({ camera, onCameraUpdate }: ProvisionLprSect
                     <Icon icon={Eye} size="xs" /> Ver recorte
                   </div>
                 </div>
-              ) : latestEvent.panoramic_image ? (
+              ) : latestEvent?.panoramic_image ? (
                 <div
                   className="group relative cursor-pointer overflow-hidden rounded-m3-xl border border-outline-variant/60 bg-black"
                   onClick={() => setSelectedImage(`data:image/jpeg;base64,${latestEvent.panoramic_image}`)}
@@ -536,11 +538,11 @@ export function ProvisionLprSection({ camera, onCameraUpdate }: ProvisionLprSect
                 </div>
               ) : (
                 <div className="flex h-24 w-full items-center justify-center rounded-m3-xl border border-outline-variant/40 bg-surface-3 text-xs text-muted">
-                  Sin imagen adjunta
+                  {latestEvent ? "Sin imagen adjunta" : "Ingesta central confirmada"}
                 </div>
               )}
 
-              {latestEvent.panoramic_image && latestEvent.plate_crop && (
+              {latestEvent?.panoramic_image && latestEvent?.plate_crop && (
                 <button
                   type="button"
                   onClick={() => setSelectedImage(`data:image/jpeg;base64,${latestEvent.panoramic_image}`)}
@@ -559,18 +561,23 @@ export function ProvisionLprSection({ camera, onCameraUpdate }: ProvisionLprSect
                   {/* License Plate Graphic Badge */}
                   <div className="inline-flex items-center justify-center rounded-m3-md border-2 border-black/80 bg-white px-5 py-2 shadow-md">
                     <span className="font-mono text-3xl font-black tracking-widest text-black uppercase">
-                      {latestEvent.plate}
+                      {latestEvent?.plate ?? fallbackPlate?.plate}
                     </span>
                   </div>
 
-                  {latestEvent.confidence !== undefined && (
+                  {(latestEvent?.confidence !== undefined || fallbackPlate?.score !== undefined) && (
                     <span className="rounded-m3-full bg-ok/15 px-3 py-1 text-xs font-bold text-ok">
-                      {latestEvent.confidence.toFixed(1)}% confianza
+                      {((latestEvent?.confidence ?? ((fallbackPlate?.score ?? 0) * 100))).toFixed(1)}% confianza
                     </span>
                   )}
-                  {latestEvent.list_status && (
+                  {latestEvent?.list_status && (
                     <span className="rounded-m3-full bg-primary/20 px-3 py-1 text-xs font-bold text-primary">
                       {latestEvent.list_status}
+                    </span>
+                  )}
+                  {fallbackPlate && !latestEvent && (
+                    <span className="rounded-m3-full bg-primary/20 px-3 py-1 text-xs font-bold text-primary">
+                      Base de datos
                     </span>
                   )}
                 </div>
@@ -578,37 +585,37 @@ export function ProvisionLprSection({ camera, onCameraUpdate }: ProvisionLprSect
 
               {/* Attributes (Color, Marca, Modelo, Tipo) */}
               <div className="flex flex-wrap items-center gap-2 pt-2 border-t border-outline-variant/30">
-                {latestEvent.vehicle_color && (
+                {(latestEvent?.vehicle_color || fallbackPlate?.vehicle_color) && (
                   <div className="flex items-center gap-1.5 rounded-m3-lg bg-surface-3 px-3 py-1.5 text-xs font-semibold text-on-surface">
                     <span className="text-muted">Color:</span>
-                    <span className="font-bold text-primary">{latestEvent.vehicle_color}</span>
+                    <span className="font-bold text-primary">{latestEvent?.vehicle_color ?? fallbackPlate?.vehicle_color}</span>
                   </div>
                 )}
-                {latestEvent.vehicle_brand && (
+                {latestEvent?.vehicle_brand && (
                   <div className="flex items-center gap-1.5 rounded-m3-lg bg-surface-3 px-3 py-1.5 text-xs font-semibold text-on-surface">
                     <span className="text-muted">Marca:</span>
                     <span className="font-bold text-primary">{latestEvent.vehicle_brand}</span>
                   </div>
                 )}
-                {latestEvent.vehicle_model && (
+                {latestEvent?.vehicle_model && (
                   <div className="flex items-center gap-1.5 rounded-m3-lg bg-surface-3 px-3 py-1.5 text-xs font-semibold text-on-surface">
                     <span className="text-muted">Modelo:</span>
                     <span className="font-bold text-primary">{latestEvent.vehicle_model}</span>
                   </div>
                 )}
-                {latestEvent.vehicle_type && (
+                {(latestEvent?.vehicle_type || fallbackPlate?.vehicle_type) && (
                   <div className="flex items-center gap-1.5 rounded-m3-lg bg-surface-3 px-3 py-1.5 text-xs font-semibold text-on-surface">
                     <span className="text-muted">Tipo:</span>
-                    <span className="font-bold text-primary">{latestEvent.vehicle_type}</span>
+                    <span className="font-bold text-primary">{latestEvent?.vehicle_type ?? fallbackPlate?.vehicle_type}</span>
                   </div>
                 )}
-                {latestEvent.speed !== undefined && (
+                {latestEvent?.speed !== undefined && (
                   <div className="flex items-center gap-1.5 rounded-m3-lg bg-surface-3 px-3 py-1.5 text-xs font-semibold text-on-surface">
                     <span className="text-muted">Velocidad:</span>
                     <span className="font-bold text-on-surface">{latestEvent.speed} km/h</span>
                   </div>
                 )}
-                {latestEvent.direction && (
+                {latestEvent?.direction && (
                   <div className="flex items-center gap-1.5 rounded-m3-lg bg-surface-3 px-3 py-1.5 text-xs font-semibold text-on-surface">
                     <span className="text-muted">Dirección:</span>
                     <span className="font-bold text-on-surface">{latestEvent.direction}</span>
@@ -619,7 +626,11 @@ export function ProvisionLprSection({ camera, onCameraUpdate }: ProvisionLprSect
               <div className="flex items-center gap-1.5 text-xs text-muted pt-1">
                 <Icon icon={Clock} size="xs" />
                 <span>
-                  {latestEvent.event_time ? new Date(latestEvent.event_time).toLocaleString() : "Hora reciente"}
+                  {latestEvent?.event_time
+                    ? new Date(latestEvent.event_time).toLocaleString()
+                    : fallbackPlate?.seen_at
+                    ? new Date(fallbackPlate.seen_at).toLocaleString()
+                    : "Hora reciente"}
                 </span>
               </div>
             </div>
@@ -635,7 +646,7 @@ export function ProvisionLprSection({ camera, onCameraUpdate }: ProvisionLprSect
         )}
 
         {/* History Table of Recent Readings */}
-        {recentEvents.length > 1 && (
+        {recentEvents.length > 1 ? (
           <div className="flex flex-col gap-2 pt-2">
             <span className="text-xs font-bold uppercase tracking-wider text-muted">Historial de Lecturas Recientes</span>
             <div className="flex flex-col gap-2">
@@ -680,7 +691,40 @@ export function ProvisionLprSection({ camera, onCameraUpdate }: ProvisionLprSect
               ))}
             </div>
           </div>
-        )}
+        ) : recentPlates.length > (latestEvent ? 0 : 1) ? (
+          <div className="flex flex-col gap-2 pt-2">
+            <span className="text-xs font-bold uppercase tracking-wider text-muted">Historial de Lecturas Recientes (Base de Datos)</span>
+            <div className="flex flex-col gap-2">
+              {recentPlates.slice(latestEvent ? 0 : 1).map((p) => (
+                <div
+                  key={p.id}
+                  className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 rounded-m3-xl border border-outline-variant/40 bg-surface-2 p-3 hover:bg-surface-3 transition-colors"
+                >
+                  <div className="flex items-center gap-3">
+                    <span className="font-mono text-base font-bold text-on-surface uppercase">
+                      {p.plate}
+                    </span>
+                    {p.vehicle_color && (
+                      <span className="rounded bg-surface-3 px-2 py-0.5 text-xs font-medium text-muted">
+                        {p.vehicle_color}
+                      </span>
+                    )}
+                    {p.vehicle_type && (
+                      <span className="rounded bg-surface-3 px-2 py-0.5 text-xs font-medium text-muted">
+                        {p.vehicle_type}
+                      </span>
+                    )}
+                  </div>
+
+                  <div className="flex items-center gap-3 text-xs text-muted">
+                    {p.score !== undefined && <span>{(p.score * 100).toFixed(0)}% conf</span>}
+                    <span>{p.seen_at ? new Date(p.seen_at).toLocaleTimeString() : ""}</span>
+                  </div>
+                </div>
+              ))}
+            </div>
+          </div>
+        ) : null}
       </div>
 
       {/* Modal for viewing image in full detail */}
