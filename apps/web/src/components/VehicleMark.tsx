@@ -8,6 +8,8 @@ type Vehicle = {
   color_confidence?: number;
   trailer_color?: string;
   trailer_color_confidence?: number;
+  brand?: string;
+  model?: string;
 };
 
 type Job = "pending" | "processing" | "completed" | "failed";
@@ -92,6 +94,12 @@ export function VehicleFacts({
         <span className="font-normal text-muted">{t("labels.factClassification")}: </span>
         {waiting ? <Reading text={detecting} paint={null} {...tone} /> : <>{qualification}{percent(vehicle?.type_confidence, qualification, detecting, undetected)}</>}
       </span>
+      {(vehicle?.brand || vehicle?.model) && (
+        <span className="truncate">
+          <span className="text-muted">{t("labels.factBrandModel")}: </span>
+          {[vehicle.brand, vehicle.model].filter(Boolean).join(" ")}
+        </span>
+      )}
       {(color || trailer) && (
         <span className="flex min-w-0 items-center gap-1.5 truncate">
           {color && (
