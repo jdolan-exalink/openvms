@@ -15,14 +15,26 @@ const camera = {
 
 type Call = { method: string; path: string; body?: string; csrf: string | null };
 
-function stubServer(configureAnswer: Record<string, unknown>) {
+function stubServer(configureAnswer: Record<string, unknown>, statusOverride?: Record<string, unknown>) {
   const calls: Call[] = [];
   vi.stubGlobal("fetch", vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
     const url = new URL(typeof input === "string" ? input : input instanceof Request ? input.url : input.toString(), "http://localhost");
     const method = init?.method ?? (input instanceof Request ? input.method : "GET");
     calls.push({ method, path: url.pathname, body: typeof init?.body === "string" ? init.body : undefined, csrf: new Headers(init?.headers).get("X-OpenVMS-Request") });
     if (url.pathname === `/api/v1/cameras/${cameraID}/provision-lpr/status`) {
-      return json({ camera_id: cameraID, camera_ip: "10.0.15.107", online: false, keepalive_count: 0, event_count: 0, target_port: 7419, keepalive_path: "/SendKeepalive", event_path: "/v1/provision-lpr/event", recent_events: [], recent_plates: [] });
+      return json({
+        camera_id: cameraID,
+        camera_ip: "10.0.15.107",
+        online: false,
+        keepalive_count: 0,
+        event_count: 0,
+        target_port: 7419,
+        keepalive_path: "/SendKeepalive",
+        event_path: "/v1/provision-lpr/event",
+        recent_events: [],
+        recent_plates: [],
+        ...statusOverride,
+      });
     }
     if (url.pathname === `/api/v1/cameras/${cameraID}/provision-lpr/configure` && method === "POST") return json(configureAnswer);
     if (url.pathname === `/api/v1/servers/${serverID}/provision-lpr/registry`) return json({ enforce: false, cameras: [], unregistered_seen: [] });
@@ -88,11 +100,11 @@ describe("ProvisionLprSection", () => {
   it("hides the values when the guide is collapsed and shows them again", async () => {
     stubServer(waiting);
     renderPage(() => <ProvisionLprSection camera={camera} />);
-    expect(await screen.findByText("Puerto del Servidor:")).toBeInTheDocument();
+    expect(await screen.findByText("Puerto HTTP POS:")).toBeInTheDocument();
     fireEvent.click(screen.getByRole("button", { name: "Ocultar guía" }));
-    expect(screen.queryByText("Puerto del Servidor:")).not.toBeInTheDocument();
+    expect(screen.queryByText("Puerto HTTP POS:")).not.toBeInTheDocument();
     fireEvent.click(screen.getByRole("button", { name: "Ver parámetros" }));
-    expect(screen.getByText("Puerto del Servidor:")).toBeInTheDocument();
+    expect(screen.getByText("Puerto HTTP POS:")).toBeInTheDocument();
   });
 
   it("shows the registry of the camera's server", async () => {
@@ -100,5 +112,39 @@ describe("ProvisionLprSection", () => {
     renderPage(() => <ProvisionLprSection camera={camera} />);
     expect(await screen.findByText("Cámaras permitidas en el receptor")).toBeInTheDocument();
     expect(await screen.findByText(/Sin exigir/)).toBeInTheDocument();
+  });
+
+  it("displays both the full vehicle image and plate crop in the recent readings history", async () => {
+    stubServer(waiting, {
+      online: true,
+      event_count: 2,
+      recent_events: [
+        {
+          plate: "AA111AA",
+          event_time: "2026-10-30T15:00:00Z",
+          panoramic_image: "VEHICLE_IMAGE_1",
+          plate_crop: "PLATE_CROP_1",
+          vehicle_color: "Blanco",
+          vehicle_brand: "Toyota",
+        },
+        {
+          plate: "BB222BB",
+          event_time: "2026-10-30T14:59:00Z",
+          panoramic_image: "VEHICLE_IMAGE_2",
+          plate_crop: "PLATE_CROP_2",
+          vehicle_color: "Negro",
+          vehicle_brand: "Ford",
+        },
+      ],
+    });
+    renderPage(() => <ProvisionLprSection camera={camera} />);
+    expect(await screen.findByText("Historial de Lecturas Recientes")).toBeInTheDocument();
+    expect(screen.getByAltText("Auto completo BB222BB")).toBeInTheDocument();
+    expect(screen.getByAltText("Recorte patente BB222BB")).toBeInTheDocument();
+
+    // Clicking full vehicle image opens the modal dialog with the panorama image
+    fireEvent.click(screen.getByAltText("Auto completo BB222BB"));
+    expect(screen.getByRole("dialog")).toBeInTheDocument();
+    expect(screen.getByAltText("Detalle LPR")).toHaveAttribute("src", "data:image/jpeg;base64,VEHICLE_IMAGE_2");
   });
 });
