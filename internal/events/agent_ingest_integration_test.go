@@ -33,13 +33,17 @@ type fakeAgent struct {
 	pageLimit int
 }
 
-func (a *fakeAgent) add(camera, plate string, conf *float64, at time.Time) string {
+func (a *fakeAgent) addEvent(e provision.LPRAgentEvent) string {
 	a.mu.Lock()
 	defer a.mu.Unlock()
 	a.lastSeq++
 	id := uuid.NewString()[:8]
-	a.queue = append(a.queue, provision.LPRQueuedEvent{Seq: a.lastSeq, ID: id, Event: provision.LPRAgentEvent{CameraID: camera, Plate: plate, EventTime: at, ReceivedTime: at, Confidence: conf}})
+	a.queue = append(a.queue, provision.LPRQueuedEvent{Seq: a.lastSeq, ID: id, Event: e})
 	return id
+}
+
+func (a *fakeAgent) add(camera, plate string, conf *float64, at time.Time) string {
+	return a.addEvent(provision.LPRAgentEvent{CameraID: camera, Plate: plate, EventTime: at, ReceivedTime: at, Confidence: conf, EventType: "lpr"})
 }
 
 func (a *fakeAgent) PullProvisionLPREvents(_ context.Context, _ uuid.UUID, after uint64) (provision.LPREventsPage, error) {
@@ -404,6 +408,142 @@ func TestAgentIngestResolvesCameraByRemoteNameOrIP(t *testing.T) {
 		if r.camera != w.camA {
 			t.Errorf("expected reading %s attributed to camA %s, got %s", r.plate, w.camA, r.camera)
 		}
+	}
+}
+
+type eventRow struct {
+	id        uuid.UUID
+	remoteID  string
+	severity  string
+	labels    []string
+	cameraID  uuid.UUID
+	startTime time.Time
+}
+
+func (w *ingestWorld) events(t *testing.T) []eventRow {
+	t.Helper()
+	var out []eventRow
+	err := w.st.TxRaw(context.Background(), store.AllTenants, func(tx pgx.Tx) error {
+		rows, err := tx.Query(context.Background(), `SELECT id, remote_id, severity, labels, camera_id, start_time FROM events WHERE server_id = $1 ORDER BY start_time, remote_id`, w.server)
+		if err != nil {
+			return err
+		}
+		defer rows.Close()
+		for rows.Next() {
+			var r eventRow
+			if err := rows.Scan(&r.id, &r.remoteID, &r.severity, &r.labels, &r.cameraID, &r.startTime); err != nil {
+				return err
+			}
+			out = append(out, r)
+		}
+		return rows.Err()
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	return out
+}
+
+func TestAgentIngestStoresAnalyticEventsWithoutPlate(t *testing.T) {
+	w := newIngestWorld(t)
+	ctx := context.Background()
+
+	// Add an analytic event with no plate (e.g. line crossing)
+	id := w.agent.addEvent(provision.LPRAgentEvent{
+		CameraID:     w.camA.String(),
+		EventType:    "line_crossing",
+		Plate:        "",
+		EventTime:    t0,
+		ReceivedTime: t0,
+	})
+
+	if err := w.ing.IngestServer(ctx, w.server, w.tenant); err != nil {
+		t.Fatalf("IngestServer: %v", err)
+	}
+
+	// Should NOT be in lpr_reads because it has no license plate
+	reads := w.reads(t)
+	if len(reads) != 0 {
+		t.Fatalf("expected 0 lpr reads, got %d", len(reads))
+	}
+
+	// MUST be stored in events table
+	evs := w.events(t)
+	if len(evs) != 1 {
+		t.Fatalf("expected 1 event in events table, got %d", len(evs))
+	}
+	ev := evs[0]
+	if ev.remoteID != "agent:"+id {
+		t.Errorf("remoteID = %q, want %q", ev.remoteID, "agent:"+id)
+	}
+	if ev.cameraID != w.camA {
+		t.Errorf("cameraID = %v, want %v", ev.cameraID, w.camA)
+	}
+	if ev.severity != "alert" {
+		t.Errorf("severity = %q, want alert", ev.severity)
+	}
+	foundLabel := false
+	for _, l := range ev.labels {
+		if l == "line_crossing" {
+			foundLabel = true
+			break
+		}
+	}
+	if !foundLabel {
+		t.Errorf("labels = %v, want line_crossing", ev.labels)
+	}
+
+	// Cursor should have advanced and acknowledged
+	c := w.cursor(t)
+	if c.lastSeq != 1 || c.ingested != 1 || c.skipped != 0 {
+		t.Fatalf("cursor = %+v; want lastSeq=1, ingested=1, skipped=0", c)
+	}
+	if len(w.agent.queue) != 0 {
+		t.Fatal("event should have been acknowledged and cleared from queue")
+	}
+}
+
+func TestAgentIngestResolvesNVRChannel(t *testing.T) {
+	w := newIngestWorld(t)
+	ctx := context.Background()
+
+	nvrCam1 := uuid.New()
+	nvrCam2 := uuid.New()
+	nvrIP := "10.0.15.200"
+
+	// Create 2 cameras on the same NVR server representing channels 1 and 2
+	err := w.st.TxRaw(ctx, store.AllTenants, func(tx pgx.Tx) error {
+		_, err := tx.Exec(ctx, `
+INSERT INTO cameras (id, tenant_id, site_id, server_id, remote_name, display_name, onvif_endpoint)
+VALUES
+  ($1, $2, $3, $4, 'ch01', 'Entrance NVR Ch1', 'http://10.0.15.200/onvif/device_service'),
+  ($5, $2, $3, $4, 'ch02', 'Exit NVR Ch2', 'http://10.0.15.200/onvif/device_service')`,
+			nvrCam1, w.tenant, w.site, w.server, nvrCam2)
+		return err
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	ch2 := 2
+	w.agent.addEvent(provision.LPRAgentEvent{
+		CameraIP:     nvrIP,
+		ChannelID:    &ch2,
+		EventType:    "intrusion",
+		EventTime:    t0,
+		ReceivedTime: t0,
+	})
+
+	if err := w.ing.IngestServer(ctx, w.server, w.tenant); err != nil {
+		t.Fatalf("IngestServer: %v", err)
+	}
+
+	evs := w.events(t)
+	if len(evs) != 1 {
+		t.Fatalf("expected 1 event, got %d", len(evs))
+	}
+	if evs[0].cameraID != nvrCam2 {
+		t.Errorf("expected event mapped to nvrCam2 (%v), got %v", nvrCam2, evs[0].cameraID)
 	}
 }
 

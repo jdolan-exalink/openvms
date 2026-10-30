@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"log/slog"
 	"net/url"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -185,9 +186,10 @@ func (a *AgentIngestor) loadCursor(ctx context.Context, serverID uuid.UUID) (uin
 	return uint64(max(seq, 0)), epoch, nil //nolint:gosec // clamped non-negative above
 }
 
-// storePage stores the valid readings of a page and moves the cursor, in one transaction. It returns
-// the highest sequence handled, which is also what the agent is told to drop. Readings central cannot
-// attribute are counted and left behind: holding the cursor for them would block every later reading.
+// storePage stores the valid readings and smart analytic events of a page and moves the cursor, in one
+// transaction. It returns the highest sequence handled, which is also what the agent is told to drop.
+// Readings central cannot attribute are counted and left behind: holding the cursor for them would block
+// every later reading.
 func (a *AgentIngestor) storePage(ctx context.Context, serverID, tenantID uuid.UUID, cursor uint64, page provision.LPREventsPage) (uint64, error) {
 	through := cursor
 	var ingested, skipped int64
@@ -203,32 +205,130 @@ func (a *AgentIngestor) storePage(ctx context.Context, serverID, tenantID uuid.U
 				continue
 			}
 			through = max(through, e.Seq)
-			plate := NormalizePlate(e.Event.Plate)
-			ref, known := resolver.resolve(e.Event.CameraID, e.Event.CameraIP)
-			if !known || plate == "" || e.ID == "" {
+			if e.ID == "" {
 				skipped++
 				continue
 			}
+			ref, known := resolver.resolve(e.Event.CameraID, e.Event.CameraIP, e.Event.ChannelID)
+			if !known {
+				skipped++
+				continue
+			}
+			plate := NormalizePlate(e.Event.Plate)
+			eventType := strings.TrimSpace(e.Event.EventType)
+			if eventType == "" {
+				if plate != "" {
+					eventType = "lpr"
+				} else {
+					skipped++
+					continue
+				}
+			}
+			if eventType == "keepalive" || eventType == "heartbeat" {
+				skipped++
+				continue
+			}
+			if eventType == "lpr" && plate == "" {
+				skipped++
+				continue
+			}
+
 			cam := ref.id
 			siteID := ref.siteID
-			var score *float32
-			if e.Event.Confidence != nil {
-				v := float32(*e.Event.Confidence)
-				score = &v
-			}
 			seen := e.Event.EventTime
 			if seen.IsZero() {
 				seen = e.Event.ReceivedTime
 			}
-			tag, err := tx.Exec(ctx, `
+			if seen.IsZero() {
+				seen = time.Now()
+			}
+
+			var eventIngested bool
+
+			// 1. If a plate is present, store in lpr_reads.
+			if plate != "" {
+				var score *float32
+				if e.Event.Confidence != nil {
+					v := float32(*e.Event.Confidence)
+					score = &v
+				}
+				tag, err := tx.Exec(ctx, `
 INSERT INTO lpr_reads (tenant_id, site_id, server_id, camera_id, remote_event_id, plate, plate_normalized, score, label, sub_label, zones, seen_at, crop_attempts)
 VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, '', '{}', $10, $11)
 ON CONFLICT (server_id, remote_event_id) DO NOTHING`,
-				tenantID, siteID, serverID, cam, agentReadPrefix+e.ID, e.Event.Plate, plate, score, agentReadLabel, seen.UTC(), agentReadCropAttempts)
-			if err != nil {
-				return fmt.Errorf("store agent reading %s: %w", e.ID, err)
+					tenantID, siteID, serverID, cam, agentReadPrefix+e.ID, e.Event.Plate, plate, score, agentReadLabel, seen.UTC(), agentReadCropAttempts)
+				if err != nil {
+					return fmt.Errorf("store agent reading %s: %w", e.ID, err)
+				}
+				if tag.RowsAffected() > 0 {
+					eventIngested = true
+				}
 			}
-			ingested += tag.RowsAffected()
+
+			// 2. If it's a smart analytic event (or plate == ""), store in events table.
+			if eventType != "lpr" || plate == "" {
+				sev := "alert"
+				if eventType == "motion" {
+					sev = "detection"
+				}
+				var labels []string
+				switch eventType {
+				case "line_crossing":
+					labels = []string{"line_crossing"}
+				case "intrusion":
+					labels = []string{"intrusion"}
+				case "vehicle":
+					labels = []string{"car", "vehicle"}
+				case "human":
+					labels = []string{"person", "human"}
+				case "face":
+					labels = []string{"face"}
+				case "motion":
+					labels = []string{"motion"}
+				default:
+					labels = []string{eventType}
+				}
+				plates := []string{}
+				if plate != "" {
+					plates = []string{plate}
+				}
+
+				var evID uuid.UUID
+				var isNew bool
+				err := tx.QueryRow(ctx, `
+INSERT INTO events (tenant_id, site_id, server_id, camera_id, remote_id, severity, labels, sub_labels, zones, audio,
+                    detection_ids, start_time, reviewed, plates, has_snapshot, lpr)
+VALUES ($1, $2, $3, $4, $5, $6, coalesce($7::text[], '{}'), '{}', '{}', '{}',
+        '{}', $8, false, coalesce($9::text[], '{}'), false, $10)
+ON CONFLICT (server_id, remote_id) DO UPDATE SET
+    updated_at = now()
+RETURNING id, (xmax = 0)`,
+					tenantID, siteID, serverID, cam, agentReadPrefix+e.ID, sev, labels,
+					seen.UTC(), plates, plate != "").Scan(&evID, &isNew)
+				if err != nil {
+					return fmt.Errorf("store agent event %s: %w", e.ID, err)
+				}
+				if isNew {
+					eventIngested = true
+					ev := NewEvent{
+						ID:       evID,
+						TenantID: tenantID,
+						SiteID:   siteID,
+						ServerID: serverID,
+						CameraID: cam,
+						Severity: sev,
+						Labels:   labels,
+						Start:    seen.UTC(),
+					}
+					if err := enqueueRuleEvaluation(ctx, tx, ev, ref.name, false); err != nil {
+						return fmt.Errorf("enqueue rule evaluation for agent event %s: %w", e.ID, err)
+					}
+				}
+			}
+
+			if eventIngested {
+				ingested++
+			}
 		}
 		_, err = tx.Exec(ctx, `
 INSERT INTO server_agent_event_cursors (server_id, tenant_id, last_seq, ingested_total, skipped_total, agent_lost, agent_depth, agent_epoch, last_pull_at, last_error)
@@ -253,17 +353,45 @@ ON CONFLICT (server_id) DO UPDATE SET
 type agentCameraRef struct {
 	id     uuid.UUID
 	siteID uuid.UUID
+	name   string
 }
 
 type cameraResolver struct {
-	byID   map[uuid.UUID]agentCameraRef
-	byIP   map[string]agentCameraRef
-	byName map[string]agentCameraRef
+	byID        map[uuid.UUID]agentCameraRef
+	byIP        map[string]agentCameraRef
+	byName      map[string]agentCameraRef
+	byIPChannel map[string]agentCameraRef
 }
 
-func (r *cameraResolver) resolve(cameraID, cameraIP string) (agentCameraRef, bool) {
+func (r *cameraResolver) resolve(cameraID, cameraIP string, channelID *int) (agentCameraRef, bool) {
 	if id, err := uuid.Parse(cameraID); err == nil {
 		if ref, ok := r.byID[id]; ok {
+			return ref, true
+		}
+	}
+	if channelID != nil && *channelID > 0 {
+		ch := *channelID
+		if cameraIP != "" {
+			if ref, ok := r.byIPChannel[fmt.Sprintf("%s:%d", cameraIP, ch)]; ok {
+				return ref, true
+			}
+		}
+		if ref, ok := r.byName[strconv.Itoa(ch)]; ok {
+			return ref, true
+		}
+		if ref, ok := r.byName[fmt.Sprintf("%02d", ch)]; ok {
+			return ref, true
+		}
+		if ref, ok := r.byName[fmt.Sprintf("ch%d", ch)]; ok {
+			return ref, true
+		}
+		if ref, ok := r.byName[fmt.Sprintf("ch%02d", ch)]; ok {
+			return ref, true
+		}
+		if ref, ok := r.byName[fmt.Sprintf("channel%d", ch)]; ok {
+			return ref, true
+		}
+		if ref, ok := r.byName[fmt.Sprintf("channel %d", ch)]; ok {
 			return ref, true
 		}
 	}
@@ -283,33 +411,83 @@ func (r *cameraResolver) resolve(cameraID, cameraIP string) (agentCameraRef, boo
 	return agentCameraRef{}, false
 }
 
+// extractChannel parses channel numbers from names or profiles like "1", "01", "ch1", "ch01", "channel1", "channel_1", "camera 1", "MediaProfile_Channel1".
+func extractChannel(s string) (int, bool) {
+	s = strings.TrimSpace(strings.ToLower(s))
+	if s == "" {
+		return 0, false
+	}
+	if n, err := strconv.Atoi(s); err == nil && n >= 0 {
+		return n, true
+	}
+	prefixes := []string{"channel_", "channel-", "channel ", "channel", "ch_", "ch-", "ch", "cam_", "cam-", "cam ", "cam", "camera_", "camera-", "camera ", "camera"}
+	for _, p := range prefixes {
+		if strings.HasPrefix(s, p) {
+			rest := strings.TrimPrefix(s, p)
+			var numStr string
+			for _, r := range rest {
+				if r >= '0' && r <= '9' {
+					numStr += string(r)
+				} else {
+					break
+				}
+			}
+			if numStr != "" {
+				if n, err := strconv.Atoi(numStr); err == nil && n >= 0 {
+					return n, true
+				}
+			}
+		}
+	}
+	for _, part := range strings.FieldsFunc(s, func(r rune) bool {
+		return r == '_' || r == '-' || r == '/' || r == '.' || r == ' '
+	}) {
+		for _, p := range prefixes {
+			if strings.HasPrefix(part, p) {
+				rest := strings.TrimPrefix(part, p)
+				if n, err := strconv.Atoi(rest); err == nil && n >= 0 {
+					return n, true
+				}
+			}
+		}
+	}
+	return 0, false
+}
+
 // serverCameras returns the cameras central knows for the server, with their site: the only ones a
 // reading may be attributed to. An agent cannot file a reading under a camera of another server.
 func serverCameras(ctx context.Context, tx pgx.Tx, serverID, tenantID uuid.UUID) (*cameraResolver, error) {
-	rows, err := tx.Query(ctx, `SELECT id, site_id, coalesce(onvif_endpoint, ''), remote_name, display_name FROM cameras WHERE server_id = $1 AND tenant_id = $2 AND deleted_at IS NULL`, serverID, tenantID)
+	rows, err := tx.Query(ctx, `SELECT id, site_id, coalesce(onvif_endpoint, ''), remote_name, display_name, coalesce(onvif_profile, '') FROM cameras WHERE server_id = $1 AND tenant_id = $2 AND deleted_at IS NULL`, serverID, tenantID)
 	if err != nil {
 		return nil, err
 	}
 	defer rows.Close()
 	res := &cameraResolver{
-		byID:   map[uuid.UUID]agentCameraRef{},
-		byIP:   map[string]agentCameraRef{},
-		byName: map[string]agentCameraRef{},
+		byID:        map[uuid.UUID]agentCameraRef{},
+		byIP:        map[string]agentCameraRef{},
+		byName:      map[string]agentCameraRef{},
+		byIPChannel: map[string]agentCameraRef{},
 	}
 	for rows.Next() {
 		var (
-			id, site     uuid.UUID
-			endpoint     string
-			remote, disp string
+			id, site              uuid.UUID
+			endpoint              string
+			remote, disp, profile string
 		)
-		if err := rows.Scan(&id, &site, &endpoint, &remote, &disp); err != nil {
+		if err := rows.Scan(&id, &site, &endpoint, &remote, &disp, &profile); err != nil {
 			return nil, err
 		}
-		ref := agentCameraRef{id: id, siteID: site}
+		name := remote
+		if name == "" {
+			name = disp
+		}
+		ref := agentCameraRef{id: id, siteID: site, name: name}
 		res.byID[id] = ref
+		var host string
 		if endpoint != "" {
 			if u, err := url.Parse(endpoint); err == nil && u.Hostname() != "" {
-				res.byIP[u.Hostname()] = ref
+				host = u.Hostname()
+				res.byIP[host] = ref
 			}
 		}
 		if remote != "" {
@@ -317,6 +495,17 @@ func serverCameras(ctx context.Context, tx pgx.Tx, serverID, tenantID uuid.UUID)
 		}
 		if disp != "" {
 			res.byName[strings.ToLower(disp)] = ref
+		}
+		if host != "" {
+			if ch, ok := extractChannel(remote); ok {
+				res.byIPChannel[fmt.Sprintf("%s:%d", host, ch)] = ref
+			}
+			if ch, ok := extractChannel(disp); ok {
+				res.byIPChannel[fmt.Sprintf("%s:%d", host, ch)] = ref
+			}
+			if ch, ok := extractChannel(profile); ok {
+				res.byIPChannel[fmt.Sprintf("%s:%d", host, ch)] = ref
+			}
 		}
 	}
 	return res, rows.Err()

@@ -20,7 +20,7 @@ Objective: extend OpenVMS Edge Agent and Central ingestion to accept, parse, and
 
 ## Slices
 
-- [ ] T1: Parser extension (`internal/agent/provisionlpr/parser.go`): parse `<alarmStatusInfo>`, smart event types, channel numbers, and images without plate requirement. (Strict TDD)
-- [ ] T2: Receiver & queue extension (`internal/agent/provisionlpr/`): accept non-plate analytics, deduplicate per type/channel, and store in durable event queue.
-- [ ] T3: Central ingestion & alarms (`internal/events/agent_ingest.go`): pull non-plate analytic events from agent, map NVR channels, and evaluate against alarm rules.
+- [x] T1: Parser extension (`internal/agent/provisionlpr/parser.go`): parse `<alarmStatusInfo>`, smart event types, channel numbers, and images without plate requirement. (Strict TDD)
+- [x] T2: Receiver & queue extension (`internal/agent/provisionlpr/`): accept non-plate analytics, deduplicate per type/channel, and store in durable event queue.
+- [x] T3: Central ingestion & alarms (`internal/events/agent_ingest.go`): pull non-plate analytic events from agent, map NVR channels, and evaluate against alarm rules.
 - [ ] T4: Verification & live deployment to test site.
