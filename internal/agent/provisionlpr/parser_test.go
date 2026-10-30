@@ -218,6 +218,9 @@ func TestParserProvisionISRXMLRealPayload(t *testing.T) {
   <deviceName>Escuela</deviceName>
   <mac>00:11:22:33:44:55</mac>
   <snapTime>1715000000000000</snapTime>
+  <sourceDataInfo>
+    <sourceBase64Data>/9j/4AAQSkZJRg_SCENE==</sourceBase64Data>
+  </sourceDataInfo>
   <items>
     <item>
       <plateNumber>AF123BC</plateNumber>
@@ -267,6 +270,13 @@ func TestParserProvisionISRXMLRealPayload(t *testing.T) {
 			got = *event.PlateCrop
 		}
 		t.Errorf("PlateCrop = %q, want /9j/4AAQSkZJRg==", got)
+	}
+	if event.PanoramicImage == nil || *event.PanoramicImage != "/9j/4AAQSkZJRg_SCENE==" {
+		got := "<nil>"
+		if event.PanoramicImage != nil {
+			got = *event.PanoramicImage
+		}
+		t.Errorf("PanoramicImage = %q, want /9j/4AAQSkZJRg_SCENE==", got)
 	}
 }
 
