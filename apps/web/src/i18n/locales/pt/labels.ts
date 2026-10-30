@@ -7,6 +7,7 @@ const messages = {
   serverLine: "Servidor: {name}",
   factDetection: "Detecção",
   factClassification: "Classificação",
+  factBrandModel: "Marca / Modelo",
   factColor: "Cor",
   factTruck: "Caminhão",
   factTrailer: "Reboque",
