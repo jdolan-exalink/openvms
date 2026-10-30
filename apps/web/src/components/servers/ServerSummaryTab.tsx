@@ -3,6 +3,7 @@ import type { ReactNode } from "react";
 import type { Schemas } from "@/api/client";
 import { serverAgentQuery } from "@/api/queries";
 import { formatBytes } from "@/components/servers/storageRetention";
+import { AgentUpdateButton } from "@/components/servers/AgentUpdateButton";
 import { Button, StatusBadge } from "@/components/ui";
 import { type MessageKey, useT } from "@/i18n";
 import { isAtLeastAgentVersion, isNewerAgentVersion } from "@/lib/agentVersion";
@@ -195,6 +196,12 @@ export function ServerSummaryTab({
               <Row label={t("servers.agentBackupLabel")}>
                 {backup.present ? `${t("servers.agentBackupPresent")}${backup.createdAt ? ` · ${fmtDateTime(backup.createdAt)}` : ""}` : t("servers.agentBackupMissing")}
               </Row>
+            )}
+            {agent?.installed && agent.binary_status === "update_available" && (
+              <div className="flex items-center justify-between border-t border-outline/20 pt-2">
+                <span className="text-xs font-medium text-warn">{t("servers.agentUpdateAvailableBanner")}</span>
+                <AgentUpdateButton server={server} />
+              </div>
             )}
           </dl>
         )}

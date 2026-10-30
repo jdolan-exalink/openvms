@@ -39,6 +39,7 @@ export default {
   agentLifecycleRefresh: "Consultar estado del agente",
   agentLifecycleCurrent: "Agente actualizado",
   agentUpdate: "Actualizar agente",
+  agentUpdateAvailableBanner: "Actualización disponible",
   agentUpdating: "Actualizando…",
   agentUpdated: "Agente actualizado",
   agentUpdateHTTPDuration: "La actualización puede tardar hasta un minuto.",
