@@ -807,8 +807,19 @@ LEFT JOIN LATERAL (
            va.trailer_color, va.trailer_color_confidence, va.brand, va.model
     FROM events e
     LEFT JOIN vehicle_attributes va ON va.event_id = e.id
-    WHERE e.server_id = p.server_id AND (e.remote_id = p.remote_event_id OR e.detection_ids @> ARRAY[p.remote_event_id])
-    ORDER BY e.start_time DESC
+    WHERE e.server_id = p.server_id
+      AND (
+        e.remote_id = p.remote_event_id
+        OR e.detection_ids @> ARRAY[p.remote_event_id]
+        OR (
+          p.plate_normalized <> ''
+          AND e.camera_id = p.camera_id
+          AND e.plates @> ARRAY[p.plate_normalized]
+          AND e.start_time >= (p.seen_at - interval '20 seconds')
+          AND e.start_time <= (p.seen_at + interval '20 seconds')
+        )
+      )
+    ORDER BY (va.event_id IS NOT NULL) DESC, e.start_time DESC
     LIMIT 1
 ) ev ON true`
 		var q string

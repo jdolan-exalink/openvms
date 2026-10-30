@@ -296,19 +296,51 @@ func (a *AgentIngestor) storePage(ctx context.Context, serverID, tenantID uuid.U
 					v := float32(*e.Event.Confidence)
 					score = &v
 				}
-				tag, err := tx.Exec(ctx, `
+
+				remoteEventID := agentReadPrefix + e.ID
+				var existingID uuid.UUID
+				err := tx.QueryRow(ctx, `
+SELECT id FROM lpr_reads
+WHERE (server_id = $1 AND remote_event_id = $2)
+   OR (camera_id = $3 AND plate_normalized = $4
+       AND seen_at >= ($5::timestamptz - interval '20 seconds')
+       AND seen_at <= ($5::timestamptz + interval '20 seconds'))
+ORDER BY (server_id = $1 AND remote_event_id = $2) DESC, abs(extract(epoch from (seen_at - $5::timestamptz))) ASC
+LIMIT 1 FOR UPDATE`, serverID, remoteEventID, cam, plate, seen.UTC()).Scan(&existingID)
+
+				if err == nil {
+					// Existing read found: update crop, snapshot, score, crop_attempts
+					tag, err := tx.Exec(ctx, `
+UPDATE lpr_reads SET
+    crop_key = CASE WHEN $2 <> '' AND (crop_key = '' OR crop_key IS NULL) THEN $2 ELSE crop_key END,
+    snapshot_key = CASE WHEN $3 <> '' AND (snapshot_key = '' OR snapshot_key IS NULL) THEN $3 ELSE snapshot_key END,
+    crop_attempts = CASE WHEN $2 <> '' THEN GREATEST(crop_attempts, $4) ELSE crop_attempts END,
+    score = CASE WHEN $5::real IS NOT NULL AND ($5::real > score OR score IS NULL) THEN $5::real ELSE score END,
+    updated_at = now()
+WHERE id = $1`, existingID, cropKey, snapKey, agentReadCropAttempts, score)
+					if err != nil {
+						return fmt.Errorf("update dedup agent reading %s: %w", e.ID, err)
+					}
+					if tag.RowsAffected() > 0 {
+						eventIngested = true
+					}
+				} else if errors.Is(err, pgx.ErrNoRows) {
+					tag, err := tx.Exec(ctx, `
 INSERT INTO lpr_reads (tenant_id, site_id, server_id, camera_id, remote_event_id, plate, plate_normalized, score, label, sub_label, zones, seen_at, crop_attempts, crop_key, snapshot_key)
 VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, '', '{}', $10, $11, $12, $13)
 ON CONFLICT (server_id, remote_event_id) DO UPDATE SET
     crop_key = CASE WHEN lpr_reads.crop_key = '' THEN EXCLUDED.crop_key ELSE lpr_reads.crop_key END,
     snapshot_key = CASE WHEN lpr_reads.snapshot_key = '' THEN EXCLUDED.snapshot_key ELSE lpr_reads.snapshot_key END,
     updated_at = now()`,
-					tenantID, siteID, serverID, cam, agentReadPrefix+e.ID, e.Event.Plate, plate, score, agentReadLabel, seen.UTC(), agentReadCropAttempts, cropKey, snapKey)
-				if err != nil {
-					return fmt.Errorf("store agent reading %s: %w", e.ID, err)
-				}
-				if tag.RowsAffected() > 0 {
-					eventIngested = true
+						tenantID, siteID, serverID, cam, remoteEventID, e.Event.Plate, plate, score, agentReadLabel, seen.UTC(), agentReadCropAttempts, cropKey, snapKey)
+					if err != nil {
+						return fmt.Errorf("store agent reading %s: %w", e.ID, err)
+					}
+					if tag.RowsAffected() > 0 {
+						eventIngested = true
+					}
+				} else {
+					return fmt.Errorf("find dedup agent reading %s: %w", e.ID, err)
 				}
 			}
 

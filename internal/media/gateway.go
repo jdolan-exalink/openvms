@@ -444,6 +444,21 @@ func (g *Gateway) lprReadSnapshot(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// If full scene is requested and archived in OpenVMS object storage:
+	if !isCrop && lr.SnapshotKey != "" && g.Blobs != nil {
+		if body, ct, err := g.Blobs.Get(r.Context(), lr.SnapshotKey); err == nil && len(body) > 0 {
+			if isDownload {
+				g.serveWatermarkedBlob(w, r, a, cam, lr, body)
+				return
+			}
+			w.Header().Set("Content-Type", ct)
+			w.Header().Set("Cache-Control", "private, max-age=3600")
+			w.WriteHeader(http.StatusOK)
+			_, _ = w.Write(body)
+			return
+		}
+	}
+
 	// If a crop is requested without download watermark and already archived in OpenVMS object storage, serve directly:
 	if isCrop && !isDownload && lr.CropKey != "" && g.Blobs != nil {
 		if body, ct, err := g.Blobs.Get(r.Context(), lr.CropKey); err == nil && len(body) > 0 {
@@ -515,7 +530,36 @@ func (g *Gateway) lprReadSnapshot(w http.ResponseWriter, r *http.Request) {
 				return
 			}
 		}
+		if resp.StatusCode != http.StatusOK {
+			_ = resp.Body.Close()
+			// Fallback to camera frame from Frigate recordings at the read's timestamp.
+			ts := strconv.FormatInt(lr.SeenAt.Unix(), 10)
+			recResp, rerr := ad.Media().Open(r.Context(), "/api/"+url.PathEscape(cam.RemoteName)+"/"+ts+"/snapshot.jpg", nil, r.Header)
+			if rerr == nil {
+				if recResp.StatusCode == http.StatusOK {
+					relay(w, recResp, "private, max-age=3600")
+					return
+				}
+				_ = recResp.Body.Close()
+			}
+			writeErr(w, http.StatusNotFound, "not_found", "snapshot not found")
+			return
+		}
 		relay(w, resp, "private, max-age=3600")
+		return
+	}
+	if resp.StatusCode != http.StatusOK {
+		_ = resp.Body.Close()
+		ts := strconv.FormatInt(lr.SeenAt.Unix(), 10)
+		recResp, rerr := ad.Media().Open(r.Context(), "/api/"+url.PathEscape(cam.RemoteName)+"/"+ts+"/snapshot.jpg", nil, r.Header)
+		if rerr == nil {
+			if recResp.StatusCode == http.StatusOK {
+				g.lprReadSnapshotDownload(w, r, a, cam, lr, recResp)
+				return
+			}
+			_ = recResp.Body.Close()
+		}
+		writeErr(w, http.StatusNotFound, "not_found", "snapshot not found")
 		return
 	}
 	g.lprReadSnapshotDownload(w, r, a, cam, lr, resp)
@@ -628,7 +672,7 @@ func (g *Gateway) lprReadClip(w http.ResponseWriter, r *http.Request) {
 			g.fail(w, r, a, err)
 			return
 		}
-		if resp.StatusCode != http.StatusOK {
+		if resp.StatusCode != http.StatusOK && resp.StatusCode != http.StatusPartialContent {
 			defer resp.Body.Close()
 			writeErr(w, http.StatusNotFound, "not_found", "clip not available for this time range")
 			return
@@ -642,8 +686,26 @@ func (g *Gateway) lprReadClip(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	resp, err := ad.Media().Open(r.Context(), "/api/events/"+url.PathEscape(lr.RemoteEventID)+"/clip.mp4", nil, r.Header)
-	if err != nil {
-		g.fail(w, r, a, err)
+	if err != nil || (resp.StatusCode != http.StatusOK && resp.StatusCode != http.StatusPartialContent) {
+		if resp != nil {
+			_ = resp.Body.Close()
+		}
+		start := strconv.FormatInt(lr.SeenAt.Add(-10*time.Second).Unix(), 10)
+		end := strconv.FormatInt(lr.SeenAt.Add(10*time.Second).Unix(), 10)
+		path := "/api/" + url.PathEscape(cam.RemoteName) + "/start/" + start + "/end/" + end + "/clip.mp4"
+		recResp, rerr := ad.Media().Open(r.Context(), path, nil, r.Header)
+		if rerr == nil && (recResp.StatusCode == http.StatusOK || recResp.StatusCode == http.StatusPartialContent) {
+			relay(w, recResp, "private, max-age=3600")
+			return
+		}
+		if recResp != nil {
+			_ = recResp.Body.Close()
+		}
+		if err != nil {
+			g.fail(w, r, a, err)
+			return
+		}
+		writeErr(w, http.StatusNotFound, "not_found", "clip not available for this time range")
 		return
 	}
 	relay(w, resp, "private, max-age=3600")
