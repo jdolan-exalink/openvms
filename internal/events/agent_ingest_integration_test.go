@@ -4,6 +4,7 @@ package events_test
 
 import (
 	"context"
+	"encoding/base64"
 	"errors"
 	"strings"
 	"sync"
@@ -544,6 +545,117 @@ VALUES
 	}
 	if evs[0].cameraID != nvrCam2 {
 		t.Errorf("expected event mapped to nvrCam2 (%v), got %v", nvrCam2, evs[0].cameraID)
+	}
+}
+
+type fakeBlobs struct {
+	mu    sync.Mutex
+	items map[string][]byte
+}
+
+func (f *fakeBlobs) Put(_ context.Context, key string, body []byte, _ string) error {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if f.items == nil {
+		f.items = make(map[string][]byte)
+	}
+	f.items[key] = body
+	return nil
+}
+
+func (f *fakeBlobs) Get(_ context.Context, key string) ([]byte, string, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	b, ok := f.items[key]
+	if !ok {
+		return nil, "", errors.New("not found")
+	}
+	return b, "image/jpeg", nil
+}
+
+func TestAgentIngestStoresLPRSnapshotsAndVehicleAttributes(t *testing.T) {
+	w := newIngestWorld(t)
+	blobs := &fakeBlobs{}
+	w.ing.Blobs = blobs
+	ctx := context.Background()
+
+	cropData := "data:image/jpeg;base64," + base64.StdEncoding.EncodeToString([]byte("CROP_IMAGE"))
+	panoData := base64.StdEncoding.EncodeToString([]byte("PANO_IMAGE"))
+	color := "blue"
+	brand := "Toyota"
+	model := "Corolla"
+	vType := "car"
+
+	w.agent.addEvent(provision.LPRAgentEvent{
+		CameraID:       w.camA.String(),
+		Plate:          "AA123BB",
+		EventType:      "lpr",
+		VehicleColor:   &color,
+		VehicleBrand:   &brand,
+		VehicleModel:   &model,
+		VehicleType:    &vType,
+		PlateCrop:      &cropData,
+		PanoramicImage: &panoData,
+		EventTime:      t0,
+		ReceivedTime:   t0,
+	})
+
+	if err := w.ing.IngestServer(ctx, w.server, w.tenant); err != nil {
+		t.Fatalf("IngestServer: %v", err)
+	}
+
+	// 1. Verify lpr_reads has crop_key and snapshot_key
+	var cropKey, snapKey string
+	err := w.st.TxRaw(ctx, store.AllTenants, func(tx pgx.Tx) error {
+		return tx.QueryRow(ctx, `SELECT crop_key, snapshot_key FROM lpr_reads WHERE server_id = $1`, w.server).
+			Scan(&cropKey, &snapKey)
+	})
+	if err != nil {
+		t.Fatalf("query lpr_reads: %v", err)
+	}
+	if cropKey == "" || snapKey == "" {
+		t.Errorf("expected non-empty crop_key and snapshot_key, got cropKey=%q, snapKey=%q", cropKey, snapKey)
+	}
+	if string(blobs.items[cropKey]) != "CROP_IMAGE" {
+		t.Errorf("blob crop content = %q, want CROP_IMAGE", string(blobs.items[cropKey]))
+	}
+	if string(blobs.items[snapKey]) != "PANO_IMAGE" {
+		t.Errorf("blob pano content = %q, want PANO_IMAGE", string(blobs.items[snapKey]))
+	}
+
+	// 2. Verify events has thumb_key, lpr=true, has_snapshot=true
+	var evID uuid.UUID
+	var isLPR, hasSnapshot bool
+	var thumbKey string
+	err = w.st.TxRaw(ctx, store.AllTenants, func(tx pgx.Tx) error {
+		return tx.QueryRow(ctx, `SELECT id, lpr, has_snapshot, thumb_key FROM events WHERE server_id = $1`, w.server).
+			Scan(&evID, &isLPR, &hasSnapshot, &thumbKey)
+	})
+	if err != nil {
+		t.Fatalf("query events: %v", err)
+	}
+	if !isLPR {
+		t.Errorf("expected event lpr=true")
+	}
+	if !hasSnapshot {
+		t.Errorf("expected event has_snapshot=true")
+	}
+	if thumbKey != snapKey {
+		t.Errorf("expected event thumb_key=%q, got %q", snapKey, thumbKey)
+	}
+
+	// 3. Verify vehicle_attributes has brand, model, color, type
+	var vaType, vaColor, vaBrand, vaModel string
+	err = w.st.TxRaw(ctx, store.AllTenants, func(tx pgx.Tx) error {
+		return tx.QueryRow(ctx, `SELECT vehicle_type, vehicle_color, brand, model FROM vehicle_attributes WHERE event_id = $1`, evID).
+			Scan(&vaType, &vaColor, &vaBrand, &vaModel)
+	})
+	if err != nil {
+		t.Fatalf("query vehicle_attributes: %v", err)
+	}
+	if vaType != "car" || vaColor != "blue" || vaBrand != "Toyota" || vaModel != "Corolla" {
+		t.Errorf("vehicle_attributes got type=%q color=%q brand=%q model=%q, want car, blue, Toyota, Corolla",
+			vaType, vaColor, vaBrand, vaModel)
 	}
 }
 

@@ -142,6 +142,8 @@ type VehicleAttr struct {
 	// TrailerColor is set for a truck with a trailer. Empty otherwise.
 	TrailerColor           string
 	TrailerColorConfidence float32
+	Brand                  string
+	Model                  string
 }
 
 type Filter struct {
@@ -703,8 +705,9 @@ type PlateRead struct {
 	// EventID is the indexed review item that contains this read, when known.
 	EventID *uuid.UUID
 	Vehicle *VehicleAttr
-	CropKey string
-	HasCrop bool
+	CropKey     string
+	HasCrop     bool
+	SnapshotKey string
 }
 
 type PlateFilter struct {
@@ -788,23 +791,23 @@ func (s *Service) ListPlates(ctx context.Context, actor authz.Actor, f PlateFilt
 		// every historical read and is what left /plates and the map panel on "buscando".
 		// MATERIALIZED forces Postgres to take the page (or the date window) first.
 		pageSQL := `SELECT l.id, l.site_id, l.server_id, l.camera_id, l.remote_event_id, l.plate, l.plate_normalized,
-       l.score, l.label, l.zones, l.seen_at, l.crop_key
+       l.score, l.label, l.zones, l.seen_at, l.crop_key, l.snapshot_key
 FROM lpr_reads l
 WHERE ` + b.sql()
 		const plateCols = `p.id, p.site_id, s.name, p.server_id, fs.name, p.camera_id, c.display_name, p.plate, p.plate_normalized,
        p.score, p.label, p.zones, p.seen_at,
        ev.event_id, ev.vehicle_type, ev.vehicle_type_confidence, ev.vehicle_color, ev.vehicle_color_confidence, ev.color_quality,
-       ev.trailer_color, ev.trailer_color_confidence, p.crop_key`
+       ev.trailer_color, ev.trailer_color_confidence, ev.brand, ev.model, p.crop_key, p.snapshot_key`
 		const plateJoins = `JOIN cameras c ON c.id = p.camera_id
 JOIN sites s ON s.id = p.site_id
 JOIN frigate_servers fs ON fs.id = p.server_id
 LEFT JOIN LATERAL (
     SELECT e.id AS event_id, va.vehicle_type, va.vehicle_type_confidence,
            va.vehicle_color, va.vehicle_color_confidence, va.color_quality,
-           va.trailer_color, va.trailer_color_confidence
+           va.trailer_color, va.trailer_color_confidence, va.brand, va.model
     FROM events e
     LEFT JOIN vehicle_attributes va ON va.event_id = e.id
-    WHERE e.server_id = p.server_id AND e.detection_ids @> ARRAY[p.remote_event_id]
+    WHERE e.server_id = p.server_id AND (e.remote_id = p.remote_event_id OR e.detection_ids @> ARRAY[p.remote_event_id])
     ORDER BY e.start_time DESC
     LIMIT 1
 ) ev ON true`
@@ -837,16 +840,17 @@ LIMIT $%d`, limitPh)
 		defer rows.Close()
 		for rows.Next() {
 			var r PlateRead
-			var vType, vColor, vQuality, trailer *string
+			var vType, vColor, vQuality, trailer, brand, model *string
 			var vTypeConf, vColorConf, trailerConf *float32
-			var cropKey string
+			var cropKey, snapshotKey string
 			if err := rows.Scan(&r.ID, &r.SiteID, &r.SiteName, &r.ServerID, &r.ServerName, &r.CameraID, &r.CameraName,
 				&r.Plate, &r.Normalized, &r.Score, &r.Label, &r.Zones, &r.SeenAt, &r.EventID,
-				&vType, &vTypeConf, &vColor, &vColorConf, &vQuality, &trailer, &trailerConf, &cropKey); err != nil {
+				&vType, &vTypeConf, &vColor, &vColorConf, &vQuality, &trailer, &trailerConf, &brand, &model, &cropKey, &snapshotKey); err != nil {
 				return err
 			}
 			r.CropKey = cropKey
 			r.HasCrop = cropKey != ""
+			r.SnapshotKey = snapshotKey
 			if vType != nil && vColor != nil && vQuality != nil && vTypeConf != nil && vColorConf != nil {
 				r.Vehicle = &VehicleAttr{
 					Type: *vType, TypeConfidence: *vTypeConf,
@@ -857,6 +861,12 @@ LIMIT $%d`, limitPh)
 				}
 				if trailerConf != nil {
 					r.Vehicle.TrailerColorConfidence = *trailerConf
+				}
+				if brand != nil {
+					r.Vehicle.Brand = *brand
+				}
+				if model != nil {
+					r.Vehicle.Model = *model
 				}
 			}
 			out.Items = append(out.Items, r)

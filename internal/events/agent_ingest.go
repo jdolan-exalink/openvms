@@ -2,6 +2,7 @@ package events
 
 import (
 	"context"
+	"encoding/base64"
 	"errors"
 	"fmt"
 	"log/slog"
@@ -48,6 +49,7 @@ const (
 // the page. The agent keeps what was not acknowledged.
 type AgentIngestor struct {
 	Store       *store.Store
+	Blobs       Blobs
 	Source      AgentEventSource
 	Log         *slog.Logger
 	Interval    time.Duration
@@ -186,6 +188,25 @@ func (a *AgentIngestor) loadCursor(ctx context.Context, serverID uuid.UUID) (uin
 	return uint64(max(seq, 0)), epoch, nil //nolint:gosec // clamped non-negative above
 }
 
+func decodeBase64Image(raw string) ([]byte, error) {
+	raw = strings.TrimSpace(raw)
+	if i := strings.Index(raw, ","); i != -1 && strings.HasPrefix(raw, "data:") {
+		raw = raw[i+1:]
+	}
+	raw = strings.TrimSpace(raw)
+	if raw == "" {
+		return nil, errors.New("empty image data")
+	}
+	data, err := base64.StdEncoding.DecodeString(raw)
+	if err == nil {
+		return data, nil
+	}
+	if data2, err2 := base64.RawStdEncoding.DecodeString(raw); err2 == nil {
+		return data2, nil
+	}
+	return nil, err
+}
+
 // storePage stores the valid readings and smart analytic events of a page and moves the cursor, in one
 // transaction. It returns the highest sequence handled, which is also what the agent is told to drop.
 // Readings central cannot attribute are counted and left behind: holding the cursor for them would block
@@ -245,6 +266,29 @@ func (a *AgentIngestor) storePage(ctx context.Context, serverID, tenantID uuid.U
 
 			var eventIngested bool
 
+			// Store images to Blobs if available
+			var cropKey, snapKey string
+			if a.Blobs != nil {
+				if e.Event.PlateCrop != nil && *e.Event.PlateCrop != "" {
+					if b, err := decodeBase64Image(*e.Event.PlateCrop); err == nil && len(b) > 0 {
+						cropKey = fmt.Sprintf("tenant/%s/plates/%s/%s.jpg", tenantID, serverID, e.ID)
+						if err := a.Blobs.Put(ctx, cropKey, b, "image/jpeg"); err != nil {
+							a.Log.WarnContext(ctx, "agent ingest: failed to save plate crop", "error", err, "event_id", e.ID)
+							cropKey = ""
+						}
+					}
+				}
+				if e.Event.PanoramicImage != nil && *e.Event.PanoramicImage != "" {
+					if b, err := decodeBase64Image(*e.Event.PanoramicImage); err == nil && len(b) > 0 {
+						snapKey = fmt.Sprintf("tenant/%s/events/%s/%s.jpg", tenantID, serverID, e.ID)
+						if err := a.Blobs.Put(ctx, snapKey, b, "image/jpeg"); err != nil {
+							a.Log.WarnContext(ctx, "agent ingest: failed to save panoramic snapshot", "error", err, "event_id", e.ID)
+							snapKey = ""
+						}
+					}
+				}
+			}
+
 			// 1. If a plate is present, store in lpr_reads.
 			if plate != "" {
 				var score *float32
@@ -253,10 +297,13 @@ func (a *AgentIngestor) storePage(ctx context.Context, serverID, tenantID uuid.U
 					score = &v
 				}
 				tag, err := tx.Exec(ctx, `
-INSERT INTO lpr_reads (tenant_id, site_id, server_id, camera_id, remote_event_id, plate, plate_normalized, score, label, sub_label, zones, seen_at, crop_attempts)
-VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, '', '{}', $10, $11)
-ON CONFLICT (server_id, remote_event_id) DO NOTHING`,
-					tenantID, siteID, serverID, cam, agentReadPrefix+e.ID, e.Event.Plate, plate, score, agentReadLabel, seen.UTC(), agentReadCropAttempts)
+INSERT INTO lpr_reads (tenant_id, site_id, server_id, camera_id, remote_event_id, plate, plate_normalized, score, label, sub_label, zones, seen_at, crop_attempts, crop_key, snapshot_key)
+VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, '', '{}', $10, $11, $12, $13)
+ON CONFLICT (server_id, remote_event_id) DO UPDATE SET
+    crop_key = CASE WHEN lpr_reads.crop_key = '' THEN EXCLUDED.crop_key ELSE lpr_reads.crop_key END,
+    snapshot_key = CASE WHEN lpr_reads.snapshot_key = '' THEN EXCLUDED.snapshot_key ELSE lpr_reads.snapshot_key END,
+    updated_at = now()`,
+					tenantID, siteID, serverID, cam, agentReadPrefix+e.ID, e.Event.Plate, plate, score, agentReadLabel, seen.UTC(), agentReadCropAttempts, cropKey, snapKey)
 				if err != nil {
 					return fmt.Errorf("store agent reading %s: %w", e.ID, err)
 				}
@@ -265,64 +312,107 @@ ON CONFLICT (server_id, remote_event_id) DO NOTHING`,
 				}
 			}
 
-			// 2. If it's a smart analytic event (or plate == ""), store in events table.
-			if eventType != "lpr" || plate == "" {
-				sev := "alert"
-				if eventType == "motion" {
-					sev = "detection"
-				}
-				var labels []string
-				switch eventType {
-				case "line_crossing":
-					labels = []string{"line_crossing"}
-				case "intrusion":
-					labels = []string{"intrusion"}
-				case "vehicle":
-					labels = []string{"car", "vehicle"}
-				case "human":
-					labels = []string{"person", "human"}
-				case "face":
-					labels = []string{"face"}
-				case "motion":
-					labels = []string{"motion"}
-				default:
-					labels = []string{eventType}
-				}
-				plates := []string{}
-				if plate != "" {
-					plates = []string{plate}
-				}
+			// 2. Store in events table for all events (both smart analytics and LPR)
+			// so they are searchable in reviews and link vehicle attributes/snapshots.
+			sev := "alert"
+			if eventType == "motion" {
+				sev = "detection"
+			}
+			var labels []string
+			switch eventType {
+			case "line_crossing":
+				labels = []string{"line_crossing"}
+			case "intrusion":
+				labels = []string{"intrusion"}
+			case "vehicle":
+				labels = []string{"car", "vehicle"}
+			case "human":
+				labels = []string{"person", "human"}
+			case "face":
+				labels = []string{"face"}
+			case "motion":
+				labels = []string{"motion"}
+			case "lpr":
+				labels = []string{"car", "vehicle"}
+			default:
+				labels = []string{eventType}
+			}
+			plates := []string{}
+			if plate != "" {
+				plates = []string{plate}
+			}
 
-				var evID uuid.UUID
-				var isNew bool
-				err := tx.QueryRow(ctx, `
+			thumbKey := snapKey
+			if thumbKey == "" {
+				thumbKey = cropKey
+			}
+
+			var evID uuid.UUID
+			var isNew bool
+			err = tx.QueryRow(ctx, `
 INSERT INTO events (tenant_id, site_id, server_id, camera_id, remote_id, severity, labels, sub_labels, zones, audio,
-                    detection_ids, start_time, reviewed, plates, has_snapshot, lpr)
+                    detection_ids, start_time, reviewed, plates, has_snapshot, lpr, thumb_key)
 VALUES ($1, $2, $3, $4, $5, $6, coalesce($7::text[], '{}'), '{}', '{}', '{}',
-        '{}', $8, false, coalesce($9::text[], '{}'), false, $10)
+        $8, $9, false, coalesce($10::text[], '{}'), $11, $12, $13)
 ON CONFLICT (server_id, remote_id) DO UPDATE SET
+    thumb_key = CASE WHEN events.thumb_key = '' THEN EXCLUDED.thumb_key ELSE events.thumb_key END,
+    has_snapshot = events.has_snapshot OR EXCLUDED.has_snapshot,
     updated_at = now()
 RETURNING id, (xmax = 0)`,
-					tenantID, siteID, serverID, cam, agentReadPrefix+e.ID, sev, labels,
-					seen.UTC(), plates, plate != "").Scan(&evID, &isNew)
-				if err != nil {
-					return fmt.Errorf("store agent event %s: %w", e.ID, err)
+				tenantID, siteID, serverID, cam, agentReadPrefix+e.ID, sev, labels,
+				[]string{agentReadPrefix + e.ID}, seen.UTC(), plates, snapKey != "", plate != "" || eventType == "lpr", thumbKey).Scan(&evID, &isNew)
+			if err != nil {
+				return fmt.Errorf("store agent event %s: %w", e.ID, err)
+			}
+			if isNew {
+				eventIngested = true
+				ev := NewEvent{
+					ID:       evID,
+					TenantID: tenantID,
+					SiteID:   siteID,
+					ServerID: serverID,
+					CameraID: cam,
+					Severity: sev,
+					Labels:   labels,
+					Start:    seen.UTC(),
 				}
-				if isNew {
-					eventIngested = true
-					ev := NewEvent{
-						ID:       evID,
-						TenantID: tenantID,
-						SiteID:   siteID,
-						ServerID: serverID,
-						CameraID: cam,
-						Severity: sev,
-						Labels:   labels,
-						Start:    seen.UTC(),
-					}
-					if err := enqueueRuleEvaluation(ctx, tx, ev, ref.name, false); err != nil {
-						return fmt.Errorf("enqueue rule evaluation for agent event %s: %w", e.ID, err)
-					}
+				if err := enqueueRuleEvaluation(ctx, tx, ev, ref.name, false); err != nil {
+					return fmt.Errorf("enqueue rule evaluation for agent event %s: %w", e.ID, err)
+				}
+			}
+
+			// 3. Store vehicle attributes if present
+			vType := "unknown"
+			if e.Event.VehicleType != nil && *e.Event.VehicleType != "" {
+				vType = *e.Event.VehicleType
+			} else if plate != "" {
+				vType = "car"
+			}
+			vColor := "unknown"
+			if e.Event.VehicleColor != nil && *e.Event.VehicleColor != "" {
+				vColor = *e.Event.VehicleColor
+			}
+			brand := ""
+			if e.Event.VehicleBrand != nil {
+				brand = *e.Event.VehicleBrand
+			}
+			model := ""
+			if e.Event.VehicleModel != nil {
+				model = *e.Event.VehicleModel
+			}
+			if vColor != "unknown" || brand != "" || model != "" || vType != "unknown" {
+				_, err = tx.Exec(ctx, `
+INSERT INTO vehicle_attributes (event_id, tenant_id, site_id, camera_id, vehicle_type, vehicle_type_confidence, vehicle_color, vehicle_color_confidence, color_quality, brand, model, processed_at)
+VALUES ($1, $2, $3, $4, $5, 1.0, $6, 1.0, 'good', $7, $8, now())
+ON CONFLICT (event_id) DO UPDATE SET
+    vehicle_type = EXCLUDED.vehicle_type,
+    vehicle_color = EXCLUDED.vehicle_color,
+    brand = EXCLUDED.brand,
+    model = EXCLUDED.model,
+    processed_at = now()`,
+					evID, tenantID, siteID, cam, vType, vColor, brand, model)
+				if err != nil {
+					return fmt.Errorf("store vehicle attributes for agent event %s: %w", e.ID, err)
 				}
 			}
 
