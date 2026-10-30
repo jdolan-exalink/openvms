@@ -506,50 +506,52 @@ export function ProvisionLprSection({ camera, onCameraUpdate }: ProvisionLprSect
         {/* Latest Reading Highlight Box */}
         {latestEvent || fallbackPlate ? (
           <div className="rounded-m3-2xl border border-primary/40 bg-surface-2 p-5 flex flex-col md:flex-row gap-6 items-start">
-            {/* Visual Images (Plate Crop & Panorama) */}
-            <div className="flex flex-col gap-2 w-full md:w-72 shrink-0">
-              {latestEvent?.plate_crop ? (
+            {/* Visual Images (Full Car & Plate Crop) */}
+            <div className="flex flex-col gap-2.5 w-full md:w-80 shrink-0">
+              {latestEvent?.panoramic_image && (
+                <div
+                  className="group relative cursor-pointer overflow-hidden rounded-m3-xl border border-outline-variant/60 bg-black"
+                  onClick={() => setSelectedImage(`data:image/jpeg;base64,${latestEvent.panoramic_image}`)}
+                  title="Click para ampliar vehículo completo"
+                >
+                  <img
+                    src={`data:image/jpeg;base64,${latestEvent.panoramic_image}`}
+                    alt={`Vehículo ${latestEvent.plate}`}
+                    className="h-32 w-full object-cover"
+                  />
+                  <div className="absolute bottom-1.5 left-1.5 rounded bg-black/75 px-1.5 py-0.5 text-[10px] font-semibold text-white pointer-events-none">
+                    Vehículo completo
+                  </div>
+                  <div className="absolute inset-0 bg-black/40 opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center text-white text-xs font-semibold gap-1">
+                    <Icon icon={Eye} size="xs" /> Ampliar foto
+                  </div>
+                </div>
+              )}
+
+              {latestEvent?.plate_crop && (
                 <div
                   className="group relative cursor-pointer overflow-hidden rounded-m3-xl border border-outline-variant/60 bg-black"
                   onClick={() => setSelectedImage(`data:image/jpeg;base64,${latestEvent.plate_crop}`)}
+                  title="Click para ampliar recorte de patente"
                 >
                   <img
                     src={`data:image/jpeg;base64,${latestEvent.plate_crop}`}
                     alt={`Recorte de patente ${latestEvent.plate}`}
-                    className="h-24 w-full object-contain"
+                    className={cn(latestEvent?.panoramic_image ? "h-16" : "h-24", "w-full object-contain")}
                   />
-                  <div className="absolute inset-0 bg-black/40 opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center text-white text-xs font-semibold gap-1">
-                    <Icon icon={Eye} size="xs" /> Ver recorte
+                  <div className="absolute bottom-1.5 left-1.5 rounded bg-black/75 px-1.5 py-0.5 text-[10px] font-semibold text-white pointer-events-none">
+                    Recorte chapa
                   </div>
-                </div>
-              ) : latestEvent?.panoramic_image ? (
-                <div
-                  className="group relative cursor-pointer overflow-hidden rounded-m3-xl border border-outline-variant/60 bg-black"
-                  onClick={() => setSelectedImage(`data:image/jpeg;base64,${latestEvent.panoramic_image}`)}
-                >
-                  <img
-                    src={`data:image/jpeg;base64,${latestEvent.panoramic_image}`}
-                    alt={`Escena patente ${latestEvent.plate}`}
-                    className="h-28 w-full object-cover"
-                  />
                   <div className="absolute inset-0 bg-black/40 opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center text-white text-xs font-semibold gap-1">
-                    <Icon icon={Eye} size="xs" /> Ver escena
+                    <Icon icon={Eye} size="xs" /> Ampliar recorte
                   </div>
-                </div>
-              ) : (
-                <div className="flex h-24 w-full items-center justify-center rounded-m3-xl border border-outline-variant/40 bg-surface-3 text-xs text-muted">
-                  {latestEvent ? "Sin imagen adjunta" : "Ingesta central confirmada"}
                 </div>
               )}
 
-              {latestEvent?.panoramic_image && latestEvent?.plate_crop && (
-                <button
-                  type="button"
-                  onClick={() => setSelectedImage(`data:image/jpeg;base64,${latestEvent.panoramic_image}`)}
-                  className="text-center text-xs font-semibold text-primary hover:underline flex items-center justify-center gap-1"
-                >
-                  <Icon icon={Eye} size="xs" /> Ver foto panorámica de escena
-                </button>
+              {!latestEvent?.panoramic_image && !latestEvent?.plate_crop && (
+                <div className="flex h-24 w-full items-center justify-center rounded-m3-xl border border-outline-variant/40 bg-surface-3 text-xs text-muted">
+                  {latestEvent ? "Sin imagen adjunta" : "Ingesta central confirmada"}
+                </div>
               )}
             </div>
 
@@ -655,32 +657,75 @@ export function ProvisionLprSection({ camera, onCameraUpdate }: ProvisionLprSect
                   key={`${ev.plate}-${ev.event_time ?? i}`}
                   className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 rounded-m3-xl border border-outline-variant/40 bg-surface-2 p-3 hover:bg-surface-3 transition-colors"
                 >
-                  <div className="flex items-center gap-3">
-                    {ev.plate_crop ? (
-                      <img
-                        src={`data:image/jpeg;base64,${ev.plate_crop}`}
-                        alt={ev.plate}
-                        className="h-9 w-20 object-contain rounded bg-black shrink-0 cursor-pointer"
-                        onClick={() => setSelectedImage(`data:image/jpeg;base64,${ev.plate_crop}`)}
-                      />
-                    ) : (
-                      <div className="flex h-9 w-20 items-center justify-center rounded bg-surface-3 text-[10px] text-muted shrink-0">
-                        Sin foto
+                  <div className="flex items-center gap-3 min-w-0">
+                    {/* Foto del vehículo completo (panorámica) */}
+                    {ev.panoramic_image ? (
+                      <div
+                        className="group relative cursor-pointer overflow-hidden rounded-m3-md border border-outline-variant/60 bg-black shrink-0"
+                        onClick={() => setSelectedImage(`data:image/jpeg;base64,${ev.panoramic_image}`)}
+                        title="Ver foto del vehículo completo"
+                      >
+                        <img
+                          src={`data:image/jpeg;base64,${ev.panoramic_image}`}
+                          alt={`Auto completo ${ev.plate}`}
+                          className="h-10 w-16 sm:h-11 sm:w-20 object-cover"
+                        />
+                        <span className="absolute bottom-0.5 right-0.5 rounded bg-black/75 px-1 text-[9px] font-semibold text-white pointer-events-none">
+                          Auto
+                        </span>
+                        <div className="absolute inset-0 bg-black/30 opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center text-white">
+                          <Icon icon={Eye} size="xs" />
+                        </div>
                       </div>
+                    ) : null}
+
+                    {/* Recorte de la patente / chapa */}
+                    {ev.plate_crop ? (
+                      <div
+                        className="group relative cursor-pointer overflow-hidden rounded-m3-md border border-outline-variant/60 bg-black shrink-0"
+                        onClick={() => setSelectedImage(`data:image/jpeg;base64,${ev.plate_crop}`)}
+                        title="Ver recorte de la patente"
+                      >
+                        <img
+                          src={`data:image/jpeg;base64,${ev.plate_crop}`}
+                          alt={`Recorte patente ${ev.plate}`}
+                          className="h-10 w-18 sm:h-11 sm:w-22 object-contain"
+                        />
+                        <span className="absolute bottom-0.5 right-0.5 rounded bg-black/75 px-1 text-[9px] font-semibold text-white pointer-events-none">
+                          Chapa
+                        </span>
+                        <div className="absolute inset-0 bg-black/30 opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center text-white">
+                          <Icon icon={Eye} size="xs" />
+                        </div>
+                      </div>
+                    ) : (
+                      !ev.panoramic_image && (
+                        <div className="flex h-10 w-16 sm:h-11 sm:w-20 items-center justify-center rounded-m3-md bg-surface-3 text-[10px] text-muted shrink-0 border border-outline-variant/30">
+                          Sin foto
+                        </div>
+                      )
                     )}
-                    <span className="font-mono text-base font-bold text-on-surface uppercase">
-                      {ev.plate}
-                    </span>
-                    {ev.vehicle_color && (
-                      <span className="rounded bg-surface-3 px-2 py-0.5 text-xs font-medium text-muted">
-                        {ev.vehicle_color}
+
+                    <div className="flex flex-wrap items-center gap-2 min-w-0">
+                      <span className="font-mono text-base font-bold text-on-surface uppercase tracking-wide">
+                        {ev.plate}
                       </span>
-                    )}
-                    {ev.vehicle_brand && (
-                      <span className="rounded bg-surface-3 px-2 py-0.5 text-xs font-medium text-muted">
-                        {ev.vehicle_brand} {ev.vehicle_model ?? ""}
-                      </span>
-                    )}
+                      {ev.vehicle_color && (
+                        <span className="rounded bg-surface-3 px-2 py-0.5 text-xs font-medium text-muted">
+                          {ev.vehicle_color}
+                        </span>
+                      )}
+                      {ev.vehicle_brand && (
+                        <span className="rounded bg-surface-3 px-2 py-0.5 text-xs font-medium text-muted">
+                          {ev.vehicle_brand} {ev.vehicle_model ?? ""}
+                        </span>
+                      )}
+                      {ev.vehicle_type && (
+                        <span className="rounded bg-surface-3 px-2 py-0.5 text-xs font-medium text-muted">
+                          {ev.vehicle_type}
+                        </span>
+                      )}
+                    </div>
                   </div>
 
                   <div className="flex items-center gap-3 text-xs text-muted">
