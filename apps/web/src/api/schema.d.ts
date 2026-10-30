@@ -6653,6 +6653,10 @@ export interface components {
             color_confidence: number;
             /** @enum {string} */
             color_quality: "good" | "medium" | "low";
+            /** @description Vehicle brand or make. */
+            brand?: string;
+            /** @description Vehicle model. */
+            model?: string;
             /** @description Color of the trailer when the type is a truck with a trailer. Empty otherwise. */
             trailer_color?: string;
             /** Format: float */
