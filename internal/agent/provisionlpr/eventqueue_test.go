@@ -176,7 +176,7 @@ func TestEventQueueFileIsPrivateAndPreservesBoundedImages(t *testing.T) {
 		t.Fatalf("queue file mode = %v, want 0600", info.Mode().Perm())
 	}
 
-	huge := strings.Repeat("A", 850<<10)
+	huge := strings.Repeat("A", 3600<<10)
 	ev2 := queueEvent("A2")
 	ev2.PanoramicImage = &huge
 	qe2, err := q.Append(ev2)

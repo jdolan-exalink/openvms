@@ -171,10 +171,10 @@ func (q *EventQueue) load() (bool, error) {
 
 // Append stores the event and returns it with its sequence and ID. Images are preserved within bounds.
 func (q *EventQueue) Append(ev LPREvent) (QueuedEvent, error) {
-	if ev.PanoramicImage != nil && len(*ev.PanoramicImage) > 800<<10 {
+	if ev.PanoramicImage != nil && len(*ev.PanoramicImage) > 3500<<10 {
 		ev.PanoramicImage = nil
 	}
-	if ev.PlateCrop != nil && len(*ev.PlateCrop) > 400<<10 {
+	if ev.PlateCrop != nil && len(*ev.PlateCrop) > 800<<10 {
 		ev.PlateCrop = nil
 	}
 	id, err := newQueueID()
