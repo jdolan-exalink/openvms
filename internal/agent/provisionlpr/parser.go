@@ -109,7 +109,7 @@ func (p *Parser) Parse(r *http.Request, body []byte, receivedAt time.Time) (LPRE
 		}
 	}
 
-	if event.Plate == "" {
+	if event.Plate == "" || isPlaceholderPlate(event.Plate) {
 		return LPREvent{}, ErrNoPlateFound
 	}
 
@@ -231,13 +231,19 @@ func (p *Parser) parseXML(data []byte, ev *LPREvent) (bool, error) {
 				}
 			case isCropKey(name):
 				var img string
-				if err := decoder.DecodeElement(&img, &se); err == nil && img != "" {
-					ev.PlateCrop = &img
+				if err := decoder.DecodeElement(&img, &se); err == nil {
+					img = strings.TrimSpace(img)
+					if img != "" {
+						ev.PlateCrop = &img
+					}
 				}
 			case isPanoramaKey(name):
 				var img string
-				if err := decoder.DecodeElement(&img, &se); err == nil && img != "" {
-					ev.PanoramicImage = &img
+				if err := decoder.DecodeElement(&img, &se); err == nil {
+					img = strings.TrimSpace(img)
+					if img != "" {
+						ev.PanoramicImage = &img
+					}
 				}
 			case isColorKey(name):
 				countAttr := getXMLAttr(se.Attr, "count")
@@ -373,9 +379,15 @@ func extractFromMap(m map[string]any, ev *LPREvent) {
 			case isListStatusKey(kLower):
 				ev.ListStatus = &val
 			case isCropKey(kLower):
-				ev.PlateCrop = &val
+				val = strings.TrimSpace(val)
+				if val != "" {
+					ev.PlateCrop = &val
+				}
 			case isPanoramaKey(kLower):
-				ev.PanoramicImage = &val
+				val = strings.TrimSpace(val)
+				if val != "" {
+					ev.PanoramicImage = &val
+				}
 			case isColorKey(kLower):
 				ev.VehicleColor = &val
 			case isBrandKey(kLower):
@@ -435,11 +447,28 @@ func isListStatusKey(k string) bool {
 
 func isCropKey(k string) bool {
 	return k == "plate_crop" || k == "platecrop" || k == "cutout" || k == "close_up" || k == "plate_image" ||
-		k == "targetbase64data"
+		k == "targetbase64data" || k == "target_base64_data"
 }
 
 func isPanoramaKey(k string) bool {
-	return k == "panoramic_image" || k == "panorama" || k == "scene_image" || k == "scene_pic"
+	return k == "panoramic_image" || k == "panoramicimage" || k == "panorama" ||
+		k == "scene_image" || k == "sceneimage" || k == "scene_pic" || k == "scenepic" ||
+		k == "sourcebase64data" || k == "source_base64_data" ||
+		k == "scenebase64data" || k == "scene_base64_data" ||
+		k == "backgroundbase64data" || k == "background_base64_data" ||
+		k == "bkgbase64data" || k == "bkg_base64_data" ||
+		k == "sourceimage" || k == "source_image" || k == "sourcepic" || k == "source_pic" ||
+		k == "fullimage" || k == "full_image" || k == "fullpic" || k == "full_pic" ||
+		k == "overviewimage" || k == "overview_image" || k == "overviewpic" || k == "overview_pic" ||
+		k == "vehicleimage" || k == "vehicle_image" || k == "vehiclepic" || k == "vehicle_pic" ||
+		k == "carimage" || k == "car_image" || k == "carpic" || k == "car_pic" ||
+		k == "bkgimage" || k == "bkg_image" || k == "bkgpic" || k == "bkg_pic" ||
+		k == "originalimage" || k == "original_image"
+}
+
+func isPlaceholderPlate(p string) bool {
+	p = strings.ToUpper(strings.TrimSpace(p))
+	return p == "COUNT" || p == "NOPLATE" || p == "UNKNOWN" || p == "NONE" || p == "NULL"
 }
 
 func isColorKey(k string) bool {
