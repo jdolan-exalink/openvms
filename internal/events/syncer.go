@@ -801,7 +801,34 @@ func upsertPlate(ctx context.Context, tx pgx.Tx, srv db.FrigateServer, cameraID 
 		v := float32(*o.PlateScore)
 		score = &v
 	}
-	_, err := tx.Exec(ctx, `
+	seenAt := fromUnix(o.StartTime)
+
+	// Check if a plate read already exists for this camera & plate within ±20 seconds
+	// or with the same (server_id, remote_event_id).
+	var existingID uuid.UUID
+	err := tx.QueryRow(ctx, `
+SELECT id FROM lpr_reads
+WHERE (server_id = $1 AND remote_event_id = $2)
+   OR (camera_id = $3 AND plate_normalized = $4
+       AND seen_at >= ($5::timestamptz - interval '20 seconds')
+       AND seen_at <= ($5::timestamptz + interval '20 seconds'))
+ORDER BY (server_id = $1 AND remote_event_id = $2) DESC, abs(extract(epoch from (seen_at - $5::timestamptz))) ASC
+LIMIT 1 FOR UPDATE`, srv.ID, o.ID, cameraID, norm, seenAt).Scan(&existingID)
+
+	if err == nil {
+		// Existing read found within window: update score, sub_label, zones, updated_at
+		_, err = tx.Exec(ctx, `
+UPDATE lpr_reads SET
+    score = CASE WHEN $2::real IS NOT NULL AND ($2::real > score OR score IS NULL) THEN $2::real ELSE score END,
+    sub_label = CASE WHEN $3 <> '' THEN $3 ELSE sub_label END,
+    zones = CASE WHEN array_length($4::text[], 1) > 0 THEN $4 ELSE zones END,
+    updated_at = now()
+WHERE id = $1`, existingID, score, o.SubLabel, nonNil(o.Zones))
+		if err != nil {
+			return fmt.Errorf("update dedup plate %s: %w", o.ID, err)
+		}
+	} else if errors.Is(err, pgx.ErrNoRows) {
+		_, err = tx.Exec(ctx, `
 INSERT INTO lpr_reads (tenant_id, site_id, server_id, camera_id, remote_event_id, plate, plate_normalized, score, label, sub_label, zones, seen_at)
 VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)
 ON CONFLICT (server_id, remote_event_id) DO UPDATE SET
@@ -811,9 +838,12 @@ ON CONFLICT (server_id, remote_event_id) DO UPDATE SET
     sub_label = excluded.sub_label,
     zones = excluded.zones,
     updated_at = now()`,
-		srv.TenantID, srv.SiteID, srv.ID, cameraID, o.ID, o.Plate, norm, score, o.Label, o.SubLabel, nonNil(o.Zones), fromUnix(o.StartTime))
-	if err != nil {
-		return fmt.Errorf("upsert plate %s: %w", o.ID, err)
+			srv.TenantID, srv.SiteID, srv.ID, cameraID, o.ID, o.Plate, norm, score, o.Label, o.SubLabel, nonNil(o.Zones), seenAt)
+		if err != nil {
+			return fmt.Errorf("upsert plate %s: %w", o.ID, err)
+		}
+	} else {
+		return fmt.Errorf("find dedup plate %s: %w", o.ID, err)
 	}
 	// Attach the plate to the review item that contains this object, if already indexed.
 	_, err = tx.Exec(ctx, `
