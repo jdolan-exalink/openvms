@@ -12,7 +12,7 @@ const (
 	eventsPath    = "/v1/provision-lpr/events"
 	eventsAckPath = "/v1/provision-lpr/events/ack"
 
-	defaultEventsPage = 100
+	defaultEventsPage = 25
 	maxAckBody        = 1 << 10
 )
 
