@@ -341,6 +341,7 @@ type lprRead struct {
 	RemoteEventID string
 	SeenAt        time.Time
 	CropKey       string
+	SnapshotKey   string
 }
 
 func (g *Gateway) lprReadCamera(w http.ResponseWriter, r *http.Request, p authz.Permission) (authz.Actor, Camera, lprRead, bool) {
@@ -356,8 +357,8 @@ func (g *Gateway) lprReadCamera(w http.ResponseWriter, r *http.Request, p authz.
 	lr := lprRead{ID: id}
 	var cameraID uuid.UUID
 	err = g.Svc.Store.TxRaw(r.Context(), store.ScopeFor(a), func(tx pgx.Tx) error {
-		return tx.QueryRow(r.Context(), `SELECT camera_id, remote_event_id, seen_at, crop_key FROM lpr_reads WHERE id = $1`, id).
-			Scan(&cameraID, &lr.RemoteEventID, &lr.SeenAt, &lr.CropKey)
+		return tx.QueryRow(r.Context(), `SELECT camera_id, remote_event_id, seen_at, crop_key, snapshot_key FROM lpr_reads WHERE id = $1`, id).
+			Scan(&cameraID, &lr.RemoteEventID, &lr.SeenAt, &lr.CropKey, &lr.SnapshotKey)
 	})
 	if err != nil {
 		g.fail(w, r, a, store.Classify(err))
@@ -397,6 +398,35 @@ func (g *Gateway) lprReadSnapshot(w http.ResponseWriter, r *http.Request) {
 	}
 	isCrop := r.URL.Query().Get("crop") == "1"
 	isDownload := r.URL.Query().Get("download") == "1"
+
+	// If this read originates from an edge agent (e.g. Provision-ISR), it has no Frigate event.
+	// Serve directly from object storage (crop or full scene).
+	if strings.HasPrefix(lr.RemoteEventID, "agent:") {
+		targetKey := lr.SnapshotKey
+		if isCrop {
+			targetKey = lr.CropKey
+			if targetKey == "" {
+				targetKey = lr.SnapshotKey
+			}
+		} else if targetKey == "" {
+			targetKey = lr.CropKey
+		}
+		if targetKey != "" && g.Blobs != nil {
+			if body, ct, err := g.Blobs.Get(r.Context(), targetKey); err == nil && len(body) > 0 {
+				if isDownload {
+					g.serveWatermarkedBlob(w, r, a, cam, lr, body)
+					return
+				}
+				w.Header().Set("Content-Type", ct)
+				w.Header().Set("Cache-Control", "private, max-age=3600")
+				w.WriteHeader(http.StatusOK)
+				_, _ = w.Write(body)
+				return
+			}
+		}
+		writeErr(w, http.StatusNotFound, "not_found", "snapshot not found")
+		return
+	}
 
 	// If a crop is requested without download watermark and already archived in OpenVMS object storage, serve directly:
 	if isCrop && !isDownload && lr.CropKey != "" && g.Blobs != nil {
@@ -475,6 +505,26 @@ func (g *Gateway) lprReadSnapshot(w http.ResponseWriter, r *http.Request) {
 	g.lprReadSnapshotDownload(w, r, a, cam, lr, resp)
 }
 
+func (g *Gateway) serveWatermarkedBlob(w http.ResponseWriter, r *http.Request, a authz.Actor, cam Camera, lr lprRead, body []byte) {
+	if _, err := g.Svc.Authorize(r.Context(), a, cam.ID, authz.SnapshotsDownload); err != nil {
+		g.auditDenied(r.Context(), a, err, r.Method, r.URL.Path)
+		writeErr(w, http.StatusForbidden, "forbidden", "you cannot download snapshots of this camera")
+		return
+	}
+	out, err := g.burnPhotoWatermark(r.Context(), a, cam.TenantID, lr, body)
+	if err != nil {
+		g.Svc.Log.WarnContext(r.Context(), "burn photo watermark", "error", err)
+		writeErr(w, http.StatusInternalServerError, "internal", "could not prepare the watermarked photo")
+		return
+	}
+	w.Header().Set("Content-Type", "image/jpeg")
+	w.Header().Set("Content-Disposition", `attachment; filename="plate-`+lr.ID.String()+`.jpg"`)
+	w.Header().Set("Cache-Control", "private, no-store")
+	w.WriteHeader(http.StatusOK)
+	_, _ = w.Write(out)
+	g.audit(r.Context(), a, cam.TenantID, ActionSnapshotViewed, "lpr_read", lr.ID, nil)
+}
+
 // lprReadSnapshotDownload finishes a ?download=1 request (PDW-3): it needs
 // snapshots.download in addition to what lprReadCamera already checked, burns the watermark
 // (date/time + owner branding) into the photo, and audits SNAPSHOT_DOWNLOADED. resp's body
@@ -546,6 +596,10 @@ func (g *Gateway) burnPhotoWatermark(ctx context.Context, a authz.Actor, tenantI
 func (g *Gateway) lprReadClip(w http.ResponseWriter, r *http.Request) {
 	a, cam, lr, ok := g.lprReadCamera(w, r, authz.RecordingsView)
 	if !ok {
+		return
+	}
+	if strings.HasPrefix(lr.RemoteEventID, "agent:") {
+		writeErr(w, http.StatusNotFound, "not_found", "clips are not supported for edge agent plate readings")
 		return
 	}
 	ad, err := g.Svc.Adapters.Get(r.Context(), cam.Server)

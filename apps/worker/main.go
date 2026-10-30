@@ -156,7 +156,7 @@ func run() error {
 	// Collects the plate readings Provision-ISR cameras report to their edge agents. An agent that
 	// is unreachable or too old only gets its error recorded; it never stops the other jobs.
 	agentService := &provision.Service{Store: st, Sealer: sealer, Log: log}
-	agentIngest := &events.AgentIngestor{Store: st, Log: log, Interval: 15 * time.Second, Source: agentService}
+	agentIngest := &events.AgentIngestor{Store: st, Blobs: objects, Log: log, Interval: 15 * time.Second, Source: agentService}
 	go agentIngest.Run(ctx)
 
 	// Asks the agents that send no heartbeat (their host cannot reach OpenVMS) for their state and

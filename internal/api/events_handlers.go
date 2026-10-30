@@ -253,6 +253,14 @@ func (h *Handlers) ListPlateReads(ctx context.Context, r gen.ListPlateReadsReque
 				item.Vehicle.TrailerColor = &color
 				item.Vehicle.TrailerColorConfidence = &conf
 			}
+			if pr.Vehicle.Brand != "" {
+				brand := pr.Vehicle.Brand
+				item.Vehicle.Brand = &brand
+			}
+			if pr.Vehicle.Model != "" {
+				model := pr.Vehicle.Model
+				item.Vehicle.Model = &model
+			}
 		}
 		out.Items = append(out.Items, item)
 	}
