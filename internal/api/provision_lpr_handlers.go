@@ -73,17 +73,20 @@ func (h *Handlers) GetCameraProvisionLPRStatusHandler(w http.ResponseWriter, r *
 	}
 
 	if h.Provision != nil {
-		if statusMap, err := h.Provision.GetProvisionLPRStatus(r.Context(), a, cam.ServerID); err == nil {
-			if cMap := findProvisionCameraStatus(statusMap, cam.ID, cameraIP, cam.RemoteName, cam.DisplayName); cMap != nil {
-				res["online"] = cMap["online"]
-				res["last_seen"] = cMap["last_seen"]
-				res["keepalive_count"] = cMap["keepalive_count"]
-				res["event_count"] = cMap["event_count"]
-				res["last_plate"] = cMap["last_plate"]
-				res["last_event_time"] = cMap["last_event_time"]
-				if recent, ok := cMap["recent_events"].([]any); ok && len(recent) > 0 {
-					res["recent_events"] = recent
-				}
+		statusMap, err := h.Provision.GetProvisionLPRStatus(r.Context(), a, cam.ServerID)
+		if err != nil {
+			if h.Log != nil {
+				h.Log.Warn("provision-lpr status probe failed", "server_id", cam.ServerID, "camera_id", cam.ID, "error", err)
+			}
+		} else if cMap := findProvisionCameraStatus(statusMap, cam.ID, cameraIP, cam.RemoteName, cam.DisplayName); cMap != nil {
+			res["online"] = cMap["online"]
+			res["last_seen"] = cMap["last_seen"]
+			res["keepalive_count"] = cMap["keepalive_count"]
+			res["event_count"] = cMap["event_count"]
+			res["last_plate"] = cMap["last_plate"]
+			res["last_event_time"] = cMap["last_event_time"]
+			if recent, ok := cMap["recent_events"].([]any); ok && len(recent) > 0 {
+				res["recent_events"] = recent
 			}
 		}
 	}

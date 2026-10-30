@@ -137,7 +137,15 @@ func postAgentJSON(ctx context.Context, client AgentProbeDoer, token, path strin
 	return nil
 }
 
+// maxProvisionLPRStatusBytes bounds one status response from the agent: camera statuses and
+// up to 20 recent events holding base64 JPEG images (crops and panoramas).
+const maxProvisionLPRStatusBytes = 16 << 20
+
 func getAgentJSON(ctx context.Context, client AgentProbeDoer, token, path string, out any) error {
+	return getAgentJSONWithLimit(ctx, client, token, path, maxOnvifProbeResponseBytes, out)
+}
+
+func getAgentJSONWithLimit(ctx context.Context, client AgentProbeDoer, token, path string, maxBytes int64, out any) error {
 	if token == "" {
 		return ErrAgentProbeFailed
 	}
@@ -155,8 +163,8 @@ func getAgentJSON(ctx context.Context, client AgentProbeDoer, token, path string
 		return fmt.Errorf("agent returned %d: %s", response.StatusCode, strings.TrimSpace(string(b)))
 	}
 	if out != nil {
-		data, err := io.ReadAll(io.LimitReader(response.Body, maxOnvifProbeResponseBytes+1))
-		if err != nil || len(data) > maxOnvifProbeResponseBytes {
+		data, err := io.ReadAll(io.LimitReader(response.Body, maxBytes+1))
+		if err != nil || int64(len(data)) > maxBytes {
 			return ErrAgentProbeFailed
 		}
 		if err := json.Unmarshal(data, out); err != nil {
@@ -191,7 +199,7 @@ func (s *Service) GetProvisionLPRStatus(ctx context.Context, actor authz.Actor, 
 		return nil, err
 	}
 	var out map[string]any
-	if err := getAgentJSON(ctx, client, token, "/v1/provision-lpr/status", &out); err != nil {
+	if err := getAgentJSONWithLimit(ctx, client, token, "/v1/provision-lpr/status", maxProvisionLPRStatusBytes, &out); err != nil {
 		return nil, err
 	}
 	return out, nil
