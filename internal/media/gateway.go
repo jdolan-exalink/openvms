@@ -408,8 +408,6 @@ func (g *Gateway) lprReadSnapshot(w http.ResponseWriter, r *http.Request) {
 			if targetKey == "" {
 				targetKey = lr.SnapshotKey
 			}
-		} else if targetKey == "" {
-			targetKey = lr.CropKey
 		}
 		if targetKey != "" && g.Blobs != nil {
 			if body, ct, err := g.Blobs.Get(r.Context(), targetKey); err == nil && len(body) > 0 {
@@ -433,6 +431,28 @@ func (g *Gateway) lprReadSnapshot(w http.ResponseWriter, r *http.Request) {
 					if isDownload {
 						g.lprReadSnapshotDownload(w, r, a, cam, lr, resp)
 						return
+					}
+					if !isCrop && lr.SnapshotKey == "" && g.Blobs != nil {
+						body, rerr := io.ReadAll(io.LimitReader(resp.Body, 8<<20))
+						resp.Body.Close()
+						if rerr == nil && len(body) > 0 {
+							key := events.PlateSnapshotKey(cam.TenantID, cam.Server.ID, lr.ID)
+							ct := resp.Header.Get("Content-Type")
+							if ct == "" {
+								ct = "image/jpeg"
+							}
+							if perr := g.Blobs.Put(r.Context(), key, body, ct); perr == nil {
+								_ = g.Svc.Store.TxRaw(r.Context(), store.ScopeFor(a), func(tx pgx.Tx) error {
+									_, uerr := tx.Exec(r.Context(), `UPDATE lpr_reads SET snapshot_key = $2 WHERE id = $1`, lr.ID, key)
+									return uerr
+								})
+							}
+							w.Header().Set("Content-Type", ct)
+							w.Header().Set("Cache-Control", "private, max-age=3600")
+							w.WriteHeader(http.StatusOK)
+							_, _ = w.Write(body)
+							return
+						}
 					}
 					relay(w, resp, "private, max-age=3600")
 					return

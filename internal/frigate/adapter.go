@@ -183,7 +183,9 @@ type TrackedObject struct {
 	Plate     string   `json:"-"`
 	// PlateScore is Frigate's confidence for Plate, 0..1.
 	PlateScore *float64 `json:"-"`
-	TopScore   *float64 `json:"-"`
+	// PlateBox is the detected license plate bounding box [top, left, height, width], normalized 0..1; nil when absent.
+	PlateBox []float64 `json:"-"`
+	TopScore *float64 `json:"-"`
 	// HasSnapshot mirrors Frigate's own Event.has_snapshot (PRD §44 "Has snapshot" filter).
 	HasSnapshot bool `json:"-"`
 	// Box is Frigate's latest bounding box [x, y, w, h], normalized 0..1; nil when absent.

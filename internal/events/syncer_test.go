@@ -16,4 +16,10 @@ func TestPlateCropKeyFormat(t *testing.T) {
 	if got != want {
 		t.Fatalf("PlateCropKey: got %q want %q", got, want)
 	}
+
+	snapGot := PlateSnapshotKey(tenantID, serverID, readID)
+	snapWant := "tenant/11111111-1111-1111-1111-111111111111/events/22222222-2222-2222-2222-222222222222/33333333-3333-3333-3333-333333333333_snap.jpg"
+	if snapGot != snapWant {
+		t.Fatalf("PlateSnapshotKey: got %q want %q", snapGot, snapWant)
+	}
 }

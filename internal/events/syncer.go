@@ -802,6 +802,13 @@ func upsertPlate(ctx context.Context, tx pgx.Tx, srv db.FrigateServer, cameraID 
 		score = &v
 	}
 	seenAt := fromUnix(o.StartTime)
+	var pBox []float32
+	for _, v := range o.PlateBox {
+		pBox = append(pBox, float32(v))
+	}
+	if pBox == nil {
+		pBox = []float32{}
+	}
 
 	// Check if a plate read already exists for this camera & plate within ±20 seconds
 	// or with the same (server_id, remote_event_id).
@@ -822,23 +829,25 @@ UPDATE lpr_reads SET
     score = CASE WHEN $2::real IS NOT NULL AND ($2::real > score OR score IS NULL) THEN $2::real ELSE score END,
     sub_label = CASE WHEN $3 <> '' THEN $3 ELSE sub_label END,
     zones = CASE WHEN array_length($4::text[], 1) > 0 THEN $4 ELSE zones END,
+    plate_box = CASE WHEN array_length($5::real[], 1) = 4 THEN $5 ELSE plate_box END,
     updated_at = now()
-WHERE id = $1`, existingID, score, o.SubLabel, nonNil(o.Zones))
+WHERE id = $1`, existingID, score, o.SubLabel, nonNil(o.Zones), pBox)
 		if err != nil {
 			return fmt.Errorf("update dedup plate %s: %w", o.ID, err)
 		}
 	} else if errors.Is(err, pgx.ErrNoRows) {
 		_, err = tx.Exec(ctx, `
-INSERT INTO lpr_reads (tenant_id, site_id, server_id, camera_id, remote_event_id, plate, plate_normalized, score, label, sub_label, zones, seen_at)
-VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)
+INSERT INTO lpr_reads (tenant_id, site_id, server_id, camera_id, remote_event_id, plate, plate_normalized, score, label, sub_label, zones, seen_at, plate_box)
+VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13)
 ON CONFLICT (server_id, remote_event_id) DO UPDATE SET
     plate = excluded.plate,
     plate_normalized = excluded.plate_normalized,
     score = excluded.score,
     sub_label = excluded.sub_label,
     zones = excluded.zones,
+    plate_box = CASE WHEN array_length(excluded.plate_box, 1) = 4 THEN excluded.plate_box ELSE lpr_reads.plate_box END,
     updated_at = now()`,
-			srv.TenantID, srv.SiteID, srv.ID, cameraID, o.ID, o.Plate, norm, score, o.Label, o.SubLabel, nonNil(o.Zones), seenAt)
+			srv.TenantID, srv.SiteID, srv.ID, cameraID, o.ID, o.Plate, norm, score, o.Label, o.SubLabel, nonNil(o.Zones), seenAt, pBox)
 		if err != nil {
 			return fmt.Errorf("upsert plate %s: %w", o.ID, err)
 		}
@@ -957,18 +966,24 @@ func PlateCropKey(tenantID, serverID, readID uuid.UUID) string {
 	return fmt.Sprintf("tenant/%s/plates/%s/%s.jpg", tenantID, serverID, readID)
 }
 
+// PlateSnapshotKey is where the full vehicle photo of a plate read lives in object storage.
+func PlateSnapshotKey(tenantID, serverID, readID uuid.UUID) string {
+	return fmt.Sprintf("tenant/%s/events/%s/%s_snap.jpg", tenantID, serverID, readID)
+}
+
 // copyPlateCrops copies plate crops of recognized plate reads to object storage so they survive
 // Frigate's retention cycles, emergency pruning, and server outages.
 func (s *Syncer) copyPlateCrops(ctx context.Context, srv db.FrigateServer, a frigate.Adapter) {
 	type pending struct {
 		id            uuid.UUID
 		remoteEventID string
+		plateBox      []float32
 	}
 	var todo []pending
 	err := s.Store.TxRaw(ctx, store.AllTenants, func(tx pgx.Tx) error {
 		rows, err := tx.Query(ctx, `
-SELECT id, remote_event_id FROM lpr_reads
-WHERE server_id = $1 AND crop_key = '' AND crop_attempts < $2
+SELECT id, remote_event_id, plate_box FROM lpr_reads
+WHERE server_id = $1 AND (crop_key = '' OR snapshot_key = '') AND crop_attempts < $2
 ORDER BY seen_at DESC LIMIT $3`, srv.ID, maxThumbAttempts, thumbsPerPull)
 		if err != nil {
 			return err
@@ -976,7 +991,7 @@ ORDER BY seen_at DESC LIMIT $3`, srv.ID, maxThumbAttempts, thumbsPerPull)
 		defer rows.Close()
 		for rows.Next() {
 			var p pending
-			if err := rows.Scan(&p.id, &p.remoteEventID); err != nil {
+			if err := rows.Scan(&p.id, &p.remoteEventID, &p.plateBox); err != nil {
 				return err
 			}
 			todo = append(todo, p)
@@ -988,29 +1003,64 @@ ORDER BY seen_at DESC LIMIT $3`, srv.ID, maxThumbAttempts, thumbsPerPull)
 		return
 	}
 	for _, p := range todo {
-		resp, err := a.Media().Open(ctx, "/api/events/"+url.PathEscape(p.remoteEventID)+"/snapshot.jpg", url.Values{"crop": {"1"}}, nil)
-		key := ""
-		if err == nil {
-			if resp.StatusCode == http.StatusOK {
-				body, rerr := io.ReadAll(io.LimitReader(resp.Body, 4<<20))
-				if rerr == nil && len(body) > 0 {
-					key = PlateCropKey(srv.TenantID, srv.ID, p.id)
-					ct := resp.Header.Get("Content-Type")
-					if ct == "" {
-						ct = "image/jpeg"
-					}
-					if err = s.Blobs.Put(ctx, key, body, ct); err != nil {
-						key = ""
+		cropKey := ""
+		snapKey := ""
+
+		// 1. Fetch full clean snapshot (crop=0)
+		fullResp, ferr := a.Media().Open(ctx, "/api/events/"+url.PathEscape(p.remoteEventID)+"/snapshot.jpg", url.Values{"crop": {"0"}}, nil)
+		if ferr == nil && fullResp.StatusCode == http.StatusOK {
+			fullBody, rerr := io.ReadAll(io.LimitReader(fullResp.Body, 8<<20))
+			fullResp.Body.Close()
+			if rerr == nil && len(fullBody) > 0 {
+				snapKey = PlateSnapshotKey(srv.TenantID, srv.ID, p.id)
+				_ = s.Blobs.Put(ctx, snapKey, fullBody, "image/jpeg")
+
+				// If we have plate_box, crop the exact license plate!
+				if len(p.plateBox) == 4 {
+					box64 := []float64{float64(p.plateBox[0]), float64(p.plateBox[1]), float64(p.plateBox[2]), float64(p.plateBox[3])}
+					if cropped, err := CropLicensePlate(fullBody, box64); err == nil && len(cropped) > 0 {
+						cropKey = PlateCropKey(srv.TenantID, srv.ID, p.id)
+						if err := s.Blobs.Put(ctx, cropKey, cropped, "image/jpeg"); err != nil {
+							cropKey = ""
+						}
 					}
 				}
 			}
-			resp.Body.Close()
+		} else if fullResp != nil {
+			fullResp.Body.Close()
 		}
-		if err != nil && !errors.Is(err, frigate.ErrNotFound) {
-			s.Log.DebugContext(ctx, "events: copy plate crop", "read_id", p.id, "error", err)
+
+		// 2. Fallback to Frigate's object crop (crop=1) if plate_box was absent or cropping failed:
+		if cropKey == "" {
+			resp, err := a.Media().Open(ctx, "/api/events/"+url.PathEscape(p.remoteEventID)+"/snapshot.jpg", url.Values{"crop": {"1"}}, nil)
+			if err == nil {
+				if resp.StatusCode == http.StatusOK {
+					body, rerr := io.ReadAll(io.LimitReader(resp.Body, 4<<20))
+					if rerr == nil && len(body) > 0 {
+						cropKey = PlateCropKey(srv.TenantID, srv.ID, p.id)
+						ct := resp.Header.Get("Content-Type")
+						if ct == "" {
+							ct = "image/jpeg"
+						}
+						if err = s.Blobs.Put(ctx, cropKey, body, ct); err != nil {
+							cropKey = ""
+						}
+					}
+				}
+				resp.Body.Close()
+			}
+			if err != nil && !errors.Is(err, frigate.ErrNotFound) {
+				s.Log.DebugContext(ctx, "events: copy plate crop fallback", "read_id", p.id, "error", err)
+			}
 		}
+
 		uerr := s.Store.TxRaw(ctx, store.AllTenants, func(tx pgx.Tx) error {
-			_, err := tx.Exec(ctx, `UPDATE lpr_reads SET crop_key = $2, crop_attempts = crop_attempts + 1 WHERE id = $1`, p.id, key)
+			_, err := tx.Exec(ctx, `
+UPDATE lpr_reads SET
+    crop_key = CASE WHEN $2 <> '' THEN $2 ELSE crop_key END,
+    snapshot_key = CASE WHEN $3 <> '' THEN $3 ELSE snapshot_key END,
+    crop_attempts = crop_attempts + 1
+WHERE id = $1`, p.id, cropKey, snapKey)
 			return err
 		})
 		if uerr != nil {

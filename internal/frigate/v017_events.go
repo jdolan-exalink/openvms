@@ -16,11 +16,18 @@ import (
 
 func (a *v017) Media() Media { return a.c }
 
+type objectAttribute struct {
+	Label string    `json:"label"`
+	Box   []float64 `json:"box"`
+	Score *float64  `json:"score"`
+}
+
 type objectData struct {
-	TopScore   *float64  `json:"top_score"`
-	Plate      *string   `json:"recognized_license_plate"`
-	PlateScore *float64  `json:"recognized_license_plate_score"`
-	Box        []float64 `json:"box"`
+	TopScore   *float64          `json:"top_score"`
+	Plate      *string           `json:"recognized_license_plate"`
+	PlateScore *float64          `json:"recognized_license_plate_score"`
+	Box        []float64         `json:"box"`
+	Attributes []objectAttribute `json:"attributes"`
 	// PathData is kept raw so one malformed entry can be skipped instead of failing the page.
 	PathData []json.RawMessage `json:"path_data"`
 }
@@ -109,6 +116,12 @@ func (a *v017) TrackedObjects(ctx context.Context, q ObjectQuery) ([]TrackedObje
 		}
 		if o.Data.Plate != nil {
 			t.Plate = strings.TrimSpace(*o.Data.Plate)
+		}
+		for _, attr := range o.Data.Attributes {
+			if attr.Label == "license_plate" && len(attr.Box) == 4 {
+				t.PlateBox = attr.Box
+				break
+			}
 		}
 		if t.Zones == nil {
 			t.Zones = []string{}
