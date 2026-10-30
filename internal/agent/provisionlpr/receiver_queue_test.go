@@ -174,3 +174,37 @@ func TestQueueRoutesAreNotFoundWithoutAQueueAndStatusReportsTheQueue(t *testing.
 		t.Fatalf("status events = %+v", status.Events)
 	}
 }
+
+func TestReceiverQueuesAnalyticEventsWithoutPlate(t *testing.T) {
+	f := newRegistryFixture(t)
+	q, err := OpenEventQueue(t.TempDir(), 100, 1<<20)
+	if err != nil {
+		t.Fatal(err)
+	}
+	f.r.SetEventQueue(q)
+	_ = f.reg.Upsert(RegisteredCamera{CameraID: "11111111-2222-3333-4444-555555555555", IP: "10.0.15.107"})
+
+	xml := `<?xml version="1.0" encoding="UTF-8" ?>
+<config version="1.7" xmlns="http://www.ipc.com/ver10">
+<alarmStatusInfo>
+<lineCrossAlarm type="boolean" id="1">true</lineCrossAlarm>
+</alarmStatusInfo>
+<deviceInfo>
+<deviceNo.>1</deviceNo.>
+<deviceName>Entrada</deviceName>
+</deviceInfo>
+</config>`
+	f.send(http.MethodPost, "/", "10.0.15.107:5000", xml, nil)
+	f.emitted(t)
+
+	events := q.After(0, 10)
+	if len(events) < 1 {
+		t.Fatalf("expected at least 1 queued event, got %d", len(events))
+	}
+	if events[0].Event.EventType != "line_crossing" {
+		t.Errorf("expected line_crossing, got %q", events[0].Event.EventType)
+	}
+	if events[0].Event.ChannelID == nil || *events[0].Event.ChannelID != 1 {
+		t.Errorf("expected channel 1, got %v", events[0].Event.ChannelID)
+	}
+}

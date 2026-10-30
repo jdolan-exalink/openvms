@@ -63,7 +63,6 @@ func (p *Parser) Parse(r *http.Request, body []byte, receivedAt time.Time) (LPRE
 
 	endpoint := r.URL.Path
 	event := LPREvent{
-		EventType:    "lpr",
 		Source:       "provision_isr",
 		ReceivedTime: receivedAt,
 		EventTime:    receivedAt,
@@ -109,11 +108,16 @@ func (p *Parser) Parse(r *http.Request, body []byte, receivedAt time.Time) (LPRE
 		}
 	}
 
-	if event.Plate == "" || isPlaceholderPlate(event.Plate) {
+	if event.Plate != "" && !isPlaceholderPlate(event.Plate) {
+		event.Plate = NormalizePlate(event.Plate)
+		if event.EventType == "" {
+			event.EventType = "lpr"
+		}
+	} else if event.EventType != "" {
+		event.Plate = ""
+	} else {
 		return LPREvent{}, ErrNoPlateFound
 	}
-
-	event.Plate = NormalizePlate(event.Plate)
 	if event.CameraID == "" {
 		if event.CameraIP != "" {
 			event.CameraID = event.CameraIP
@@ -186,6 +190,7 @@ func (p *Parser) parseJSON(data []byte, ev *LPREvent) (bool, error) {
 
 func (p *Parser) parseXML(data []byte, ev *LPREvent) (bool, error) {
 	decoder := xml.NewDecoder(bytes.NewReader(data))
+	activeAlarms := make(map[string]bool)
 	for {
 		token, err := decoder.Token()
 		if err != nil {
@@ -193,7 +198,56 @@ func (p *Parser) parseXML(data []byte, ev *LPREvent) (bool, error) {
 		}
 		if se, ok := token.(xml.StartElement); ok {
 			name := strings.ToLower(se.Name.Local)
+			if ev.ChannelID == nil {
+				if idAttr := getXMLAttr(se.Attr, "id"); idAttr != "" {
+					if n, err := strconv.Atoi(idAttr); err == nil && n >= 0 {
+						ev.ChannelID = &n
+					}
+				}
+			}
 			switch {
+			case isLineCrossingKey(name):
+				var s string
+				if err := decoder.DecodeElement(&s, &se); err == nil && isXMLBoolTrue(s) {
+					activeAlarms["line_crossing"] = true
+				}
+			case isIntrusionKey(name):
+				var s string
+				if err := decoder.DecodeElement(&s, &se); err == nil && isXMLBoolTrue(s) {
+					activeAlarms["intrusion"] = true
+				}
+			case isFaceKey(name):
+				var s string
+				if err := decoder.DecodeElement(&s, &se); err == nil && isXMLBoolTrue(s) {
+					activeAlarms["face"] = true
+				}
+			case isHumanKey(name):
+				var s string
+				if err := decoder.DecodeElement(&s, &se); err == nil && isXMLBoolTrue(s) {
+					activeAlarms["human"] = true
+				}
+			case isVehicleAlarmKey(name):
+				var s string
+				if err := decoder.DecodeElement(&s, &se); err == nil && isXMLBoolTrue(s) {
+					activeAlarms["vehicle"] = true
+				}
+			case isTamperKey(name):
+				var s string
+				if err := decoder.DecodeElement(&s, &se); err == nil && isXMLBoolTrue(s) {
+					activeAlarms["tamper"] = true
+				}
+			case isMotionKey(name):
+				var s string
+				if err := decoder.DecodeElement(&s, &se); err == nil && isXMLBoolTrue(s) {
+					activeAlarms["motion"] = true
+				}
+			case isChannelKey(name):
+				var chStr string
+				if err := decoder.DecodeElement(&chStr, &se); err == nil && chStr != "" {
+					if n, err := strconv.Atoi(strings.TrimSpace(chStr)); err == nil && n >= 0 {
+						ev.ChannelID = &n
+					}
+				}
 			case isPlateKey(name):
 				var plate string
 				if err := decoder.DecodeElement(&plate, &se); err == nil && plate != "" {
@@ -292,7 +346,14 @@ func (p *Parser) parseXML(data []byte, ev *LPREvent) (bool, error) {
 			}
 		}
 	}
-	return ev.Plate != "", nil
+	alarmPriority := []string{"line_crossing", "intrusion", "face", "vehicle", "human", "tamper", "motion"}
+	for _, p := range alarmPriority {
+		if activeAlarms[p] {
+			ev.EventType = p
+			break
+		}
+	}
+	return ev.Plate != "" || ev.EventType != "", nil
 }
 
 func (p *Parser) parseForm(r *http.Request, body []byte, ev *LPREvent) (bool, error) {
@@ -426,7 +487,52 @@ func isPlateKey(k string) bool {
 
 func isTimeKey(k string) bool {
 	return k == "time" || k == "event_time" || k == "eventtime" || k == "timestamp" ||
-		k == "snap_time" || k == "snaptime" || k == "capture_time" || k == "datetime"
+		k == "snap_time" || k == "snaptime" || k == "capture_time" || k == "datetime" ||
+		k == "datatime"
+}
+
+func isLineCrossingKey(k string) bool {
+	return k == "linecrossalarm" || k == "linecross" || k == "linecrossing" ||
+		k == "tripwirealarm" || k == "tripwire"
+}
+
+func isIntrusionKey(k string) bool {
+	return k == "intrusionalarm" || k == "intrusion" || k == "fielddetector" ||
+		k == "areaintrusion" || k == "areaintrusionalarm"
+}
+
+func isFaceKey(k string) bool {
+	return k == "facealarm" || k == "facedetectionalarm" || k == "facematchalarm" ||
+		k == "face" || k == "facedetection"
+}
+
+func isHumanKey(k string) bool {
+	return k == "humanalarm" || k == "peoplealarm" || k == "personalarm" ||
+		k == "pedestrianalarm" || k == "human" || k == "person"
+}
+
+func isVehicleAlarmKey(k string) bool {
+	return k == "vehicealarm" || k == "vehiclealarm" || k == "caralarm" ||
+		k == "vehice" || k == "vehicle"
+}
+
+func isMotionKey(k string) bool {
+	return k == "motionalarm" || k == "motion"
+}
+
+func isTamperKey(k string) bool {
+	return k == "tamperalarm" || k == "scenedetectionalarm" || k == "tamper"
+}
+
+func isChannelKey(k string) bool {
+	k = strings.TrimSuffix(k, ".")
+	return k == "deviceno" || k == "channelid" || k == "channel_id" || k == "chid" ||
+		k == "channelno" || k == "channel_no" || k == "channel"
+}
+
+func isXMLBoolTrue(val string) bool {
+	v := strings.ToLower(strings.TrimSpace(val))
+	return v == "true" || v == "1" || v == "yes" || v == "on"
 }
 
 func isCameraKey(k string) bool {
@@ -546,6 +652,8 @@ func parseTime(raw string) (time.Time, error) {
 		"2006-01-02 15:04:05",
 		"2006-01-02T15:04:05",
 		"2006/01/02 15:04:05",
+		"02/01/2006 15:04:05",
+		"02-01-2006 15:04:05",
 	}
 	for _, f := range formats {
 		if t, err := time.Parse(f, raw); err == nil {
