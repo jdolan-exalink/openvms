@@ -11,6 +11,8 @@ type LPREvent struct {
 	EventType string `json:"event_type"` // "lpr"
 	Source    string `json:"source"`     // "provision_isr"
 	CameraID  string `json:"camera_id"`
+	// ChannelID identifies the channel index on multi-channel NVRs (e.g. 1, 2, ...).
+	ChannelID *int `json:"channel_id,omitempty"`
 	// ReportedCameraID is the camera ID the payload itself carried when it differs from the
 	// registered one; the original is kept for audit, never used to identify the camera.
 	ReportedCameraID *string   `json:"reported_camera_id,omitempty"`

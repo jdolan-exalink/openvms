@@ -59,7 +59,9 @@ func (m *HeartbeatManager) RecordFullEvent(event LPREvent, now time.Time) {
 	stat.Online = true
 	stat.LastSeen = now
 	stat.EventCount++
-	stat.LastPlate = event.Plate
+	if event.Plate != "" {
+		stat.LastPlate = event.Plate
+	}
 	t := event.EventTime
 	stat.LastEventTime = &t
 

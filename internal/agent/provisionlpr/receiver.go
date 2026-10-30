@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"io"
 	"log/slog"
 	"net"
@@ -237,14 +238,21 @@ func (r *Receiver) handleEvent(w http.ResponseWriter, req *http.Request) {
 	}
 
 	// Deduplicate
-	if r.dedup.IsDuplicate(event.CameraID, event.Plate, now) {
-		r.log.Debug("provision-isr duplicate plate suppressed", "camera_id", event.CameraID, "plate", event.Plate)
+	dedupKey := event.Plate
+	if dedupKey == "" {
+		dedupKey = event.EventType
+		if event.ChannelID != nil {
+			dedupKey = fmt.Sprintf("%s:ch%d", event.EventType, *event.ChannelID)
+		}
+	}
+	if r.dedup.IsDuplicate(event.CameraID, dedupKey, now) {
+		r.log.Debug("provision-isr duplicate event suppressed", "camera_id", event.CameraID, "key", dedupKey)
 		return
 	}
 
 	// Update heartbeat with reading
 	r.heartbeat.RecordFullEvent(event, now)
-	r.log.Info("provision-isr lpr event accepted", "camera_id", event.CameraID, "plate", event.Plate, "ip", event.CameraIP)
+	r.log.Info("provision-isr event accepted", "camera_id", event.CameraID, "type", event.EventType, "plate", event.Plate, "ip", event.CameraIP)
 
 	// Keep it for central before anything that can drop it: the camera has already been answered, so
 	// a failure here is logged and the reading still reaches the subscribers.

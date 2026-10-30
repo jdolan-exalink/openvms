@@ -280,3 +280,114 @@ func TestParserProvisionISRXMLRealPayload(t *testing.T) {
 	}
 }
 
+func TestParserProvisionISRLineCrossingAndMotionAlarm(t *testing.T) {
+	parser := NewParser()
+	xmlPayload := []byte(`<?xml version="1.0" encoding="UTF-8" ?>
+<config version="1.7" xmlns="http://www.ipc.com/ver10">
+<alarmStatusInfo>
+<motionAlarm type="boolean" id="1">true</motionAlarm>
+<lineCrossAlarm type="boolean" id="1">true</lineCrossAlarm>
+<vehiceAlarm type="boolean" id="1">false</vehiceAlarm>
+</alarmStatusInfo>
+<dataTime><![CDATA[30/10/2026 16:32:28]]></dataTime>
+<deviceInfo>
+<deviceName><![CDATA[Ruta 1 y PPP sella]]></deviceName>
+<deviceNo.><![CDATA[1]]></deviceNo.>
+<sn><![CDATA[ID2C10A3G7B1]]></sn>
+<ipAddress><![CDATA[10.0.15.107]]></ipAddress>
+<macAddress><![CDATA[a0:e0:25:07:d2:c1]]></macAddress>
+</deviceInfo>
+<targetImageData>
+<targetBase64Data><![CDATA[/9j/4TARGET_CROP]]></targetBase64Data>
+</targetImageData>
+<sourceDataInfo>
+<sourceBase64Data><![CDATA[/9j/4SCENE_FULL]]></sourceBase64Data>
+</sourceDataInfo>
+</config>`)
+
+	req := httptest.NewRequest(http.MethodPost, "/", bytes.NewReader(xmlPayload))
+	req.Header.Set("Content-Type", "application/xml; charset=utf-8")
+	req.RemoteAddr = "10.0.15.107:54321"
+
+	now := time.Now()
+	event, err := parser.Parse(req, xmlPayload, now)
+	if err != nil {
+		t.Fatalf("Parse error: %v", err)
+	}
+
+	if event.EventType != "line_crossing" {
+		t.Errorf("EventType = %q, want line_crossing", event.EventType)
+	}
+	if event.CameraID != "Ruta 1 y PPP sella" {
+		t.Errorf("CameraID = %q, want 'Ruta 1 y PPP sella'", event.CameraID)
+	}
+	if event.CameraIP != "10.0.15.107" {
+		t.Errorf("CameraIP = %q, want 10.0.15.107", event.CameraIP)
+	}
+	if event.ChannelID == nil || *event.ChannelID != 1 {
+		t.Errorf("ChannelID = %v, want 1", event.ChannelID)
+	}
+	if event.PlateCrop == nil || *event.PlateCrop != "/9j/4TARGET_CROP" {
+		t.Errorf("PlateCrop = %v, want /9j/4TARGET_CROP", event.PlateCrop)
+	}
+	if event.PanoramicImage == nil || *event.PanoramicImage != "/9j/4SCENE_FULL" {
+		t.Errorf("PanoramicImage = %v, want /9j/4SCENE_FULL", event.PanoramicImage)
+	}
+}
+
+func TestParserProvisionISRMotionAlarmAlone(t *testing.T) {
+	parser := NewParser()
+	xmlPayload := []byte(`<?xml version="1.0" encoding="UTF-8" ?>
+<config version="1.7" xmlns="http://www.ipc.com/ver10">
+<alarmStatusInfo>
+<motionAlarm type="boolean" id="1">true</motionAlarm>
+<vehiceAlarm type="boolean" id="1">false</vehiceAlarm>
+</alarmStatusInfo>
+<dataTime><![CDATA[30/10/2026 16:32:28]]></dataTime>
+<deviceInfo>
+<deviceName><![CDATA[Cam-Entrada]]></deviceName>
+<deviceNo.><![CDATA[3]]></deviceNo.>
+<ipAddress><![CDATA[10.0.15.108]]></ipAddress>
+</deviceInfo>
+</config>`)
+
+	req := httptest.NewRequest(http.MethodPost, "/", bytes.NewReader(xmlPayload))
+	req.Header.Set("Content-Type", "application/xml; charset=utf-8")
+	req.RemoteAddr = "10.0.15.108:54321"
+
+	event, err := parser.Parse(req, xmlPayload, time.Now())
+	if err != nil {
+		t.Fatalf("Parse error: %v", err)
+	}
+
+	if event.EventType != "motion" {
+		t.Errorf("EventType = %q, want motion", event.EventType)
+	}
+	if event.ChannelID == nil || *event.ChannelID != 3 {
+		t.Errorf("ChannelID = %v, want 3", event.ChannelID)
+	}
+}
+
+func TestParserProvisionISRAlarmClearIgnored(t *testing.T) {
+	parser := NewParser()
+	xmlPayload := []byte(`<?xml version="1.0" encoding="UTF-8" ?>
+<config version="1.7" xmlns="http://www.ipc.com/ver10">
+<alarmStatusInfo>
+<motionAlarm type="boolean" id="1">false</motionAlarm>
+<vehiceAlarm type="boolean" id="1">false</vehiceAlarm>
+</alarmStatusInfo>
+<deviceInfo>
+<deviceName><![CDATA[Cam-Entrada]]></deviceName>
+</deviceInfo>
+</config>`)
+
+	req := httptest.NewRequest(http.MethodPost, "/", bytes.NewReader(xmlPayload))
+	req.Header.Set("Content-Type", "application/xml")
+	req.RemoteAddr = "10.0.15.108:54321"
+
+	_, err := parser.Parse(req, xmlPayload, time.Now())
+	if err == nil {
+		t.Fatalf("expected error for alarm clear with no plate, got nil")
+	}
+}
+
