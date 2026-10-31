@@ -39,5 +39,7 @@ const messages = {
   cropAlt: "License plate crop for {plate}",
   downloadCrop: "Download plate crop",
   fullPhotoTitle: "Full camera snapshot",
+  exportCsv: "Export CSV",
+  exporting: "Exporting…",
 } as const;
 export default messages;

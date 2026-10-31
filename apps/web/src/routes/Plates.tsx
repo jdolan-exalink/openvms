@@ -1,12 +1,13 @@
 import { useInfiniteQuery, useQuery } from "@tanstack/react-query";
-import { ChevronLeft, ChevronRight } from "lucide-react";
+import { ChevronLeft, ChevronRight, Download } from "lucide-react";
 import { useEffect, useState } from "react";
-import type { Schemas } from "@/api/client";
+import { api, type Schemas } from "@/api/client";
 import { cameraGroupsQuery, meQuery, type PlateFilter, platesQuery, sitesQuery } from "@/api/queries";
 import { PlateDetailModal } from "@/components/PlateDetailModal";
 import { PlateReadCard } from "@/components/plates/PlateReadCard";
 import { type FilterChip, SearchSummary } from "@/components/SearchSummary";
 import { Button, Empty, ErrorNote, Field, Select, Switch, TextInput } from "@/components/ui";
+import { downloadPlateReadsCsv } from "@/lib/lprExport";
 import { fromLocalInput, vehicleColorOptions, vehicleTypeOptions } from "@/lib/format";
 import { rangeEnd, todayEventsRange } from "@/lib/eventsSearch";
 import { can } from "@/lib/perm";
@@ -60,6 +61,28 @@ export function Plates() {
   const [detailRead, setDetailRead] = useState<Schemas["PlateRead"] | null>(null);
   const canPreviewSnapshot = can(me.data, "snapshots.view") && can(me.data, "lpr.view");
   const canViewDetail = can(me.data, "lpr.view") && (can(me.data, "snapshots.view") || can(me.data, "recordings.view"));
+  const [isExporting, setIsExporting] = useState(false);
+
+  async function handleExportCsv() {
+    if (items.length === 0) return;
+    setIsExporting(true);
+    try {
+      const allLoaded = pages.flatMap((p) => p.items);
+      if (!reads.hasNextPage) {
+        downloadPlateReadsCsv(allLoaded);
+        return;
+      }
+      const res = await api.GET("/api/v1/lpr/reads", {
+        params: { query: { ...toFilter(applied), limit: 500 } },
+      });
+      const fetched = res.data?.items ?? allLoaded;
+      downloadPlateReadsCsv(fetched);
+    } catch (err) {
+      console.error("Failed to export plate reads CSV", err);
+    } finally {
+      setIsExporting(false);
+    }
+  }
   const filterKey = JSON.stringify(toFilter(applied));
   const [pageKey, setPageKey] = useState(filterKey);
   if (pageKey !== filterKey) {
@@ -163,18 +186,29 @@ export function Plates() {
           </Button>
         </div>
       </form>
-      <SearchSummary
-        count={items.length}
-        noun={{ one: t("plates.readingOne"), many: t("plates.readingMany") }}
-        hasMore={!!reads.hasNextPage && page === lastPage}
-        loading={reads.isPending}
-        chips={chips}
-        onClear={() => {
-          const next = defaultForm(today);
-          setForm(next);
-          setApplied(next);
-        }}
-      />
+      <div className="flex flex-wrap items-center justify-between gap-2">
+        <SearchSummary
+          count={items.length}
+          noun={{ one: t("plates.readingOne"), many: t("plates.readingMany") }}
+          hasMore={!!reads.hasNextPage && page === lastPage}
+          loading={reads.isPending}
+          chips={chips}
+          onClear={() => {
+            const next = defaultForm(today);
+            setForm(next);
+            setApplied(next);
+          }}
+        />
+        <Button
+          type="button"
+          variant="tonal"
+          size="sm"
+          disabled={items.length === 0 || reads.isPending || isExporting}
+          onClick={() => void handleExportCsv()}
+        >
+          <Download className="size-4" aria-hidden /> {isExporting ? t("plates.exporting") : t("plates.exportCsv")}
+        </Button>
+      </div>
       <ErrorNote error={reads.error} />
       {reads.isSuccess && items.length === 0 && <Empty>{t("plates.empty")}</Empty>}
       {items.length > 0 && (

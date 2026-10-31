@@ -342,4 +342,53 @@ describe("Plates", () => {
     expect((screen.getByLabelText("Patente") as HTMLInputElement).value).toBe("");
     expect(screen.queryByRole("list", { name: "Filtros aplicados" })).not.toBeInTheDocument();
   });
+
+  it("disables export button when there are no reads and enables when reads exist", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (input: Request) => {
+        const url = new URL(input.url);
+        if (url.pathname === "/api/v1/lpr/reads") {
+          return json({ items: [] });
+        }
+        return stubApi({ "/api/v1/me": () => meResponse("lpr.search"), ...noCatalogs })(input);
+      }),
+    );
+
+    renderPage(Plates);
+    await screen.findByText("No hay lecturas que coincidan.");
+    const exportBtn = screen.getByRole("button", { name: "Exportar CSV" });
+    expect(exportBtn).toBeDisabled();
+  });
+
+  it("exports plate reads to CSV when export button is clicked", async () => {
+    const reads = [makePlateRead("r1"), makePlateRead("r2")];
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (input: Request) => {
+        const url = new URL(input.url);
+        if (url.pathname === "/api/v1/lpr/reads") {
+          return json({ items: reads });
+        }
+        return stubApi({ "/api/v1/me": () => meResponse("lpr.search"), ...noCatalogs })(input);
+      }),
+    );
+
+    const fakeUrl = "blob:fake-csv";
+    const createObjectURL = vi.fn(() => fakeUrl);
+    const revokeObjectURL = vi.fn();
+    vi.stubGlobal("URL", Object.assign(URL, { createObjectURL, revokeObjectURL }));
+
+    renderPage(Plates);
+    await screen.findByRole("list", { name: "Lecturas LPR" });
+    const exportBtn = screen.getByRole("button", { name: "Exportar CSV" });
+    expect(exportBtn).not.toBeDisabled();
+
+    fireEvent.click(exportBtn);
+
+    await waitFor(() => {
+      expect(createObjectURL).toHaveBeenCalled();
+      expect(revokeObjectURL).toHaveBeenCalledWith(fakeUrl);
+    });
+  });
 });

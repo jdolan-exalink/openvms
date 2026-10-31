@@ -39,5 +39,7 @@ const messages = {
   cropAlt: "Recorte de la matrícula {plate}",
   downloadCrop: "Descargar recorte",
   fullPhotoTitle: "Captura completa de la cámara",
+  exportCsv: "Exportar CSV",
+  exporting: "Exportando…",
 } as const;
 export default messages;
