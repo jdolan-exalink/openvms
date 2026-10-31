@@ -1,9 +1,10 @@
 import { useInfiniteQuery, useQuery } from "@tanstack/react-query";
-import { ChevronLeft, ChevronRight, Download } from "lucide-react";
+import { Bookmark, ChevronLeft, ChevronRight, Download } from "lucide-react";
 import { useEffect, useState } from "react";
 import { api, type Schemas } from "@/api/client";
 import { cameraGroupsQuery, meQuery, type PlateFilter, platesQuery, sitesQuery } from "@/api/queries";
 import { PlateDetailModal } from "@/components/PlateDetailModal";
+import { LprWatchlistsModal } from "@/components/plates/LprWatchlistsModal";
 import { PlateReadCard } from "@/components/plates/PlateReadCard";
 import { type FilterChip, SearchSummary } from "@/components/SearchSummary";
 import { Button, Empty, ErrorNote, Field, Select, Switch, TextInput } from "@/components/ui";
@@ -62,6 +63,7 @@ export function Plates() {
   const canPreviewSnapshot = can(me.data, "snapshots.view") && can(me.data, "lpr.view");
   const canViewDetail = can(me.data, "lpr.view") && (can(me.data, "snapshots.view") || can(me.data, "recordings.view"));
   const [isExporting, setIsExporting] = useState(false);
+  const [showWatchlists, setShowWatchlists] = useState(false);
 
   async function handleExportCsv() {
     if (items.length === 0) return;
@@ -199,15 +201,27 @@ export function Plates() {
             setApplied(next);
           }}
         />
-        <Button
-          type="button"
-          variant="tonal"
-          size="sm"
-          disabled={items.length === 0 || reads.isPending || isExporting}
-          onClick={() => void handleExportCsv()}
-        >
-          <Download className="size-4" aria-hidden /> {isExporting ? t("plates.exporting") : t("plates.exportCsv")}
-        </Button>
+        <div className="flex items-center gap-2">
+          {can(me.data, "lpr.view") && (
+            <Button
+              type="button"
+              variant="tonal"
+              size="sm"
+              onClick={() => setShowWatchlists(true)}
+            >
+              <Bookmark className="size-4" aria-hidden /> {t("plates.watchlists")}
+            </Button>
+          )}
+          <Button
+            type="button"
+            variant="tonal"
+            size="sm"
+            disabled={items.length === 0 || reads.isPending || isExporting}
+            onClick={() => void handleExportCsv()}
+          >
+            <Download className="size-4" aria-hidden /> {isExporting ? t("plates.exporting") : t("plates.exportCsv")}
+          </Button>
+        </div>
       </div>
       <ErrorNote error={reads.error} />
       {reads.isSuccess && items.length === 0 && <Empty>{t("plates.empty")}</Empty>}
@@ -233,6 +247,12 @@ export function Plates() {
         </Button>
       </div>
       {detailRead && <PlateDetailModal read={detailRead} onClose={() => setDetailRead(null)} />}
+      {showWatchlists && (
+        <LprWatchlistsModal
+          canManage={can(me.data, "lpr.manage")}
+          onClose={() => setShowWatchlists(false)}
+        />
+      )}
     </div>
   );
 }

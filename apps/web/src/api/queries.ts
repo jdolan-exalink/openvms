@@ -342,6 +342,20 @@ export const platesQuery = (filter: PlateFilter) =>
     getNextPageParam: (last) => last.next_cursor,
   });
 
+export const lprWatchlistsQuery = () =>
+  queryOptions({
+    queryKey: ["lpr", "watchlists"],
+    queryFn: async () => unwrap(await api.GET("/api/v1/lpr/watchlists")).items,
+  });
+
+export const lprWatchlistItemsQuery = (watchlistId: string) =>
+  queryOptions({
+    queryKey: ["lpr", "watchlists", watchlistId, "items"],
+    queryFn: async () =>
+      unwrap(await api.GET("/api/v1/lpr/watchlists/{watchlistId}/items", { params: { path: { watchlistId } } })).items,
+    enabled: !!watchlistId,
+  });
+
 export const syncStatusQuery = queryOptions({
   queryKey: ["events", "sync-status"],
   queryFn: async () => unwrap(await api.GET("/api/v1/events/sync-status")).items,

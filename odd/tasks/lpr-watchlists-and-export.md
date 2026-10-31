@@ -41,7 +41,8 @@ Empower operators with two major LPR capabilities:
 - [x] API integration tests in `internal/api/lpr_watchlists_integration_test.go`.
 
 ### Slice 5: Web UI Management & Plate Badges
-- [ ] Watchlist manager dialog / tab in LPR interface.
-- [ ] Watchlist alert pill on `PlateReadCard` and `PlateDetailModal`.
-- [ ] Rule creation UI option for LPR Watchlists in `Rules.tsx`.
-- [ ] Vitest coverage.
+- [x] Watchlist manager dialog (`LprWatchlistsModal.tsx`) in LPR interface.
+- [x] Watchlist alert pills on `PlateReadCard` and `PlateDetailModal`.
+- [x] Rule creation UI option for LPR Watchlists in `Rules.tsx`.
+- [x] Full i18n support in `es`, `en`, and `pt`.
+- [x] Vitest coverage in `LprWatchlistsModal.test.tsx` and `Plates.test.tsx`.
