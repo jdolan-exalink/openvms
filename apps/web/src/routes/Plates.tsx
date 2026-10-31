@@ -14,12 +14,12 @@ import { rangeEnd, todayEventsRange } from "@/lib/eventsSearch";
 import { can } from "@/lib/perm";
 import { useT } from "@/i18n";
 
-type Form = { plate: string; exact: boolean; site: string; cameraGroup: string; vehicleType: string; vehicleColor: string; from: string; to: string };
+type Form = { plate: string; exact: boolean; site: string; cameraGroup: string; vehicleType: string; vehicleColor: string; brand: string; model: string; from: string; to: string };
 
 const PAGE_SIZE = 12;
 
 function defaultForm(day = todayEventsRange()): Form {
-  return { plate: "", exact: false, site: "", cameraGroup: "", vehicleType: "", vehicleColor: "", from: day.from, to: day.to };
+  return { plate: "", exact: false, site: "", cameraGroup: "", vehicleType: "", vehicleColor: "", brand: "", model: "", from: day.from, to: day.to };
 }
 
 function toFilter(f: Form): PlateFilter {
@@ -30,6 +30,8 @@ function toFilter(f: Form): PlateFilter {
     camera_group_id: f.cameraGroup ? [f.cameraGroup] : undefined,
     vehicle_type: f.vehicleType ? [f.vehicleType] : undefined,
     vehicle_color: f.vehicleColor ? [f.vehicleColor] : undefined,
+    vehicle_brand: f.brand.trim() || undefined,
+    vehicle_model: f.model.trim() || undefined,
     from: fromLocalInput(f.from),
     to: rangeEnd(f.to),
     limit: PAGE_SIZE,
@@ -116,6 +118,8 @@ export function Plates() {
     chips.push({ key: "vehicleType", label: t("plates.chipObject", { value: vehicleTypeOptions().find((o) => o.value === applied.vehicleType)?.label ?? applied.vehicleType }), onRemove: () => reset({ vehicleType: "" }) });
   if (applied.vehicleColor)
     chips.push({ key: "vehicleColor", label: t("plates.chipColor", { value: vehicleColorOptions().find((o) => o.value === applied.vehicleColor)?.label ?? applied.vehicleColor }), onRemove: () => reset({ vehicleColor: "" }) });
+  if (applied.brand.trim()) chips.push({ key: "brand", label: t("plates.chipBrand", { value: applied.brand.trim() }), onRemove: () => reset({ brand: "" }) });
+  if (applied.model.trim()) chips.push({ key: "model", label: t("plates.chipModel", { value: applied.model.trim() }), onRemove: () => reset({ model: "" }) });
   if (applied.from && applied.from !== today.from) chips.push({ key: "from", label: t("plates.chipFrom", { value: applied.from.replace("T", " ") }), onRemove: () => reset({ from: today.from }) });
   if (applied.to && applied.to !== today.to) chips.push({ key: "to", label: t("plates.chipTo", { value: applied.to.replace("T", " ") }), onRemove: () => reset({ to: today.to }) });
 
@@ -174,6 +178,20 @@ export function Plates() {
               <option key={o.value} value={o.value}>{o.label}</option>
             ))}
           </Select>
+        </Field>
+        <Field label={t("plates.brand")}>
+          <TextInput
+            value={form.brand}
+            onChange={(e) => setForm({ ...form, brand: e.target.value })}
+            placeholder={t("plates.brandPlaceholder")}
+          />
+        </Field>
+        <Field label={t("plates.model")}>
+          <TextInput
+            value={form.model}
+            onChange={(e) => setForm({ ...form, model: e.target.value })}
+            placeholder={t("plates.modelPlaceholder")}
+          />
         </Field>
         <Field label={t("common.from")}>
           <TextInput type="datetime-local" className="font-mono" value={form.from} onChange={(e) => setForm({ ...form, from: e.target.value })} />

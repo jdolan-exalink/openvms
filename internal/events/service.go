@@ -158,6 +158,8 @@ type Filter struct {
 	SubLabels      []string
 	VehicleTypes   []string
 	VehicleColors  []string
+	VehicleBrand   string
+	VehicleModel   string
 	Severity       string
 	// Plate matches events with a plate containing this text (normalized).
 	Plate string
@@ -281,7 +283,7 @@ const eventColumns = `e.id, e.tenant_id, e.site_id, s.name, e.server_id, fs.name
 e.severity, e.labels, e.sub_labels, e.zones, e.plates, e.start_time, e.end_time, e.reviewed, e.thumb_key <> '',
 e.has_snapshot, e.preview_key <> '', e.lpr,
 va.vehicle_type, va.vehicle_type_confidence, va.vehicle_color, va.vehicle_color_confidence, va.color_quality,
-va.trailer_color, va.trailer_color_confidence,
+va.trailer_color, va.trailer_color_confidence, va.brand, va.model,
 pa.upper_color, pa.upper_color_confidence, pa.lower_color, pa.lower_color_confidence, pa.color_quality,
 vj.status, pj.status, ` + TracksSubquery
 
@@ -296,7 +298,7 @@ LEFT JOIN person_attribute_jobs pj ON pj.event_id = e.id`
 
 func scanEvent(row pgx.Row) (Event, error) {
 	var e Event
-	var vType, vColor, vQuality, trailer *string
+	var vType, vColor, vQuality, trailer, brand, model *string
 	var vTypeConf, vColorConf, trailerConf *float32
 	var upper, lower, pQuality *string
 	var upperConf, lowerConf *float32
@@ -305,7 +307,7 @@ func scanEvent(row pgx.Row) (Event, error) {
 	err := row.Scan(&e.ID, &e.TenantID, &e.SiteID, &e.SiteName, &e.ServerID, &e.ServerName, &e.CameraID, &e.CameraName, &e.CameraLPR, &e.RemoteID,
 		&e.Severity, &e.Labels, &e.SubLabels, &e.Zones, &e.Plates, &e.StartTime, &e.EndTime, &e.Reviewed, &e.HasThumbnail,
 		&e.HasSnapshot, &e.HasPreview, &e.LPR,
-		&vType, &vTypeConf, &vColor, &vColorConf, &vQuality, &trailer, &trailerConf,
+		&vType, &vTypeConf, &vColor, &vColorConf, &vQuality, &trailer, &trailerConf, &brand, &model,
 		&upper, &upperConf, &lower, &lowerConf, &pQuality,
 		&vehicleJob, &personJob, &tracksRaw)
 	if err != nil {
@@ -314,16 +316,34 @@ func scanEvent(row pgx.Row) (Event, error) {
 	if e.Tracks, err = parseTracks(tracksRaw); err != nil {
 		return e, err
 	}
-	if vType != nil && vColor != nil && vQuality != nil && vTypeConf != nil && vColorConf != nil {
-		e.Vehicle = &VehicleAttr{
-			Type: *vType, TypeConfidence: *vTypeConf,
-			Color: *vColor, ColorConfidence: *vColorConf, ColorQuality: *vQuality,
+	if vType != nil || vColor != nil || brand != nil || model != nil {
+		e.Vehicle = &VehicleAttr{}
+		if vType != nil {
+			e.Vehicle.Type = *vType
+		}
+		if vTypeConf != nil {
+			e.Vehicle.TypeConfidence = *vTypeConf
+		}
+		if vColor != nil {
+			e.Vehicle.Color = *vColor
+		}
+		if vColorConf != nil {
+			e.Vehicle.ColorConfidence = *vColorConf
+		}
+		if vQuality != nil {
+			e.Vehicle.ColorQuality = *vQuality
 		}
 		if trailer != nil {
 			e.Vehicle.TrailerColor = *trailer
 		}
 		if trailerConf != nil {
 			e.Vehicle.TrailerColorConfidence = *trailerConf
+		}
+		if brand != nil {
+			e.Vehicle.Brand = *brand
+		}
+		if model != nil {
+			e.Vehicle.Model = *model
 		}
 	}
 	if vehicleJob != nil {
@@ -350,7 +370,8 @@ func (s *Service) ListEvents(ctx context.Context, actor authz.Actor, f Filter) (
 	err := s.tx(ctx, actor, func(tx pgx.Tx, c *access.Checker) error {
 		perm := authz.EventsView
 		if f.Plate != "" || len(f.Labels) > 0 || len(f.Zones) > 0 || len(f.SubLabels) > 0 || f.From != nil ||
-			f.HasSnapshot != nil || f.HasPreview != nil || len(f.VehicleTypes) > 0 || len(f.VehicleColors) > 0 {
+			f.HasSnapshot != nil || f.HasPreview != nil || len(f.VehicleTypes) > 0 || len(f.VehicleColors) > 0 ||
+			f.VehicleBrand != "" || f.VehicleModel != "" {
 			perm = authz.EventsSearch
 		}
 		cams, err := c.CameraIDs(ctx, perm)
@@ -438,6 +459,12 @@ func (s *Service) ListEvents(ctx context.Context, actor authz.Actor, f Filter) (
 		}
 		if len(f.VehicleColors) > 0 {
 			b.add("va.vehicle_color = ANY(?)", f.VehicleColors)
+		}
+		if f.VehicleBrand != "" {
+			b.add("va.brand ILIKE '%' || ? || '%'", strings.TrimSpace(f.VehicleBrand))
+		}
+		if f.VehicleModel != "" {
+			b.add("va.model ILIKE '%' || ? || '%'", strings.TrimSpace(f.VehicleModel))
 		}
 		if f.Cursor != "" {
 			t, id, err := decodeCursor(f.Cursor)
@@ -721,6 +748,8 @@ type PlateFilter struct {
 	CameraGroupIDs []uuid.UUID
 	VehicleTypes   []string
 	VehicleColors  []string
+	VehicleBrand   string
+	VehicleModel   string
 	From           *time.Time
 	To             *time.Time
 	Cursor         string
@@ -785,6 +814,14 @@ func (s *Service) ListPlates(ctx context.Context, actor authz.Actor, f PlateFilt
 			b.args = append(b.args, f.VehicleColors)
 			vehicleWhere = append(vehicleWhere, fmt.Sprintf("ev.vehicle_color = ANY($%d)", len(b.args)))
 		}
+		if f.VehicleBrand != "" {
+			b.args = append(b.args, strings.TrimSpace(f.VehicleBrand))
+			vehicleWhere = append(vehicleWhere, fmt.Sprintf("ev.brand ILIKE '%%' || $%d || '%%'", len(b.args)))
+		}
+		if f.VehicleModel != "" {
+			b.args = append(b.args, strings.TrimSpace(f.VehicleModel))
+			vehicleWhere = append(vehicleWhere, fmt.Sprintf("ev.model ILIKE '%%' || $%d || '%%'", len(b.args)))
+		}
 		b.args = append(b.args, n+1)
 		limitPh := len(b.args)
 		// The detection_ids lookup is a per-row GIN probe. Running it before LIMIT walks
@@ -807,7 +844,7 @@ LEFT JOIN LATERAL (
            va.trailer_color, va.trailer_color_confidence, va.brand, va.model
     FROM events e
     LEFT JOIN vehicle_attributes va ON va.event_id = e.id
-    WHERE e.server_id = p.server_id
+    WHERE (e.server_id = p.server_id OR e.camera_id = p.camera_id)
       AND (
         e.remote_id = p.remote_event_id
         OR e.detection_ids @> ARRAY[p.remote_event_id]
@@ -819,7 +856,7 @@ LEFT JOIN LATERAL (
           AND e.start_time <= (p.seen_at + interval '20 seconds')
         )
       )
-    ORDER BY (va.event_id IS NOT NULL) DESC, e.start_time DESC
+    ORDER BY (va.event_id IS NOT NULL AND (va.brand <> '' OR va.model <> '' OR (va.vehicle_color <> '' AND va.vehicle_color <> 'unknown'))) DESC, (va.event_id IS NOT NULL) DESC, e.start_time DESC
     LIMIT 1
 ) ev ON true`
 		var q string
@@ -862,10 +899,22 @@ LIMIT $%d`, limitPh)
 			r.CropKey = cropKey
 			r.HasCrop = cropKey != ""
 			r.SnapshotKey = snapshotKey
-			if vType != nil && vColor != nil && vQuality != nil && vTypeConf != nil && vColorConf != nil {
-				r.Vehicle = &VehicleAttr{
-					Type: *vType, TypeConfidence: *vTypeConf,
-					Color: *vColor, ColorConfidence: *vColorConf, ColorQuality: *vQuality,
+			if vType != nil || vColor != nil || brand != nil || model != nil {
+				r.Vehicle = &VehicleAttr{}
+				if vType != nil {
+					r.Vehicle.Type = *vType
+				}
+				if vTypeConf != nil {
+					r.Vehicle.TypeConfidence = *vTypeConf
+				}
+				if vColor != nil {
+					r.Vehicle.Color = *vColor
+				}
+				if vColorConf != nil {
+					r.Vehicle.ColorConfidence = *vColorConf
+				}
+				if vQuality != nil {
+					r.Vehicle.ColorQuality = *vQuality
 				}
 				if trailer != nil {
 					r.Vehicle.TrailerColor = *trailer

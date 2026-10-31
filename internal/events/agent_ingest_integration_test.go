@@ -659,3 +659,107 @@ func TestAgentIngestStoresLPRSnapshotsAndVehicleAttributes(t *testing.T) {
 	}
 }
 
+func TestAgentIngestNormalizesAndEnrichesVehicleAttributes(t *testing.T) {
+	w := newIngestWorld(t)
+	blobs := &fakeBlobs{}
+	w.ing.Blobs = blobs
+	ctx := context.Background()
+
+	colorBlanco := "Blanco"
+	brandFord := "Ford"
+	modelFocus := "Focus"
+	vTypeSedan := "sedan"
+
+	w.agent.addEvent(provision.LPRAgentEvent{
+		CameraID:     w.camA.String(),
+		Plate:        "AF123CD",
+		EventType:    "lpr",
+		VehicleColor: &colorBlanco,
+		VehicleBrand: &brandFord,
+		VehicleModel: &modelFocus,
+		VehicleType:  &vTypeSedan,
+		EventTime:    t0,
+		ReceivedTime: t0,
+	})
+
+	if err := w.ing.IngestServer(ctx, w.server, w.tenant); err != nil {
+		t.Fatalf("IngestServer: %v", err)
+	}
+
+	var evID uuid.UUID
+	err := w.st.TxRaw(ctx, store.AllTenants, func(tx pgx.Tx) error {
+		return tx.QueryRow(ctx, `SELECT id FROM events WHERE server_id = $1 AND plates @> ARRAY['AF123CD']`, w.server).
+			Scan(&evID)
+	})
+	if err != nil {
+		t.Fatalf("query events: %v", err)
+	}
+
+	var vaType, vaColor, vaBrand, vaModel string
+	err = w.st.TxRaw(ctx, store.AllTenants, func(tx pgx.Tx) error {
+		return tx.QueryRow(ctx, `SELECT vehicle_type, vehicle_color, brand, model FROM vehicle_attributes WHERE event_id = $1`, evID).
+			Scan(&vaType, &vaColor, &vaBrand, &vaModel)
+	})
+	if err != nil {
+		t.Fatalf("query vehicle_attributes: %v", err)
+	}
+	if vaType != "sedan" || vaColor != "white" || vaBrand != "Ford" || vaModel != "Focus" {
+		t.Errorf("vehicle_attributes got type=%q color=%q brand=%q model=%q, want sedan, white, Ford, Focus",
+			vaType, vaColor, vaBrand, vaModel)
+	}
+
+	// Now simulate an existing Frigate event created 5 seconds earlier for plate "AG456HI" with empty vehicle attributes
+	frigateEvID := uuid.New()
+	tPlate := t0.Add(5 * time.Second)
+	err = w.st.TxRaw(ctx, store.AllTenants, func(tx pgx.Tx) error {
+		_, err := tx.Exec(ctx, `
+INSERT INTO events (id, tenant_id, site_id, server_id, camera_id, remote_id, severity, labels, plates, start_time, reviewed)
+VALUES ($1, $2, $3, $4, $5, 'frigate-event-1', 'alert', '{car}', ARRAY['AG456HI'], $6, false)`,
+			frigateEvID, w.tenant, w.site, w.server, w.camA, tPlate)
+		if err != nil {
+			return err
+		}
+		_, err = tx.Exec(ctx, `
+INSERT INTO vehicle_attributes (event_id, tenant_id, site_id, camera_id, vehicle_type, vehicle_color, brand, model)
+VALUES ($1, $2, $3, $4, 'unknown', 'unknown', '', '')`,
+			frigateEvID, w.tenant, w.site, w.camA)
+		return err
+	})
+	if err != nil {
+		t.Fatalf("insert existing frigate event: %v", err)
+	}
+
+	// Agent sends an LPR read with Provision color "Gris" and brand "Chevrolet" / "Cruze"
+	colorGris := "Gris"
+	brandChevy := "Chevrolet"
+	modelCruze := "Cruze"
+	w.agent.addEvent(provision.LPRAgentEvent{
+		CameraID:     w.camA.String(),
+		Plate:        "AG456HI",
+		EventType:    "lpr",
+		VehicleColor: &colorGris,
+		VehicleBrand: &brandChevy,
+		VehicleModel: &modelCruze,
+		EventTime:    tPlate.Add(1 * time.Second),
+		ReceivedTime: tPlate.Add(1 * time.Second),
+	})
+
+	if err := w.ing.IngestServer(ctx, w.server, w.tenant); err != nil {
+		t.Fatalf("IngestServer 2: %v", err)
+	}
+
+	// Verify the existing Frigate event's vehicle_attributes got cross-enriched!
+	var fType, fColor, fBrand, fModel string
+	err = w.st.TxRaw(ctx, store.AllTenants, func(tx pgx.Tx) error {
+		return tx.QueryRow(ctx, `SELECT vehicle_type, vehicle_color, brand, model FROM vehicle_attributes WHERE event_id = $1`, frigateEvID).
+			Scan(&fType, &fColor, &fBrand, &fModel)
+	})
+	if err != nil {
+		t.Fatalf("query frigate vehicle_attributes: %v", err)
+	}
+	if fColor != "gray" || fBrand != "Chevrolet" || fModel != "Cruze" {
+		t.Errorf("frigate vehicle_attributes after cross-enrichment got type=%q color=%q brand=%q model=%q, want color=gray, brand=Chevrolet, model=Cruze",
+			fType, fColor, fBrand, fModel)
+	}
+}
+
