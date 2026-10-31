@@ -38,6 +38,25 @@ func TestDiscoverConnKeepsOnlySameHostServices(t *testing.T) {
 	}
 }
 
+// A camera (observed: Provision-ISR) advertises its media services with an explicit default port
+// `:80` while its device endpoint omits it. That is the same authority and must be accepted; the
+// host check still has to reject a genuinely different host.
+func TestDiscoverConnAcceptsExplicitDefaultPortOnSameHost(t *testing.T) {
+	transport := roundTripFunc(func(*http.Request) (*http.Response, error) {
+		return response(200, `<s:Envelope xmlns:s="http://www.w3.org/2003/05/soap-envelope" xmlns:tds="http://www.onvif.org/ver10/device/wsdl"><s:Body><tds:GetServicesResponse>`+
+			`<tds:Service><tds:Namespace>http://www.onvif.org/ver10/media/wsdl</tds:Namespace><tds:XAddr>http://10.0.0.5:80/onvif/media</tds:XAddr></tds:Service>`+
+			`<tds:Service><tds:Namespace>http://www.onvif.org/ver20/media/wsdl</tds:Namespace><tds:XAddr>http://10.0.0.5:80/onvif/media2</tds:XAddr></tds:Service>`+
+			`</tds:GetServicesResponse></s:Body></s:Envelope>`), nil
+	})
+	conn, err := DiscoverConn(context.Background(), NewClient(transport, Config{Timeout: time.Second}), "http://10.0.0.5/onvif/device_service")
+	if err != nil {
+		t.Fatalf("the explicit default port must match the device host: %v", err)
+	}
+	if conn.Media.String() != "http://10.0.0.5:80/onvif/media" || conn.Media2.String() != "http://10.0.0.5:80/onvif/media2" {
+		t.Fatalf("same-host default-port services not accepted: %+v", conn)
+	}
+}
+
 func TestPrivateAddr(t *testing.T) {
 	for addr, want := range map[string]bool{
 		"192.168.1.20": true, "10.1.2.3": true, "172.16.0.9": true, "100.64.0.1": true,

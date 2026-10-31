@@ -113,38 +113,67 @@ func ProfileStreams(ctx context.Context, conn Conn) ([]ProfileStream, error) {
 	if err := conn.check(); err != nil {
 		return nil, err
 	}
-	var raw []rawProfile
-	service := conn.service()
-	if conn.useMedia2() {
-		data, err := conn.media2().call(ctx, "GetProfiles", "<tr2:Type>All</tr2:Type>", ReadOnly)
-		if err != nil {
-			return nil, err
-		}
-		var response struct {
-			Profiles []rawProfile `xml:"Profiles"`
-		}
-		if err := decodeNamespacedOperation(data, media2Namespace, "GetProfilesResponse", &response); err != nil {
-			return nil, &CallError{Status: StatusFailed, Code: "invalid_profiles"}
-		}
-		raw = response.Profiles
-	} else {
-		data, err := conn.media1().call(ctx, "GetProfiles", "", ReadOnly)
-		if err != nil {
-			return nil, err
-		}
-		var response struct {
-			Profiles []rawProfile `xml:"Profiles"`
-		}
-		if err := decodeMediaOperation(data, "GetProfilesResponse", &response); err != nil {
-			return nil, &CallError{Status: StatusFailed, Code: "invalid_profiles"}
-		}
-		raw = response.Profiles
+	raw, service, err := fetchRawProfiles(ctx, conn)
+	if err != nil {
+		return nil, err
 	}
 	out := make([]ProfileStream, 0, len(raw))
 	for _, p := range raw {
 		out = append(out, p.toStream(service))
 	}
 	return out, nil
+}
+
+// fetchRawProfiles reads the stream profiles and the media service that produced them. It prefers
+// Media2, asking for every configuration with Type=All. Some cameras (observed on Provision-ISR
+// firmware) answer that Media2 call with a SOAP fault even though they serve Media1; when a second
+// service is available the read is retried there, because Media1 GetProfiles returns the full video
+// encoder configuration with no Type parameter. It falls back only on error, and a device offering
+// a single service keeps its original behaviour and error.
+func fetchRawProfiles(ctx context.Context, conn Conn) ([]rawProfile, string, error) {
+	if conn.useMedia2() {
+		raw, err := media2Profiles(ctx, conn)
+		if err == nil {
+			return raw, "media2", nil
+		}
+		if conn.Media.value == "" {
+			return nil, "media2", err
+		}
+		if raw, merr := media1Profiles(ctx, conn); merr == nil {
+			return raw, "media1", nil
+		}
+		return nil, "media2", err
+	}
+	raw, err := media1Profiles(ctx, conn)
+	return raw, "media1", err
+}
+
+func media2Profiles(ctx context.Context, conn Conn) ([]rawProfile, error) {
+	data, err := conn.media2().call(ctx, "GetProfiles", "<tr2:Type>All</tr2:Type>", ReadOnly)
+	if err != nil {
+		return nil, err
+	}
+	var response struct {
+		Profiles []rawProfile `xml:"Profiles"`
+	}
+	if err := decodeNamespacedOperation(data, media2Namespace, "GetProfilesResponse", &response); err != nil {
+		return nil, &CallError{Status: StatusFailed, Code: "invalid_profiles"}
+	}
+	return response.Profiles, nil
+}
+
+func media1Profiles(ctx context.Context, conn Conn) ([]rawProfile, error) {
+	data, err := conn.media1().call(ctx, "GetProfiles", "", ReadOnly)
+	if err != nil {
+		return nil, err
+	}
+	var response struct {
+		Profiles []rawProfile `xml:"Profiles"`
+	}
+	if err := decodeMediaOperation(data, "GetProfilesResponse", &response); err != nil {
+		return nil, &CallError{Status: StatusFailed, Code: "invalid_profiles"}
+	}
+	return response.Profiles, nil
 }
 
 func findProfile(ctx context.Context, conn Conn, profileToken string) (ProfileStream, error) {

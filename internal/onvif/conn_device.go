@@ -6,6 +6,7 @@ import (
 	"net"
 	"net/http"
 	"net/netip"
+	"net/url"
 	"strings"
 	"syscall"
 	"time"
@@ -75,11 +76,24 @@ func hostOf(raw string) string {
 	if err != nil {
 		return ""
 	}
-	rest := strings.TrimPrefix(strings.TrimPrefix(ep.String(), "https://"), "http://")
-	if i := strings.IndexAny(rest, "/?"); i >= 0 {
-		rest = rest[:i]
+	u, err := url.Parse(ep.String())
+	if err != nil {
+		return ""
 	}
-	return strings.ToLower(rest)
+	host := strings.ToLower(u.Hostname())
+	port := u.Port()
+	// An explicit scheme-default port (`http://host:80`, `https://host:443`) is the same authority
+	// as an endpoint that omits it: cameras (observed: Provision-ISR) advertise their services as
+	// `:80` while the device endpoint leaves the port off, and rejecting that broke DiscoverConn.
+	// Any other port is kept, so a service on a different host or port is still refused and the
+	// check remains a real host guard.
+	if (u.Scheme == "http" && port == "80") || (u.Scheme == "https" && port == "443") {
+		port = ""
+	}
+	if port != "" {
+		return host + ":" + port
+	}
+	return host
 }
 
 var cgnat = netip.MustParsePrefix("100.64.0.0/10")
