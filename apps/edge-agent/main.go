@@ -398,6 +398,7 @@ func buildMuxWithAuth(auth *authenticator, variant string, sampler *agent.Sample
 		mux.Handle("POST /v1/onvif/reboot", control(opsHandler.HandleReboot))
 		mux.Handle("POST /v1/onvif/imaging", control(opsHandler.HandleImaging))
 		mux.Handle("POST /v1/onvif/snapshot", control(opsHandler.HandleSnapshot))
+		mux.Handle("POST /v1/onvif/pull-events", control(opsHandler.HandlePullEvents))
 	}
 	if lprHandler != nil {
 		mountProvisionLPR(mux, auth, lprHandler)
