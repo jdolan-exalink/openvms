@@ -26,6 +26,7 @@ import (
 	"github.com/jdolan-exalink/openvms/internal/provision"
 	"github.com/jdolan-exalink/openvms/internal/rules"
 	"github.com/jdolan-exalink/openvms/internal/search"
+	"github.com/jdolan-exalink/openvms/internal/store"
 	"github.com/jdolan-exalink/openvms/internal/visionai"
 )
 
@@ -46,6 +47,7 @@ type SessionConnTracker interface {
 
 // Handlers implements gen.StrictServerInterface. Each module adds its methods in its own file.
 type Handlers struct {
+	Store           *store.Store
 	Inv             *inventory.Service
 	Provision       *provision.Service
 	CameraWeb       *camweb.Service

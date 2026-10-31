@@ -3029,6 +3029,94 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/lpr/watchlists": {
+        parameters: {
+            query?: {
+                /** @description Optional. Act on specific tenant for platform admins. */
+                tenant_id?: string;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** List LPR watchlists (lpr.view) */
+        get: operations["listLprWatchlists"];
+        put?: never;
+        /** Create an LPR watchlist (lpr.manage) */
+        post: operations["createLprWatchlist"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/lpr/watchlists/{watchlistId}": {
+        parameters: {
+            query?: {
+                tenant_id?: string;
+            };
+            header?: never;
+            path: {
+                watchlistId: string;
+            };
+            cookie?: never;
+        };
+        /** Get one LPR watchlist (lpr.view) */
+        get: operations["getLprWatchlist"];
+        put?: never;
+        post?: never;
+        /** Delete an LPR watchlist (lpr.manage) */
+        delete: operations["deleteLprWatchlist"];
+        options?: never;
+        head?: never;
+        /** Update an LPR watchlist (lpr.manage) */
+        patch: operations["updateLprWatchlist"];
+        trace?: never;
+    };
+    "/api/v1/lpr/watchlists/{watchlistId}/items": {
+        parameters: {
+            query?: {
+                tenant_id?: string;
+            };
+            header?: never;
+            path: {
+                watchlistId: string;
+            };
+            cookie?: never;
+        };
+        /** List items in an LPR watchlist (lpr.view) */
+        get: operations["listLprWatchlistItems"];
+        put?: never;
+        /** Add or update an item in an LPR watchlist (lpr.manage) */
+        post: operations["addLprWatchlistItem"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/lpr/watchlists/{watchlistId}/items/{itemId}": {
+        parameters: {
+            query?: {
+                tenant_id?: string;
+            };
+            header?: never;
+            path: {
+                watchlistId: string;
+                itemId: string;
+            };
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post?: never;
+        /** Remove an item from an LPR watchlist (lpr.manage) */
+        delete: operations["removeLprWatchlistItem"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/auth/login": {
         parameters: {
             query?: never;
@@ -7110,10 +7198,68 @@ export interface components {
             vehicle?: components["schemas"]["VehicleAttributes"];
             /** @description True when the license plate crop is permanently archived in OpenVMS object storage. */
             has_crop?: boolean;
+            /** @description Watchlists this plate read matched. */
+            watchlists?: components["schemas"]["LprWatchlistSummary"][];
         };
         PlateReadPage: {
             items: components["schemas"]["PlateRead"][];
             next_cursor?: string;
+        };
+        LprWatchlistSummary: {
+            /** Format: uuid */
+            id: string;
+            name: string;
+            color: string;
+        };
+        LprWatchlist: {
+            /** Format: uuid */
+            id: string;
+            /** Format: uuid */
+            tenant_id: string;
+            name: string;
+            description: string;
+            color: string;
+            item_count: number;
+            /** Format: date-time */
+            created_at: string;
+            /** Format: date-time */
+            updated_at: string;
+        };
+        LprWatchlistCreate: {
+            name: string;
+            description?: string;
+            color?: string;
+        };
+        LprWatchlistUpdate: {
+            name?: string;
+            description?: string;
+            color?: string;
+        };
+        LprWatchlistItem: {
+            /** Format: uuid */
+            id: string;
+            /** Format: uuid */
+            tenant_id: string;
+            /** Format: uuid */
+            watchlist_id: string;
+            plate: string;
+            notes?: string;
+            vehicle_brand?: string;
+            vehicle_model?: string;
+            vehicle_color?: string;
+            owner_name?: string;
+            /** Format: date-time */
+            created_at: string;
+            /** Format: date-time */
+            updated_at: string;
+        };
+        LprWatchlistItemCreate: {
+            plate: string;
+            notes?: string;
+            vehicle_brand?: string;
+            vehicle_model?: string;
+            vehicle_color?: string;
+            owner_name?: string;
         };
         /** @enum {string} */
         ClipWatermarkJobStatus: "queued" | "running" | "done" | "failed";
@@ -7642,6 +7788,8 @@ export interface components {
             face_person_ids?: string[];
             /** @description Event rules only. Match events whose recognized face belongs to any person of these watchlists, resolved when the event is evaluated. */
             face_watchlist_ids?: string[];
+            /** @description Event rules only. Match events whose license plate belongs to any of these watchlists, resolved when the event is evaluated. */
+            lpr_watchlist_ids?: string[];
             schedule?: components["schemas"]["RuleSchedule"];
             /** @description Event rules only. Quiet period per rule and camera after firing; 0 or unset uses the 300 second default. */
             cooldown_seconds?: number;
@@ -13220,6 +13368,242 @@ export interface operations {
             403: components["responses"]["Forbidden"];
             404: components["responses"]["NotFound"];
             409: components["responses"]["Conflict"];
+        };
+    };
+    listLprWatchlists: {
+        parameters: {
+            query?: {
+                /** @description Optional. Act on specific tenant for platform admins. */
+                tenant_id?: string;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Watchlists */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        items: components["schemas"]["LprWatchlist"][];
+                    };
+                };
+            };
+            400: components["responses"]["BadRequest"];
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+        };
+    };
+    createLprWatchlist: {
+        parameters: {
+            query?: {
+                /** @description Optional. Act on specific tenant for platform admins. */
+                tenant_id?: string;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["LprWatchlistCreate"];
+            };
+        };
+        responses: {
+            /** @description Created */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["LprWatchlist"];
+                };
+            };
+            400: components["responses"]["BadRequest"];
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            409: components["responses"]["Conflict"];
+        };
+    };
+    getLprWatchlist: {
+        parameters: {
+            query?: {
+                tenant_id?: string;
+            };
+            header?: never;
+            path: {
+                watchlistId: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Watchlist */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["LprWatchlist"];
+                };
+            };
+            400: components["responses"]["BadRequest"];
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+        };
+    };
+    deleteLprWatchlist: {
+        parameters: {
+            query?: {
+                tenant_id?: string;
+            };
+            header?: never;
+            path: {
+                watchlistId: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Deleted */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            400: components["responses"]["BadRequest"];
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+            409: components["responses"]["Conflict"];
+        };
+    };
+    updateLprWatchlist: {
+        parameters: {
+            query?: {
+                tenant_id?: string;
+            };
+            header?: never;
+            path: {
+                watchlistId: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["LprWatchlistUpdate"];
+            };
+        };
+        responses: {
+            /** @description Updated */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["LprWatchlist"];
+                };
+            };
+            400: components["responses"]["BadRequest"];
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+            409: components["responses"]["Conflict"];
+        };
+    };
+    listLprWatchlistItems: {
+        parameters: {
+            query?: {
+                tenant_id?: string;
+            };
+            header?: never;
+            path: {
+                watchlistId: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Watchlist items */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        items: components["schemas"]["LprWatchlistItem"][];
+                    };
+                };
+            };
+            400: components["responses"]["BadRequest"];
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+        };
+    };
+    addLprWatchlistItem: {
+        parameters: {
+            query?: {
+                tenant_id?: string;
+            };
+            header?: never;
+            path: {
+                watchlistId: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["LprWatchlistItemCreate"];
+            };
+        };
+        responses: {
+            /** @description Created */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["LprWatchlistItem"];
+                };
+            };
+            400: components["responses"]["BadRequest"];
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+        };
+    };
+    removeLprWatchlistItem: {
+        parameters: {
+            query?: {
+                tenant_id?: string;
+            };
+            header?: never;
+            path: {
+                watchlistId: string;
+                itemId: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Removed */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            400: components["responses"]["BadRequest"];
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
         };
     };
     login: {

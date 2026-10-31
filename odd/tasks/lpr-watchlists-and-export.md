@@ -27,7 +27,7 @@ Empower operators with two major LPR capabilities:
 - [x] Unit & integration tests in `internal/rules/`.
 
 ### Slice 4: REST API & OpenAPI Contract
-- [ ] OpenAPI endpoints in `packages/api-contract/openapi.yaml`:
+- [x] OpenAPI endpoints in `packages/api-contract/openapi.yaml`:
   - `GET /api/v1/lpr/watchlists`
   - `POST /api/v1/lpr/watchlists`
   - `GET /api/v1/lpr/watchlists/{id}`
@@ -35,8 +35,10 @@ Empower operators with two major LPR capabilities:
   - `DELETE /api/v1/lpr/watchlists/{id}`
   - `POST /api/v1/lpr/watchlists/{id}/items`
   - `DELETE /api/v1/lpr/watchlists/{id}/items/{itemId}`
-- [ ] Handlers in `internal/api/lpr_watchlist_handlers.go`.
-- [ ] Regeneration of `api.gen.go` and `schema.d.ts`.
+- [x] Handlers in `internal/api/lpr_watchlist_handlers.go`.
+- [x] Plate reads enriched with matched watchlists in `internal/api/events_handlers.go`.
+- [x] Regeneration of `api.gen.go` and `schema.d.ts`.
+- [x] API integration tests in `internal/api/lpr_watchlists_integration_test.go`.
 
 ### Slice 5: Web UI Management & Plate Badges
 - [ ] Watchlist manager dialog / tab in LPR interface.

@@ -3712,6 +3712,154 @@ paths:
         "403": { $ref: "#/components/responses/Forbidden" }
         "404": { $ref: "#/components/responses/NotFound" }
         "409": { $ref: "#/components/responses/Conflict" }
+  /api/v1/lpr/watchlists:
+    parameters:
+      - { name: tenant_id, in: query, schema: { type: string, format: uuid }, description: "Optional. Act on specific tenant for platform admins." }
+    get:
+      tags: [lpr]
+      operationId: listLprWatchlists
+      summary: List LPR watchlists (lpr.view)
+      responses:
+        "200":
+          description: Watchlists
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [items]
+                properties:
+                  items:
+                    type: array
+                    items: { $ref: "#/components/schemas/LprWatchlist" }
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+    post:
+      tags: [lpr]
+      operationId: createLprWatchlist
+      summary: Create an LPR watchlist (lpr.manage)
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/LprWatchlistCreate" }
+      responses:
+        "201":
+          description: Created
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/LprWatchlist" }
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "409": { $ref: "#/components/responses/Conflict" }
+  /api/v1/lpr/watchlists/{watchlistId}:
+    parameters:
+      - { name: watchlistId, in: path, required: true, schema: { type: string, format: uuid } }
+      - { name: tenant_id, in: query, schema: { type: string, format: uuid } }
+    get:
+      tags: [lpr]
+      operationId: getLprWatchlist
+      summary: Get one LPR watchlist (lpr.view)
+      responses:
+        "200":
+          description: Watchlist
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/LprWatchlist" }
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { $ref: "#/components/responses/NotFound" }
+    patch:
+      tags: [lpr]
+      operationId: updateLprWatchlist
+      summary: Update an LPR watchlist (lpr.manage)
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/LprWatchlistUpdate" }
+      responses:
+        "200":
+          description: Updated
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/LprWatchlist" }
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { $ref: "#/components/responses/NotFound" }
+        "409": { $ref: "#/components/responses/Conflict" }
+    delete:
+      tags: [lpr]
+      operationId: deleteLprWatchlist
+      summary: Delete an LPR watchlist (lpr.manage)
+      responses:
+        "204": { description: Deleted }
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { $ref: "#/components/responses/NotFound" }
+        "409": { $ref: "#/components/responses/Conflict" }
+  /api/v1/lpr/watchlists/{watchlistId}/items:
+    parameters:
+      - { name: watchlistId, in: path, required: true, schema: { type: string, format: uuid } }
+      - { name: tenant_id, in: query, schema: { type: string, format: uuid } }
+    get:
+      tags: [lpr]
+      operationId: listLprWatchlistItems
+      summary: List items in an LPR watchlist (lpr.view)
+      responses:
+        "200":
+          description: Watchlist items
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [items]
+                properties:
+                  items:
+                    type: array
+                    items: { $ref: "#/components/schemas/LprWatchlistItem" }
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { $ref: "#/components/responses/NotFound" }
+    post:
+      tags: [lpr]
+      operationId: addLprWatchlistItem
+      summary: Add or update an item in an LPR watchlist (lpr.manage)
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/LprWatchlistItemCreate" }
+      responses:
+        "201":
+          description: Created
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/LprWatchlistItem" }
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { $ref: "#/components/responses/NotFound" }
+  /api/v1/lpr/watchlists/{watchlistId}/items/{itemId}:
+    parameters:
+      - { name: watchlistId, in: path, required: true, schema: { type: string, format: uuid } }
+      - { name: itemId, in: path, required: true, schema: { type: string, format: uuid } }
+      - { name: tenant_id, in: query, schema: { type: string, format: uuid } }
+    delete:
+      tags: [lpr]
+      operationId: removeLprWatchlistItem
+      summary: Remove an item from an LPR watchlist (lpr.manage)
+      responses:
+        "204": { description: Removed }
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { $ref: "#/components/responses/NotFound" }
   /api/v1/auth/login:
     post:
       tags: [identity]
@@ -8581,6 +8729,10 @@ components:
         has_crop:
           type: boolean
           description: "True when the license plate crop is permanently archived in OpenVMS object storage."
+        watchlists:
+          type: array
+          items: { $ref: "#/components/schemas/LprWatchlistSummary" }
+          description: "Watchlists this plate read matched."
     PlateReadPage:
       type: object
       required: [items]
@@ -8589,6 +8741,63 @@ components:
           type: array
           items: { $ref: "#/components/schemas/PlateRead" }
         next_cursor: { type: string }
+    LprWatchlistSummary:
+      type: object
+      required: [id, name, color]
+      properties:
+        id: { type: string, format: uuid }
+        name: { type: string }
+        color: { type: string }
+    LprWatchlist:
+      type: object
+      required: [id, tenant_id, name, description, color, item_count, created_at, updated_at]
+      properties:
+        id: { type: string, format: uuid }
+        tenant_id: { type: string, format: uuid }
+        name: { type: string }
+        description: { type: string }
+        color: { type: string }
+        item_count: { type: integer }
+        created_at: { type: string, format: date-time }
+        updated_at: { type: string, format: date-time }
+    LprWatchlistCreate:
+      type: object
+      required: [name]
+      properties:
+        name: { type: string, minLength: 1, maxLength: 120 }
+        description: { type: string, maxLength: 500 }
+        color: { type: string, maxLength: 32 }
+    LprWatchlistUpdate:
+      type: object
+      properties:
+        name: { type: string, minLength: 1, maxLength: 120 }
+        description: { type: string, maxLength: 500 }
+        color: { type: string, maxLength: 32 }
+    LprWatchlistItem:
+      type: object
+      required: [id, tenant_id, watchlist_id, plate, created_at, updated_at]
+      properties:
+        id: { type: string, format: uuid }
+        tenant_id: { type: string, format: uuid }
+        watchlist_id: { type: string, format: uuid }
+        plate: { type: string }
+        notes: { type: string }
+        vehicle_brand: { type: string }
+        vehicle_model: { type: string }
+        vehicle_color: { type: string }
+        owner_name: { type: string }
+        created_at: { type: string, format: date-time }
+        updated_at: { type: string, format: date-time }
+    LprWatchlistItemCreate:
+      type: object
+      required: [plate]
+      properties:
+        plate: { type: string, minLength: 2, maxLength: 32 }
+        notes: { type: string, maxLength: 500 }
+        vehicle_brand: { type: string, maxLength: 100 }
+        vehicle_model: { type: string, maxLength: 100 }
+        vehicle_color: { type: string, maxLength: 50 }
+        owner_name: { type: string, maxLength: 120 }
     ClipWatermarkJobStatus:
       type: string
       enum: [queued, running, done, failed]
@@ -9101,6 +9310,11 @@ components:
           type: array
           maxItems: 100
           description: Event rules only. Match events whose recognized face belongs to any person of these watchlists, resolved when the event is evaluated.
+          items: { type: string, format: uuid }
+        lpr_watchlist_ids:
+          type: array
+          maxItems: 100
+          description: Event rules only. Match events whose license plate belongs to any of these watchlists, resolved when the event is evaluated.
           items: { type: string, format: uuid }
         schedule: { $ref: "#/components/schemas/RuleSchedule" }
         cooldown_seconds:
