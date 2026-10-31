@@ -119,7 +119,9 @@ func (a *v017) TrackedObjects(ctx context.Context, q ObjectQuery) ([]TrackedObje
 		}
 		for _, attr := range o.Data.Attributes {
 			if attr.Label == "license_plate" && len(attr.Box) == 4 {
-				t.PlateBox = attr.Box
+				// Frigate attr.Box is [left, top, width, height] normalized (0..1).
+				// Convert to OpenVMS standard [top, left, height, width]:
+				t.PlateBox = []float64{attr.Box[1], attr.Box[0], attr.Box[3], attr.Box[2]}
 				break
 			}
 		}
