@@ -297,6 +297,30 @@ func (a *AgentIngestor) storePage(ctx context.Context, serverID, tenantID uuid.U
 					score = &v
 				}
 
+				var pBox []float32
+				if len(e.Event.PlateBox) == 4 {
+					pBox = e.Event.PlateBox
+				} else {
+					pBox = []float32{}
+				}
+				subLabel := ""
+				if e.Event.ListStatus != nil {
+					subLabel = strings.TrimSpace(*e.Event.ListStatus)
+				}
+
+				// If crop is missing but snapshot and plate box are present, crop the plate directly
+				if cropKey == "" && len(pBox) == 4 && a.Blobs != nil && e.Event.PanoramicImage != nil {
+					if snapBytes, err := decodeBase64Image(*e.Event.PanoramicImage); err == nil && len(snapBytes) > 0 {
+						box64 := []float64{float64(pBox[0]), float64(pBox[1]), float64(pBox[2]), float64(pBox[3])}
+						if cropped, err := CropLicensePlate(snapBytes, box64); err == nil && len(cropped) > 0 {
+							cropKey = fmt.Sprintf("tenant/%s/plates/%s/%s.jpg", tenantID, serverID, e.ID)
+							if err := a.Blobs.Put(ctx, cropKey, cropped, "image/jpeg"); err != nil {
+								cropKey = ""
+							}
+						}
+					}
+				}
+
 				remoteEventID := agentReadPrefix + e.ID
 				var existingID uuid.UUID
 				err := tx.QueryRow(ctx, `
@@ -309,15 +333,17 @@ ORDER BY (server_id = $1 AND remote_event_id = $2) DESC, abs(extract(epoch from 
 LIMIT 1 FOR UPDATE`, serverID, remoteEventID, cam, plate, seen.UTC()).Scan(&existingID)
 
 				if err == nil {
-					// Existing read found: update crop, snapshot, score, crop_attempts
+					// Existing read found: update crop, snapshot, score, crop_attempts, sub_label, plate_box
 					tag, err := tx.Exec(ctx, `
 UPDATE lpr_reads SET
     crop_key = CASE WHEN $2 <> '' AND (crop_key = '' OR crop_key IS NULL) THEN $2 ELSE crop_key END,
     snapshot_key = CASE WHEN $3 <> '' AND (snapshot_key = '' OR snapshot_key IS NULL) THEN $3 ELSE snapshot_key END,
     crop_attempts = CASE WHEN $2 <> '' THEN GREATEST(crop_attempts, $4) ELSE crop_attempts END,
     score = CASE WHEN $5::real IS NOT NULL AND ($5::real > score OR score IS NULL) THEN $5::real ELSE score END,
+    sub_label = CASE WHEN $6 <> '' AND (sub_label = '' OR sub_label IS NULL) THEN $6 ELSE sub_label END,
+    plate_box = CASE WHEN array_length($7::real[], 1) = 4 THEN $7 ELSE plate_box END,
     updated_at = now()
-WHERE id = $1`, existingID, cropKey, snapKey, agentReadCropAttempts, score)
+WHERE id = $1`, existingID, cropKey, snapKey, agentReadCropAttempts, score, subLabel, pBox)
 					if err != nil {
 						return fmt.Errorf("update dedup agent reading %s: %w", e.ID, err)
 					}
@@ -326,13 +352,15 @@ WHERE id = $1`, existingID, cropKey, snapKey, agentReadCropAttempts, score)
 					}
 				} else if errors.Is(err, pgx.ErrNoRows) {
 					tag, err := tx.Exec(ctx, `
-INSERT INTO lpr_reads (tenant_id, site_id, server_id, camera_id, remote_event_id, plate, plate_normalized, score, label, sub_label, zones, seen_at, crop_attempts, crop_key, snapshot_key)
-VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, '', '{}', $10, $11, $12, $13)
+INSERT INTO lpr_reads (tenant_id, site_id, server_id, camera_id, remote_event_id, plate, plate_normalized, score, label, sub_label, zones, seen_at, crop_attempts, crop_key, snapshot_key, plate_box)
+VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, '{}', $11, $12, $13, $14, $15)
 ON CONFLICT (server_id, remote_event_id) DO UPDATE SET
     crop_key = CASE WHEN lpr_reads.crop_key = '' THEN EXCLUDED.crop_key ELSE lpr_reads.crop_key END,
     snapshot_key = CASE WHEN lpr_reads.snapshot_key = '' THEN EXCLUDED.snapshot_key ELSE lpr_reads.snapshot_key END,
+    sub_label = CASE WHEN lpr_reads.sub_label = '' THEN EXCLUDED.sub_label ELSE lpr_reads.sub_label END,
+    plate_box = CASE WHEN array_length(EXCLUDED.plate_box, 1) = 4 THEN EXCLUDED.plate_box ELSE lpr_reads.plate_box END,
     updated_at = now()`,
-						tenantID, siteID, serverID, cam, remoteEventID, e.Event.Plate, plate, score, agentReadLabel, seen.UTC(), agentReadCropAttempts, cropKey, snapKey)
+						tenantID, siteID, serverID, cam, remoteEventID, e.Event.Plate, plate, score, agentReadLabel, subLabel, seen.UTC(), agentReadCropAttempts, cropKey, snapKey, pBox)
 					if err != nil {
 						return fmt.Errorf("store agent reading %s: %w", e.ID, err)
 					}
@@ -351,6 +379,7 @@ ON CONFLICT (server_id, remote_event_id) DO UPDATE SET
 				sev = "detection"
 			}
 			var labels []string
+			var subLabels []string
 			switch eventType {
 			case "line_crossing":
 				labels = []string{"line_crossing"}
@@ -362,6 +391,20 @@ ON CONFLICT (server_id, remote_event_id) DO UPDATE SET
 				labels = []string{"person", "human"}
 			case "face":
 				labels = []string{"face"}
+				if e.Event.PersonName != nil && *e.Event.PersonName != "" {
+					subLabels = []string{*e.Event.PersonName}
+				}
+			case "people_counting":
+				sev = "detection"
+				labels = []string{"people_counting", "count"}
+				inC, outC := 0, 0
+				if e.Event.EnterCount != nil {
+					inC = *e.Event.EnterCount
+				}
+				if e.Event.ExitCount != nil {
+					outC = *e.Event.ExitCount
+				}
+				subLabels = []string{fmt.Sprintf("in:%d,out:%d", inC, outC)}
 			case "motion":
 				labels = []string{"motion"}
 			case "lpr":
@@ -384,14 +427,15 @@ ON CONFLICT (server_id, remote_event_id) DO UPDATE SET
 			err = tx.QueryRow(ctx, `
 INSERT INTO events (tenant_id, site_id, server_id, camera_id, remote_id, severity, labels, sub_labels, zones, audio,
                     detection_ids, start_time, reviewed, plates, has_snapshot, lpr, thumb_key)
-VALUES ($1, $2, $3, $4, $5, $6, coalesce($7::text[], '{}'), '{}', '{}', '{}',
-        $8, $9, false, coalesce($10::text[], '{}'), $11, $12, $13)
+VALUES ($1, $2, $3, $4, $5, $6, coalesce($7::text[], '{}'), coalesce($8::text[], '{}'), '{}', '{}',
+        $9, $10, false, coalesce($11::text[], '{}'), $12, $13, $14)
 ON CONFLICT (server_id, remote_id) DO UPDATE SET
     thumb_key = CASE WHEN events.thumb_key = '' THEN EXCLUDED.thumb_key ELSE events.thumb_key END,
+    sub_labels = CASE WHEN array_length(EXCLUDED.sub_labels, 1) > 0 THEN EXCLUDED.sub_labels ELSE events.sub_labels END,
     has_snapshot = events.has_snapshot OR EXCLUDED.has_snapshot,
     updated_at = now()
 RETURNING id, (xmax = 0)`,
-				tenantID, siteID, serverID, cam, agentReadPrefix+e.ID, sev, labels,
+				tenantID, siteID, serverID, cam, agentReadPrefix+e.ID, sev, labels, subLabels,
 				[]string{agentReadPrefix + e.ID}, seen.UTC(), plates, snapKey != "", plate != "" || eventType == "lpr", thumbKey).Scan(&evID, &isNew)
 			if err != nil {
 				return fmt.Errorf("store agent event %s: %w", e.ID, err)
@@ -464,6 +508,26 @@ WHERE va.event_id = e.id
   AND e.start_time >= ($7::timestamptz - interval '20 seconds')
   AND e.start_time <= ($7::timestamptz + interval '20 seconds')`,
 						brand, model, vColor, vType, cam, plate, seen.UTC())
+				}
+			}
+
+			// 4. Record face sighting for face analytics if crop or snapshot is available
+			if eventType == "face" && cropKey != "" {
+				sourceFile := fmt.Sprintf("agent:%s.jpg", e.ID)
+				sourceLabel := "face"
+				if e.Event.PersonName != nil && *e.Event.PersonName != "" {
+					sourceLabel = *e.Event.PersonName
+				}
+				_, err = tx.Exec(ctx, `
+INSERT INTO face_sightings (tenant_id, server_id, source_file, source_seen_at, source_label, source_score, crop_key, crop_content_type, review_status)
+VALUES ($1, $2, $3, $4, $5, $6, $7, 'image/jpeg', 'pending')
+ON CONFLICT (tenant_id, server_id, source_file) DO UPDATE SET
+    crop_key = CASE WHEN face_sightings.crop_key IS NULL OR face_sightings.crop_key = '' THEN EXCLUDED.crop_key ELSE face_sightings.crop_key END,
+    source_label = CASE WHEN EXCLUDED.source_label <> 'face' THEN EXCLUDED.source_label ELSE face_sightings.source_label END,
+    source_score = coalesce(EXCLUDED.source_score, face_sightings.source_score)`,
+					tenantID, serverID, sourceFile, seen.UTC(), sourceLabel, e.Event.FaceScore, cropKey)
+				if err != nil {
+					a.Log.WarnContext(ctx, "agent ingest: failed to record face sighting", "error", err, "event_id", e.ID)
 				}
 			}
 
