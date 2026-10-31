@@ -434,6 +434,86 @@ func (h *OpsHandler) HandleImaging(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
+type PullEventsRequest struct {
+	Endpoint            string `json:"endpoint"`
+	Username            string `json:"username"`
+	Password            string `json:"password"`
+	SubscriptionAddress string `json:"subscription_address,omitempty"`
+	TimeoutSeconds      int    `json:"timeout_seconds,omitempty"`
+	MessageLimit        int    `json:"message_limit,omitempty"`
+}
+
+type PullEventsResponse struct {
+	SubscriptionAddress string                    `json:"subscription_address"`
+	Notifications       []onvif.EventNotification `json:"notifications"`
+}
+
+func (h *OpsHandler) HandlePullEvents(w http.ResponseWriter, r *http.Request) {
+	if !h.authenticate(r) {
+		http.Error(w, "unauthorized", http.StatusUnauthorized)
+		return
+	}
+	if r.Method != http.MethodPost {
+		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+	var req PullEventsRequest
+	if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, maxProbeRequestBytes)).Decode(&req); err != nil {
+		http.Error(w, "invalid request body", http.StatusBadRequest)
+		return
+	}
+	endpoint, address, err := parseProbeEndpoint(req.Endpoint)
+	if err != nil || !h.allowed(address) || len(req.Username) > maxProbeUsernameBytes || len(req.Password) > maxProbePasswordBytes {
+		http.Error(w, "invalid or disallowed endpoint", http.StatusBadRequest)
+		return
+	}
+	if req.Username != "" && req.Password == "" {
+		http.Error(w, "invalid camera credentials", http.StatusBadRequest)
+		return
+	}
+
+	timeout := 10 * time.Second
+	if req.TimeoutSeconds > 0 && req.TimeoutSeconds < 60 {
+		timeout = time.Duration(req.TimeoutSeconds+5) * time.Second
+	}
+	ctx, cancel := context.WithTimeout(r.Context(), timeout)
+	defer cancel()
+
+	var credentials *onvif.Credentials
+	if req.Username != "" {
+		credentials = onvif.NewCredentials(req.Username, req.Password)
+	}
+	soapClient := onvif.NewClient(h.onvifTransport, onvif.Config{Timeout: timeout, Credentials: credentials})
+	eventsClient := onvif.NewEventsClient(soapClient, endpoint)
+
+	subAddr := req.SubscriptionAddress
+	if subAddr == "" {
+		sub, err := eventsClient.CreatePullPointSubscription(ctx, "PT10M")
+		if err != nil {
+			http.Error(w, "failed to create pullpoint subscription: "+err.Error(), http.StatusBadGateway)
+			return
+		}
+		subAddr = sub.SubscriptionAddress
+	}
+
+	subEndpoint, err := onvif.ParseEndpoint(subAddr)
+	if err != nil {
+		subEndpoint = endpoint
+	}
+
+	notifs, err := eventsClient.PullMessages(ctx, subEndpoint, req.TimeoutSeconds, req.MessageLimit)
+	if err != nil {
+		http.Error(w, "failed to pull messages: "+err.Error(), http.StatusBadGateway)
+		return
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	_ = json.NewEncoder(w).Encode(PullEventsResponse{
+		SubscriptionAddress: subAddr,
+		Notifications:       notifs,
+	})
+}
+
 func (h *OpsHandler) authenticate(r *http.Request) bool {
 	const prefix = "Bearer "
 	auth := r.Header.Get("Authorization")

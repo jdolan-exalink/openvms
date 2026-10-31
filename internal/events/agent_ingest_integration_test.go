@@ -763,3 +763,127 @@ VALUES ($1, $2, $3, $4, 'unknown', 'unknown', '', '')`,
 	}
 }
 
+func TestAgentIngestorPlateBoxAndSubLabel(t *testing.T) {
+	w := newIngestWorld(t)
+	ctx := context.Background()
+
+	listStatus := "whitelist"
+	w.agent.addEvent(provision.LPRAgentEvent{
+		CameraID:   w.camA.String(),
+		Plate:      "AA111BB",
+		EventType:  "lpr",
+		ListStatus: &listStatus,
+		PlateBox:   []float32{0.1, 0.2, 0.3, 0.4},
+		EventTime:  time.Now(),
+	})
+
+	if err := w.ing.IngestServer(ctx, w.server, w.tenant); err != nil {
+		t.Fatalf("IngestServer: %v", err)
+	}
+
+	var subLabel string
+	var pBox []float32
+	err := w.st.TxRaw(ctx, store.AllTenants, func(tx pgx.Tx) error {
+		return tx.QueryRow(ctx, `SELECT sub_label, plate_box FROM lpr_reads WHERE plate = 'AA111BB'`).
+			Scan(&subLabel, &pBox)
+	})
+	if err != nil {
+		t.Fatalf("query lpr_reads: %v", err)
+	}
+
+	if subLabel != "whitelist" {
+		t.Errorf("sub_label = %q, want 'whitelist'", subLabel)
+	}
+	if len(pBox) != 4 {
+		t.Fatalf("plate_box length = %d, want 4", len(pBox))
+	}
+	want := []float32{0.1, 0.2, 0.3, 0.4}
+	for i := range want {
+		diff := pBox[i] - want[i]
+		if diff < -0.01 || diff > 0.01 {
+			t.Errorf("plate_box[%d] = %v, want %v", i, pBox[i], want[i])
+		}
+	}
+}
+
+func TestAgentIngestorFaceAndPeopleCountingAnalytics(t *testing.T) {
+	w := newIngestWorld(t)
+	// Provide a fake memory blob storage to test crop saving and face_sightings
+	blobs := &fakeBlobs{}
+	w.ing.Blobs = blobs
+	ctx := context.Background()
+
+	// 1. Face event with PersonName and crop
+	personName := "Carlos Slim"
+	faceScore := 0.96
+	cropBase64 := base64.StdEncoding.EncodeToString([]byte("fake-jpeg-face-crop"))
+	tFace := time.Now()
+	w.agent.addEvent(provision.LPRAgentEvent{
+		CameraID:   w.camA.String(),
+		EventType:  "face",
+		PersonName: &personName,
+		FaceScore:  &faceScore,
+		PlateCrop:  &cropBase64,
+		EventTime:  tFace,
+	})
+
+	// 2. People counting event
+	enterCount := 12
+	exitCount := 5
+	w.agent.addEvent(provision.LPRAgentEvent{
+		CameraID:   w.camA.String(),
+		EventType:  "people_counting",
+		EnterCount: &enterCount,
+		ExitCount:  &exitCount,
+		EventTime:  tFace.Add(2 * time.Second),
+	})
+
+	if err := w.ing.IngestServer(ctx, w.server, w.tenant); err != nil {
+		t.Fatalf("IngestServer: %v", err)
+	}
+
+	// Verify Face event in `events`
+	var faceSubLabels []string
+	var faceLabels []string
+	err := w.st.TxRaw(ctx, store.AllTenants, func(tx pgx.Tx) error {
+		return tx.QueryRow(ctx, `SELECT labels, sub_labels FROM events WHERE camera_id = $1 AND labels @> '{face}'`, w.camA).
+			Scan(&faceLabels, &faceSubLabels)
+	})
+	if err != nil {
+		t.Fatalf("query face event: %v", err)
+	}
+	if len(faceSubLabels) != 1 || faceSubLabels[0] != "Carlos Slim" {
+		t.Errorf("face sub_labels = %v, want ['Carlos Slim']", faceSubLabels)
+	}
+
+	// Verify face sighting in `face_sightings`
+	var sLabel string
+	var sScore *float64
+	var sStatus string
+	err = w.st.TxRaw(ctx, store.AllTenants, func(tx pgx.Tx) error {
+		return tx.QueryRow(ctx, `SELECT source_label, source_score, review_status FROM face_sightings WHERE server_id = $1`, w.server).
+			Scan(&sLabel, &sScore, &sStatus)
+	})
+	if err != nil {
+		t.Fatalf("query face_sightings: %v", err)
+	}
+	if sLabel != "Carlos Slim" || sStatus != "pending" || sScore == nil || *sScore != 0.96 {
+		t.Errorf("face_sighting got label=%q status=%q score=%v, want 'Carlos Slim', 'pending', 0.96", sLabel, sStatus, sScore)
+	}
+
+	// Verify People Counting event in `events`
+	var countSubLabels []string
+	var countLabels []string
+	err = w.st.TxRaw(ctx, store.AllTenants, func(tx pgx.Tx) error {
+		return tx.QueryRow(ctx, `SELECT labels, sub_labels FROM events WHERE camera_id = $1 AND labels @> '{people_counting}'`, w.camA).
+			Scan(&countLabels, &countSubLabels)
+	})
+	if err != nil {
+		t.Fatalf("query people_counting event: %v", err)
+	}
+	if len(countSubLabels) != 1 || countSubLabels[0] != "in:12,out:5" {
+		t.Errorf("people_counting sub_labels = %v, want ['in:12,out:5']", countSubLabels)
+	}
+}
+
+

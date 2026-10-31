@@ -166,7 +166,7 @@ func TestBuildMuxFeatureRoutesRemainIsolated(t *testing.T) {
 		}
 		// The video-device and reboot operations are mounted with the control scope; a missing
 		// route would answer 404, which OpenVMS reads as "agent too old".
-		for _, path := range []string{"/v1/onvif/video-device", "/v1/onvif/reboot"} {
+		for _, path := range []string{"/v1/onvif/video-device", "/v1/onvif/reboot", "/v1/onvif/pull-events"} {
 			if got := post(mux, path, `{}`, "").Code; got != http.StatusUnauthorized {
 				t.Fatalf("%s without a token: got=%d, want 401", path, got)
 			}

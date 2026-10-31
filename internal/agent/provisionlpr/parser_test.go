@@ -391,3 +391,196 @@ func TestParserProvisionISRAlarmClearIgnored(t *testing.T) {
 	}
 }
 
+func TestParserPlateBoxXML(t *testing.T) {
+	parser := NewParser()
+	xmlPayload := []byte(`<?xml version="1.0" encoding="UTF-8" ?>
+<config version="1.7" xmlns="http://www.ipc.com/ver10">
+<plate>AF123BC</plate>
+<rect x="192" y="108" w="384" h="216" picWidth="1920" picHeight="1080"/>
+<deviceInfo>
+<deviceName><![CDATA[Cam-LPR]]></deviceName>
+<deviceNo.><![CDATA[1]]></deviceNo.>
+<ipAddress><![CDATA[10.0.15.107]]></ipAddress>
+</deviceInfo>
+</config>`)
+
+	req := httptest.NewRequest(http.MethodPost, "/", bytes.NewReader(xmlPayload))
+	req.Header.Set("Content-Type", "application/xml")
+	req.RemoteAddr = "10.0.15.107:54321"
+
+	event, err := parser.Parse(req, xmlPayload, time.Now())
+	if err != nil {
+		t.Fatalf("Parse error: %v", err)
+	}
+
+	if event.Plate != "AF123BC" {
+		t.Errorf("Plate = %q, want AF123BC", event.Plate)
+	}
+	if len(event.PlateBox) != 4 {
+		t.Fatalf("PlateBox length = %d, want 4", len(event.PlateBox))
+	}
+	// [top, left, height, width]
+	// top = 108/1080 = 0.1, left = 192/1920 = 0.1, height = 216/1080 = 0.2, width = 384/1920 = 0.2
+	want := []float32{0.1, 0.1, 0.2, 0.2}
+	for i := range want {
+		diff := event.PlateBox[i] - want[i]
+		if diff < -0.01 || diff > 0.01 {
+			t.Errorf("PlateBox[%d] = %v, want %v", i, event.PlateBox[i], want[i])
+		}
+	}
+}
+
+func TestParserPlateBoxJSON(t *testing.T) {
+	parser := NewParser()
+	jsonPayload := []byte(`{
+		"plate": "AE456CD",
+		"camera_id": "cam-gate",
+		"rect": {
+			"x": 0.15,
+			"y": 0.25,
+			"w": 0.30,
+			"h": 0.10
+		}
+	}`)
+
+	req := httptest.NewRequest(http.MethodPost, "/v1/lpr/event", bytes.NewReader(jsonPayload))
+	req.Header.Set("Content-Type", "application/json")
+	req.RemoteAddr = "10.0.15.107:54321"
+
+	event, err := parser.Parse(req, jsonPayload, time.Now())
+	if err != nil {
+		t.Fatalf("Parse error: %v", err)
+	}
+
+	if len(event.PlateBox) != 4 {
+		t.Fatalf("PlateBox length = %d, want 4", len(event.PlateBox))
+	}
+	// [top, left, height, width] -> [0.25, 0.15, 0.10, 0.30]
+	want := []float32{0.25, 0.15, 0.10, 0.30}
+	for i := range want {
+		diff := event.PlateBox[i] - want[i]
+		if diff < -0.01 || diff > 0.01 {
+			t.Errorf("PlateBox[%d] = %v, want %v", i, event.PlateBox[i], want[i])
+		}
+	}
+}
+
+func TestParserFaceAnalyticsXML(t *testing.T) {
+	parser := NewParser()
+	xmlPayload := []byte(`<?xml version="1.0" encoding="UTF-8" ?>
+<config version="1.7" xmlns="http://www.ipc.com/ver10">
+<alarmStatusInfo>
+<faceAlarm type="boolean" id="1">true</faceAlarm>
+</alarmStatusInfo>
+<personName><![CDATA[Maria Gomez]]></personName>
+<similarity>94.5</similarity>
+<faceID>face-77</faceID>
+<targetBase64Data><![CDATA[/9j/4FACE_CROP]]></targetBase64Data>
+<sourceBase64Data><![CDATA[/9j/4FULL_SCENE]]></sourceBase64Data>
+<deviceInfo>
+<deviceName><![CDATA[Cam-Facial]]></deviceName>
+<deviceNo.><![CDATA[2]]></deviceNo.>
+<ipAddress><![CDATA[10.0.15.109]]></ipAddress>
+</deviceInfo>
+</config>`)
+
+	req := httptest.NewRequest(http.MethodPost, "/", bytes.NewReader(xmlPayload))
+	req.Header.Set("Content-Type", "application/xml")
+	req.RemoteAddr = "10.0.15.109:54321"
+
+	event, err := parser.Parse(req, xmlPayload, time.Now())
+	if err != nil {
+		t.Fatalf("Parse error: %v", err)
+	}
+
+	if event.EventType != "face" {
+		t.Errorf("EventType = %q, want face", event.EventType)
+	}
+	if event.PersonName == nil || *event.PersonName != "Maria Gomez" {
+		t.Errorf("PersonName = %v, want 'Maria Gomez'", event.PersonName)
+	}
+	if event.FaceScore == nil || *event.FaceScore < 0.94 || *event.FaceScore > 0.95 {
+		t.Errorf("FaceScore = %v, want ~0.945", event.FaceScore)
+	}
+	if event.FaceID == nil || *event.FaceID != "face-77" {
+		t.Errorf("FaceID = %v, want 'face-77'", event.FaceID)
+	}
+	if event.PlateCrop == nil || *event.PlateCrop != "/9j/4FACE_CROP" {
+		t.Errorf("PlateCrop = %v, want /9j/4FACE_CROP", event.PlateCrop)
+	}
+}
+
+func TestParserPeopleCountingXML(t *testing.T) {
+	parser := NewParser()
+	xmlPayload := []byte(`<?xml version="1.0" encoding="UTF-8" ?>
+<config version="1.7" xmlns="http://www.ipc.com/ver10">
+<alarmStatusInfo>
+<peopleCountAlarm type="boolean" id="1">true</peopleCountAlarm>
+</alarmStatusInfo>
+<enterCount>14</enterCount>
+<exitCount>9</exitCount>
+<passCount>23</passCount>
+<deviceInfo>
+<deviceName><![CDATA[Cam-Pasillo]]></deviceName>
+<deviceNo.><![CDATA[4]]></deviceNo.>
+<ipAddress><![CDATA[10.0.15.110]]></ipAddress>
+</deviceInfo>
+</config>`)
+
+	req := httptest.NewRequest(http.MethodPost, "/", bytes.NewReader(xmlPayload))
+	req.Header.Set("Content-Type", "application/xml")
+	req.RemoteAddr = "10.0.15.110:54321"
+
+	event, err := parser.Parse(req, xmlPayload, time.Now())
+	if err != nil {
+		t.Fatalf("Parse error: %v", err)
+	}
+
+	if event.EventType != "people_counting" {
+		t.Errorf("EventType = %q, want people_counting", event.EventType)
+	}
+	if event.EnterCount == nil || *event.EnterCount != 14 {
+		t.Errorf("EnterCount = %v, want 14", event.EnterCount)
+	}
+	if event.ExitCount == nil || *event.ExitCount != 9 {
+		t.Errorf("ExitCount = %v, want 9", event.ExitCount)
+	}
+	if event.PassCount == nil || *event.PassCount != 23 {
+		t.Errorf("PassCount = %v, want 23", event.PassCount)
+	}
+}
+
+func TestParserTVTCountPlaceholderPlate(t *testing.T) {
+	parser := NewParser()
+	xmlPayload := []byte(`<?xml version="1.0" encoding="UTF-8" ?>
+<config version="1.7" xmlns="http://www.ipc.com/ver10">
+<plate>COUNT</plate>
+<enterCount>5</enterCount>
+<exitCount>2</exitCount>
+<deviceInfo>
+<deviceName><![CDATA[Cam-Conteo]]></deviceName>
+<ipAddress><![CDATA[10.0.15.111]]></ipAddress>
+</deviceInfo>
+</config>`)
+
+	req := httptest.NewRequest(http.MethodPost, "/", bytes.NewReader(xmlPayload))
+	req.Header.Set("Content-Type", "application/xml")
+	req.RemoteAddr = "10.0.15.111:54321"
+
+	event, err := parser.Parse(req, xmlPayload, time.Now())
+	if err != nil {
+		t.Fatalf("Parse error: %v", err)
+	}
+
+	if event.Plate != "" {
+		t.Errorf("Plate = %q, want empty", event.Plate)
+	}
+	if event.EventType != "people_counting" {
+		t.Errorf("EventType = %q, want people_counting", event.EventType)
+	}
+	if event.EnterCount == nil || *event.EnterCount != 5 {
+		t.Errorf("EnterCount = %v, want 5", event.EnterCount)
+	}
+}
+
+

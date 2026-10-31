@@ -90,6 +90,15 @@ func TestOpsHandlerAuthAndEndpointValidation(t *testing.T) {
 			t.Errorf("status = %d, want 401", rec.Code)
 		}
 	})
+
+	t.Run("pull-events unauthorized", func(t *testing.T) {
+		req := httptest.NewRequest(http.MethodPost, "/v1/onvif/pull-events", bytes.NewReader([]byte(`{}`)))
+		rec := httptest.NewRecorder()
+		handler.HandlePullEvents(rec, req)
+		if rec.Code != http.StatusUnauthorized {
+			t.Errorf("status = %d, want 401", rec.Code)
+		}
+	})
 }
 
 func TestHandleSnapshotReturnsOnlyJPEGBytes(t *testing.T) {
