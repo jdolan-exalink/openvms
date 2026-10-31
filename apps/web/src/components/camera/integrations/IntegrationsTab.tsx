@@ -15,6 +15,7 @@ import {
 import { requestJson } from "@/api/client";
 import { Button } from "@/components/ui";
 import { cn } from "@/lib/cn";
+import { INTEGRATION_WHAT, integrationRemediation } from "./integrationHelp";
 
 export type IntegrationStatus = "connected" | "not_configured" | "error" | "unknown";
 
@@ -161,6 +162,8 @@ export function IntegrationsTab({ integrations, cameraId, readOnly }: Props) {
         const isTesting = testingTarget === i.id;
         const result = testResults[i.id];
         const error = errorNotes[i.id];
+        const what = INTEGRATION_WHAT[i.id];
+        const remediation = integrationRemediation(i.id, i.status);
 
         return (
           <li
@@ -213,7 +216,20 @@ export function IntegrationsTab({ integrations, cameraId, readOnly }: Props) {
               </div>
             </div>
 
+            {what && <p className="pl-6 text-[11px] leading-relaxed text-muted/70">{what}</p>}
+
             {i.detail && <p className="text-xs text-muted pl-6">{i.detail}</p>}
+
+            {remediation && (
+              <div className="ml-6 rounded border border-amber-500/20 bg-amber-500/5 p-2.5">
+                <p className="text-[11px] font-semibold text-amber-700 dark:text-amber-300">Cómo resolverlo</p>
+                <div className="mt-1 flex flex-col gap-1 text-[11px] leading-relaxed text-amber-700/90 dark:text-amber-300/90">
+                  {remediation.map((step) => (
+                    <p key={step}>{step}</p>
+                  ))}
+                </div>
+              </div>
+            )}
 
             {/* Test result diagnostics panel */}
             {result && (

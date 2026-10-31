@@ -94,4 +94,27 @@ describe("IntegrationsTab", () => {
     expect(await screen.findByText("Agente alcanzable")).toBeInTheDocument();
     expect(screen.getByText("Keepalive reciente")).toBeInTheDocument();
   });
+
+  it("explains what Provision ISR is and how to resolve its error", () => {
+    render(
+      <IntegrationsTab
+        integrations={[
+          { id: "provision_isr", label: "Provision ISR", status: "error", detail: "La cámara no está registrada en el agente" },
+        ]}
+      />,
+    );
+    expect(screen.getByText(/Analíticas y LPR que procesa la propia cámara Provision-ISR/)).toBeInTheDocument();
+    expect(screen.getByText("Cómo resolverlo")).toBeInTheDocument();
+    expect(screen.getByText(/Registrar cámara y preparar configuración/)).toBeInTheDocument();
+    expect(screen.getByText(/Configuración → Red → Configuración de Servidor/)).toBeInTheDocument();
+  });
+
+  it("does not offer remediation when an integration is connected", () => {
+    render(
+      <IntegrationsTab
+        integrations={[{ id: "provision_isr", label: "Provision ISR", status: "connected" }]}
+      />,
+    );
+    expect(screen.queryByText("Cómo resolverlo")).toBeNull();
+  });
 });
