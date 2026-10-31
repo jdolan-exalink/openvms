@@ -1,6 +1,12 @@
-import { render, screen, within } from "@testing-library/react";
-import { describe, expect, it } from "vitest";
+import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
+import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
+import { describe, expect, it, vi } from "vitest";
 import { IntegrationsTab } from "./IntegrationsTab";
+
+function renderWithClient(ui: React.ReactElement) {
+  const qc = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+  return render(<QueryClientProvider client={qc}>{ui}</QueryClientProvider>);
+}
 
 describe("IntegrationsTab", () => {
   it("shows the status of each backend integration", () => {
@@ -40,5 +46,52 @@ describe("IntegrationsTab", () => {
     expect(screen.getByText("Cargando integraciones…")).toBeTruthy();
     rerender(<IntegrationsTab integrations={[]} />);
     expect(screen.getByText("Sin información de integraciones.")).toBeTruthy();
+  });
+
+  it("renders the 4 granular service controls and offers testing buttons", async () => {
+    const fetchSpy = vi.spyOn(globalThis, "fetch").mockResolvedValueOnce(
+      new Response(
+        JSON.stringify({
+          target: "lpr_provision",
+          engine: "provision",
+          passed: true,
+          checks: [
+            { id: "agent_reachable", status: "pass", message: "Agente alcanzable", detail: "OK" },
+            { id: "keepalive_recent", status: "pass", message: "Keepalive reciente", detail: "hace 5s" },
+          ],
+          hints: [],
+          observed: { keepalive_count: 12 },
+        }),
+        { status: 200, headers: { "Content-Type": "application/json" } },
+      ),
+    );
+
+    renderWithClient(
+      <IntegrationsTab
+        cameraId="c1"
+        integrations={[
+          { id: "lpr_provision", label: "LPR Provision-ISR", status: "connected", detail: "En línea con el agente" },
+          { id: "analytics_provision", label: "Analíticas Provision", status: "connected", detail: "Analítica inteligente Profile M soportada" },
+          { id: "analytics_frigate", label: "Analíticas Frigate", status: "connected", detail: "Detección activa en Frigate" },
+          { id: "lpr_frigate", label: "LPR Frigate", status: "not_configured", detail: "No configurado" },
+        ]}
+      />,
+    );
+
+    expect(screen.getByText("LPR Provision-ISR")).toBeInTheDocument();
+    expect(screen.getByText("Analíticas Provision")).toBeInTheDocument();
+    expect(screen.getByText("Analíticas Frigate")).toBeInTheDocument();
+    expect(screen.getByText("LPR Frigate")).toBeInTheDocument();
+
+    const provBtn = within(screen.getByTestId("integration-lpr_provision")).getByRole("button", { name: /Probar/i });
+    expect(provBtn).toBeInTheDocument();
+
+    fireEvent.click(provBtn);
+
+    await waitFor(() => {
+      expect(fetchSpy).toHaveBeenCalled();
+    });
+    expect(await screen.findByText("Agente alcanzable")).toBeInTheDocument();
+    expect(screen.getByText("Keepalive reciente")).toBeInTheDocument();
   });
 });

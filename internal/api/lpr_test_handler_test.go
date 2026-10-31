@@ -281,3 +281,35 @@ func TestTestCameraLprNilBodyMeansNoWait(t *testing.T) {
 		t.Fatalf("status calls = %d, want 1 (no polling)", src.agent.calls)
 	}
 }
+
+func TestTestCameraAnalyticsHandlerTargets(t *testing.T) {
+	src := newLPRSource("provision")
+	h := &Handlers{lprTest: src}
+
+	targets := []string{"lpr_provision", "analytics_provision", "analytics_frigate", "lpr_frigate"}
+	for _, target := range targets {
+		t.Run(target, func(t *testing.T) {
+			targetEnum := gen.CameraAnalyticsTestRequestTarget(target)
+			resp, err := h.TestCameraAnalytics(testActorCtx(), gen.TestCameraAnalyticsRequestObject{
+				CameraId: src.cam.ID,
+				Body: &gen.TestCameraAnalyticsJSONRequestBody{
+					Target: &targetEnum,
+				},
+			})
+			if err != nil {
+				t.Fatalf("TestCameraAnalytics error: %v", err)
+			}
+			ok, isOK := resp.(gen.TestCameraAnalytics200JSONResponse)
+			if !isOK {
+				t.Fatalf("expected 200 response, got %T", resp)
+			}
+			res := gen.CameraAnalyticsTest(ok)
+			if res.Target != target {
+				t.Errorf("target = %v, want %s", res.Target, target)
+			}
+			if len(res.Checks) == 0 {
+				t.Errorf("checks empty, want non-empty list")
+			}
+		})
+	}
+}

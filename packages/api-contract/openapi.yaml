@@ -2062,6 +2062,30 @@ paths:
         "403": { $ref: "#/components/responses/Forbidden" }
         "404": { $ref: "#/components/responses/NotFound" }
         "502": { $ref: "#/components/responses/FrigateUnreachable" }
+  /api/v1/cameras/{cameraId}/analytics/test:
+    parameters:
+      - { name: cameraId, in: path, required: true, schema: { type: string, format: uuid } }
+    post:
+      tags: [cameras]
+      operationId: testCameraAnalytics
+      summary: Check an analytics or LPR engine of a camera
+      description: Interactive test of an analytics or LPR service (lpr_provision, analytics_provision, analytics_frigate, lpr_frigate).
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/CameraAnalyticsTestRequest" }
+      responses:
+        "200":
+          description: Result of the checks
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/CameraAnalyticsTest" }
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { $ref: "#/components/responses/NotFound" }
+        "502": { $ref: "#/components/responses/FrigateUnreachable" }
   /api/v1/cameras/{cameraId}/onvif/snapshot:
     parameters:
       - { name: cameraId, in: path, required: true, schema: { type: string, format: uuid } }
@@ -6641,6 +6665,32 @@ components:
           type: array
           items: { type: string }
         observed: { $ref: "#/components/schemas/CameraLprTestObserved" }
+    CameraAnalyticsTestRequest:
+      type: object
+      properties:
+        target:
+          type: string
+          enum: [lpr_provision, analytics_provision, analytics_frigate, lpr_frigate]
+        wait_seconds:
+          type: integer
+          minimum: 0
+          maximum: 30
+    CameraAnalyticsTest:
+      type: object
+      required: [target, engine, passed, checks, hints, observed]
+      properties:
+        target: { type: string }
+        engine: { type: string }
+        passed: { type: boolean }
+        checks:
+          type: array
+          items: { $ref: "#/components/schemas/CameraLprTestCheck" }
+        hints:
+          type: array
+          items: { type: string }
+        observed:
+          type: object
+          additionalProperties: true
     CameraOnvifCheckRequest:
       type: object
       additionalProperties: false
@@ -7389,7 +7439,7 @@ components:
             properties:
               name: { type: string }
               enabled: { type: boolean }
-              id: { type: string, enum: [frigate, onvif, provision_isr] }
+              id: { type: string, enum: [frigate, onvif, provision_isr, lpr_provision, analytics_provision, analytics_frigate, lpr_frigate] }
               label: { type: string }
               status: { type: string, enum: [connected, not_configured, error, unknown] }
               detail: { type: string }
@@ -7486,12 +7536,13 @@ components:
       type: object
       required: [id, label, available, enabled, writable, engine, settings, advanced]
       properties:
-        id: { type: string, enum: [lpr, face_detection, face_recognition, vehicle_classification, vehicle_color, clothing_color, similar_search] }
+        id: { type: string, enum: [lpr, face_detection, face_recognition, line_crossing, intrusion, people_counting, vehicle_classification, vehicle_color, clothing_color, similar_search] }
         label: { type: string, example: Matrículas (LPR) }
+        origin_label: { type: string, example: Internas de Frigate }
         available: { type: boolean }
         enabled: { type: boolean }
         writable: { type: boolean, description: OpenVMS can switch the module through its engine }
-        engine: { type: string, enum: [frigate, provision, native, openvms, none] }
+        engine: { type: string, enum: [frigate, provision, onvif, native, openvms, none] }
         reason: { type: string, description: Why the module cannot be switched on from here, example No disponible con este motor }
         settings:
           type: object

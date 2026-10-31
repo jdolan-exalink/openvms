@@ -26,7 +26,6 @@ import { SyncStatusPanel } from "@/components/camera/SyncStatusPanel";
 import { CameraPreview } from "@/components/camera/CameraPreview";
 import { CameraSummaryCards } from "@/components/camera/CameraSummaryCards";
 import { AnalyticsTab } from "@/components/camera/analytics/AnalyticsTab";
-import { IntegrationsTab } from "@/components/camera/integrations/IntegrationsTab";
 import { CameraTabs } from "@/components/camera/CameraTabs";
 import { VideoTab } from "@/components/camera/video/VideoTab";
 import { CameraWebView } from "@/components/camera/CameraWebView";
@@ -584,8 +583,15 @@ function FrigateCameraConfigScreen({ cameraId }: { cameraId: string }) {
           <CameraGeneral cameraId={cameraId} canManage={canManageCamera} frigate={general} onApplyToFrigate={onApplyToFrigate} />
         ) : section === FISHEYE ? (
           <FisheyeTab cameraId={cameraId} cameraName={effectiveDoc.camera_name} canManage={!readOnly} />
-        ) : section === ANALYTICS_MODULES ? (
-          <AnalyticsTab cameraId={cameraId} modules={change.config.data?.analytics?.modules} patch={change.patch} setPatch={change.setPatch} readOnly={readOnly || !canCamera(me.data, "cameras.config.analytics")} />
+        ) : section === ANALYTICS_MODULES || section === INTEGRATIONS_STATUS ? (
+          <AnalyticsTab
+            cameraId={cameraId}
+            integrations={change.config.data?.integrations}
+            modules={change.config.data?.analytics?.modules}
+            patch={change.patch}
+            setPatch={change.setPatch}
+            readOnly={readOnly || !canCamera(me.data, "cameras.config.analytics")}
+          />
         ) : section === PROVISION ? (
           cam && (
             <ProvisionLprSection
@@ -596,8 +602,6 @@ function FrigateCameraConfigScreen({ cameraId }: { cameraId: string }) {
               }}
             />
           )
-        ) : section === INTEGRATIONS_STATUS ? (
-          <IntegrationsTab integrations={change.config.data?.integrations} />
         ) : section === CAMERA_WEB ? (
           <CameraWebView cameraId={cameraId} autoOpen />
         ) : section === PTZ_CONTROL && tab.id === "ptz" ? (

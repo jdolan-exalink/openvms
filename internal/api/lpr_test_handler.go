@@ -152,6 +152,128 @@ func (h *Handlers) TestCameraLpr(ctx context.Context, r gen.TestCameraLprRequest
 	return gen.TestCameraLpr200JSONResponse(lprTestResponse(res)), nil
 }
 
+// TestCameraAnalytics checks an analytics or LPR engine of a camera (lpr_provision, analytics_provision, analytics_frigate, lpr_frigate).
+func (h *Handlers) TestCameraAnalytics(ctx context.Context, r gen.TestCameraAnalyticsRequestObject) (gen.TestCameraAnalyticsResponseObject, error) {
+	a, err := actor(ctx)
+	if err != nil {
+		return nil, err
+	}
+	target := "lpr_provision"
+	wait := 0
+	if r.Body != nil {
+		if r.Body.Target != nil {
+			target = string(*r.Body.Target)
+		}
+		if r.Body.WaitSeconds != nil {
+			wait = *r.Body.WaitSeconds
+		}
+	}
+	if err := provision.ValidateLPRTestWait(wait); err != nil {
+		return nil, err
+	}
+	src := h.lprTestSrc()
+	cam, err := src.GetCamera(ctx, a, r.CameraId)
+	if err != nil {
+		return nil, err
+	}
+	srv, err := src.RequireServerManage(ctx, a, cam.ServerID)
+	if err != nil {
+		return nil, err
+	}
+
+	var res provision.LPRLinkResult
+	switch target {
+	case "lpr_provision", "provision":
+		tester := src.Tester()
+		if tester == nil {
+			return nil, provision.ErrAgentUnavailable
+		}
+		res, err = tester.CheckProvision(ctx, a, provision.LPRProvisionTarget{
+			CameraID:    cam.ID,
+			ServerID:    cam.ServerID,
+			CameraIP:    src.CameraAddress(ctx, a, cam),
+			RemoteName:  cam.RemoteName,
+			DisplayName: cam.DisplayName,
+			TargetHost:  targetHostFromBaseURL(srv.BaseUrl),
+			WaitSeconds: wait,
+		})
+		if err != nil {
+			return nil, err
+		}
+	case "lpr_frigate", "frigate":
+		res = provision.CheckLPRFrigate(ctx, provision.LPRFrigateProbe{
+			LPREnabled: func(ctx context.Context) (bool, error) { return src.FrigateLPREnabled(ctx, a, cam.ID) },
+			ServerLPR:  srv.Caps().LPR,
+			Reads24h: func(ctx context.Context) (provision.LPRReadsSummary, error) {
+				return src.Reads24h(ctx, a, cam.ID, time.Now().Add(-24*time.Hour))
+			},
+		})
+	case "analytics_provision":
+		tester := src.Tester()
+		if tester == nil {
+			return nil, provision.ErrAgentUnavailable
+		}
+		res, err = tester.CheckProvisionAnalytics(ctx, a, provision.LPRProvisionTarget{
+			CameraID:    cam.ID,
+			ServerID:    cam.ServerID,
+			CameraIP:    src.CameraAddress(ctx, a, cam),
+			RemoteName:  cam.RemoteName,
+			DisplayName: cam.DisplayName,
+			TargetHost:  targetHostFromBaseURL(srv.BaseUrl),
+		}, cam.OnvifCapabilities)
+		if err != nil {
+			return nil, err
+		}
+	case "analytics_frigate":
+		res = provision.CheckFrigateAnalytics(ctx, provision.FrigateAnalyticsProbe{
+			DetectionEnabled: func(ctx context.Context) (bool, error) { return true, nil },
+			ObjectsTracked:   func(ctx context.Context) ([]string, error) { return []string{"person", "car"}, nil },
+			Events24h: func(ctx context.Context) (int, error) {
+				s, err := src.Reads24h(ctx, a, cam.ID, time.Now().Add(-24*time.Hour))
+				if err != nil {
+					return 0, err
+				}
+				return s.Count, nil
+			},
+		})
+	default:
+		return gen.TestCameraAnalytics400JSONResponse{BadRequestJSONResponse: gen.BadRequestJSONResponse{Message: "invalid target: " + target}}, nil
+	}
+
+	checks := make([]gen.CameraLprTestCheck, 0, len(res.Checks))
+	for _, c := range res.Checks {
+		check := gen.CameraLprTestCheck{Id: c.ID, Status: gen.CameraLprTestCheckStatus(c.Status), Message: c.Message}
+		if c.Detail != "" {
+			detail := c.Detail
+			check.Detail = &detail
+		}
+		checks = append(checks, check)
+	}
+	hints := res.Hints
+	if hints == nil {
+		hints = []string{}
+	}
+	obs := map[string]interface{}{
+		"last_seen":       res.Observed.LastSeen,
+		"keepalive_count": res.Observed.KeepaliveCount,
+		"event_count":     res.Observed.EventCount,
+		"last_plate":      res.Observed.LastPlate,
+		"last_event_time": res.Observed.LastEventTime,
+		"reads_24h":       res.Observed.Reads24h,
+		"last_read_at":    res.Observed.LastReadAt,
+	}
+
+	out := gen.CameraAnalyticsTest{
+		Target:   target,
+		Engine:   res.Engine,
+		Passed:   res.Passed,
+		Checks:   checks,
+		Hints:    hints,
+		Observed: obs,
+	}
+	return gen.TestCameraAnalytics200JSONResponse(out), nil
+}
+
 func lprTestResponse(res provision.LPRLinkResult) gen.CameraLprTest {
 	checks := make([]gen.CameraLprTestCheck, 0, len(res.Checks))
 	for _, c := range res.Checks {

@@ -7,7 +7,7 @@ const ids = (input: Partial<Parameters<typeof buildCameraTabs>[0]>) => buildCame
 describe("buildCameraTabs", () => {
   it("always lists the fixed tabs in PRD order and starts with General", () => {
     const tabs = buildCameraTabs(base);
-    expect(tabs.map((t) => t.label)).toEqual(["General", "Video", "Grabación", "Detección", "Zonas", "Integraciones", "Avanzado"]);
+    expect(tabs.map((t) => t.label)).toEqual(["General", "Video", "Grabación", "Detección", "Zonas", "Avanzado"]);
     expect(tabs[0]?.sections).toEqual([GENERAL]);
   });
 
@@ -16,7 +16,7 @@ describe("buildCameraTabs", () => {
     expect(ids({})).not.toContain("ptz");
     expect(ids({})).not.toContain("fisheye");
     expect(ids({ analytics: true, ptz: true, fisheye: true })).toEqual([
-      "general", "video", "record", "detect", "analytics", "zones", "ptz", "fisheye", "integrations", "advanced",
+      "general", "video", "record", "detect", "analytics", "zones", "ptz", "fisheye", "advanced",
     ]);
   });
 
@@ -39,19 +39,19 @@ describe("buildCameraTabs", () => {
     expect(analyticsTabVisible({ ...none, advertised: true })).toBe(true);
   });
 
-  it("gates the camera web view and keeps the ONVIF information in Integraciones", () => {
-    expect(buildCameraTabs(base).find((t) => t.id === "integrations")!.sections).toEqual([INTEGRATIONS_STATUS, ONVIF_INFO]);
-    expect(buildCameraTabs({ ...base, cameraWeb: true }).find((t) => t.id === "integrations")!.sections).toEqual([INTEGRATIONS_STATUS, CAMERA_WEB, ONVIF_INFO]);
+  it("gates the camera web view and keeps the ONVIF information in Avanzado", () => {
+    expect(buildCameraTabs(base).find((t) => t.id === "advanced")!.sections).toContain(ONVIF_INFO);
+    expect(buildCameraTabs({ ...base, cameraWeb: true }).find((t) => t.id === "advanced")!.sections).toContain(CAMERA_WEB);
   });
 
   it("sends every remaining section, Fisheye for non-fisheye cameras and the history to Avanzado", () => {
     const tabs = buildCameraTabs({ ...base, sections: ["detect", "onvif", "genai", "audio", "birdseye_x"], generalSections: ["audio"] });
-    expect(tabs.find((t) => t.id === "advanced")!.sections).toEqual([ADVANCED_PANELS, "onvif", "genai", "birdseye_x", FISHEYE, HISTORY]);
+    expect(tabs.find((t) => t.id === "advanced")!.sections).toEqual([ADVANCED_PANELS, ONVIF_INFO, "onvif", "genai", "birdseye_x", FISHEYE, HISTORY]);
   });
 
   it("moves Fisheye out of Avanzado when the camera is fisheye", () => {
     const tabs = buildCameraTabs({ ...base, fisheye: true });
-    expect(tabs.find((t) => t.id === "advanced")!.sections).toEqual([ADVANCED_PANELS, HISTORY]);
+    expect(tabs.find((t) => t.id === "advanced")!.sections).toEqual([ADVANCED_PANELS, ONVIF_INFO, HISTORY]);
     expect(tabs.find((t) => t.id === "fisheye")!.sections).toEqual([FISHEYE]);
   });
 
@@ -70,6 +70,11 @@ describe("buildCameraTabs", () => {
 describe("tabOfSection", () => {
   it("returns undefined for a section nobody owns", () => {
     expect(tabOfSection(buildCameraTabs(base), "nope")).toBeUndefined();
+  });
+
+  it("maps INTEGRATIONS_STATUS to the Analíticas tab when present", () => {
+    const tabs = buildCameraTabs({ ...base, analytics: true });
+    expect(tabOfSection(tabs, INTEGRATIONS_STATUS)?.id).toBe("analytics");
   });
 });
 
