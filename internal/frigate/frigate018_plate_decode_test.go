@@ -66,6 +66,17 @@ func TestFrigate018RecognizedPlateDecoding(t *testing.T) {
 	if withPlateObj.SubLabel != "" {
 		t.Errorf("sub_label must stay empty; the plate never rides on it: got %q", withPlateObj.SubLabel)
 	}
+	// attr.box is [left=0.690625, top=0.49722222222222223, width=0.0328125, height=0.04722222222222222]
+	// converted to OpenVMS [top, left, height, width]:
+	wantBox := []float64{0.49722222222222223, 0.690625, 0.04722222222222222, 0.0328125}
+	if len(withPlateObj.PlateBox) != 4 {
+		t.Fatalf("plate box: want 4 coords, got %v", withPlateObj.PlateBox)
+	}
+	for i := range wantBox {
+		if diff := withPlateObj.PlateBox[i] - wantBox[i]; diff < -1e-5 || diff > 1e-5 {
+			t.Errorf("plate box[%d]: want %v, got %v", i, wantBox[i], withPlateObj.PlateBox[i])
+		}
+	}
 
 	if noPlateObj.Plate != "" {
 		t.Errorf("event with no recognized plate yet must decode an empty plate, got %q", noPlateObj.Plate)
