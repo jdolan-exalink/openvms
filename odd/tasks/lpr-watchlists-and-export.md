@@ -14,20 +14,20 @@ Empower operators with two major LPR capabilities:
 - [x] Unit tests in `apps/web/src/routes/Plates.test.tsx`.
 
 ### Slice 2: Database Migration & Storage for LPR Watchlists
-- [ ] Migration `migrations/00088_lpr_watchlists.sql`:
+- [x] Migration `migrations/00088_lpr_watchlists.sql`:
   - `lpr_watchlists` (tenant_id, name, description, color, created_at, updated_at).
   - `lpr_watchlist_items` (tenant_id, watchlist_id, plate, notes, brand, model, color, owner_name, created_at).
-- [ ] SQL queries in `internal/store/queries/lpr_watchlists.sql` and `sqlc generate`.
-- [ ] Store repository tests.
+- [x] SQL queries in `internal/store/queries/lpr_watchlists.sql` and `sqlc generate`.
+- [x] Store repository tests.
 
 ### Slice 3: Rules & Alarm Engine Integration
-- [ ] Add `LprWatchlistIDs []uuid.UUID` to `rules.Conditions`.
-- [ ] Add `StoreLprResolver` in `internal/rules/lpr.go` with tenant cache.
-- [ ] Evaluate rules on plate reads (both direct Provision LPR and Frigate events).
-- [ ] Unit & integration tests in `internal/rules/`.
+- [x] Add `LprWatchlistIDs []uuid.UUID` to `rules.Conditions`.
+- [x] Add `StoreLprResolver` in `internal/rules/lpr.go` with tenant cache.
+- [x] Evaluate rules on plate reads (both direct Provision LPR and Frigate events).
+- [x] Unit & integration tests in `internal/rules/`.
 
 ### Slice 4: REST API & OpenAPI Contract
-- [ ] OpenAPI endpoints in `packages/api-contract/openapi.yaml`:
+- [x] OpenAPI endpoints in `packages/api-contract/openapi.yaml`:
   - `GET /api/v1/lpr/watchlists`
   - `POST /api/v1/lpr/watchlists`
   - `GET /api/v1/lpr/watchlists/{id}`
@@ -35,11 +35,14 @@ Empower operators with two major LPR capabilities:
   - `DELETE /api/v1/lpr/watchlists/{id}`
   - `POST /api/v1/lpr/watchlists/{id}/items`
   - `DELETE /api/v1/lpr/watchlists/{id}/items/{itemId}`
-- [ ] Handlers in `internal/api/lpr_watchlist_handlers.go`.
-- [ ] Regeneration of `api.gen.go` and `schema.d.ts`.
+- [x] Handlers in `internal/api/lpr_watchlist_handlers.go`.
+- [x] Plate reads enriched with matched watchlists in `internal/api/events_handlers.go`.
+- [x] Regeneration of `api.gen.go` and `schema.d.ts`.
+- [x] API integration tests in `internal/api/lpr_watchlists_integration_test.go`.
 
 ### Slice 5: Web UI Management & Plate Badges
-- [ ] Watchlist manager dialog / tab in LPR interface.
-- [ ] Watchlist alert pill on `PlateReadCard` and `PlateDetailModal`.
-- [ ] Rule creation UI option for LPR Watchlists in `Rules.tsx`.
-- [ ] Vitest coverage.
+- [x] Watchlist manager dialog (`LprWatchlistsModal.tsx`) in LPR interface.
+- [x] Watchlist alert pills on `PlateReadCard` and `PlateDetailModal`.
+- [x] Rule creation UI option for LPR Watchlists in `Rules.tsx`.
+- [x] Full i18n support in `es`, `en`, and `pt`.
+- [x] Vitest coverage in `LprWatchlistsModal.test.tsx` and `Plates.test.tsx`.

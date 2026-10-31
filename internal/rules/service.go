@@ -64,6 +64,9 @@ type Service struct {
 	// Faces resolves person and watchlist conditions to recognized names. Without it a rule
 	// with person conditions never matches (fail closed).
 	Faces FaceResolver
+	// Lpr resolves LPR watchlist conditions to plate numbers. Without it a rule with
+	// LPR watchlist conditions never matches (fail closed).
+	Lpr LprResolver
 }
 
 // RuleVersionSnapshot is an immutable rule version exposed to authorized tenant users.
@@ -172,11 +175,13 @@ func NewService(st *store.Store, pub Publisher, log *slog.Logger) *Service {
 	}
 	var zr ZoneResolver
 	var fr FaceResolver
+	var lr LprResolver
 	if st != nil {
 		zr = NewStoreZoneResolver(st)
 		fr = NewStoreFaceResolver(st)
+		lr = NewStoreLprResolver(st)
 	}
-	return &Service{Store: st, Pub: pub, Log: log, Debounce: DefaultDebounce, ZoneResolver: zr, Faces: fr}
+	return &Service{Store: st, Pub: pub, Log: log, Debounce: DefaultDebounce, ZoneResolver: zr, Faces: fr, Lpr: lr}
 }
 
 // claim records that rule fired for resourceID and reports whether it may run its actions:
@@ -307,6 +312,9 @@ func (s *Service) CreateRule(ctx context.Context, actor authz.Actor, req CreateR
 		if err := checkFaceRefs(ctx, q, chk, *actor.TenantID, req.Conditions, Conditions{}); err != nil {
 			return err
 		}
+		if err := checkLprRefs(ctx, q, chk, *actor.TenantID, req.Conditions, Conditions{}); err != nil {
+			return err
+		}
 
 		row, err := q.CreateRule(ctx, db.CreateRuleParams{
 			TenantID:    *actor.TenantID,
@@ -426,6 +434,9 @@ func (s *Service) UpdateRule(ctx context.Context, actor authz.Actor, id uuid.UUI
 					}
 				}
 				if err := checkFaceRefs(ctx, q, chk, *actor.TenantID, effCond, prev); err != nil {
+					return err
+				}
+				if err := checkLprRefs(ctx, q, chk, *actor.TenantID, effCond, prev); err != nil {
 					return err
 				}
 			}
@@ -688,6 +699,59 @@ func (s *Service) matchesFaces(ctx context.Context, tx pgx.Tx, ev EventContext, 
 	return MatchesFaces(ev.SubLabels, names)
 }
 
+// LprPlates resolves the LPR conditions of c to the plates they stand for. Without
+// a resolver it resolves to empty, so a plate rule never matches by accident.
+func (s *Service) LprPlates(ctx context.Context, tenantID uuid.UUID, c Conditions) (map[string]struct{}, error) {
+	return s.lprPlates(ctx, nil, tenantID, c)
+}
+
+func (s *Service) lprPlates(ctx context.Context, q *db.Queries, tenantID uuid.UUID, c Conditions) (map[string]struct{}, error) {
+	if s.Lpr == nil || !c.HasLprConditions() {
+		return map[string]struct{}{}, nil
+	}
+	return s.Lpr.LprPlates(ctx, q, tenantID, c.LprWatchlistIDs)
+}
+
+func (s *Service) lprPlatesIsolated(ctx context.Context, tx pgx.Tx, tenantID uuid.UUID, c Conditions) (map[string]struct{}, error) {
+	if s.Lpr == nil || !c.HasLprConditions() {
+		return map[string]struct{}{}, nil
+	}
+	if cached, ok := s.Lpr.(cachedLprResolver); ok {
+		if plates, hit := cached.lprPlatesFromCache(tenantID, c.LprWatchlistIDs); hit {
+			return plates, nil
+		}
+	}
+	sp, err := tx.Begin(ctx)
+	if err != nil {
+		return nil, err
+	}
+	plates, err := s.lprPlates(ctx, db.New(sp), tenantID, c)
+	if err != nil {
+		_ = sp.Rollback(ctx)
+		return nil, err
+	}
+	if err := sp.Commit(ctx); err != nil {
+		return nil, err
+	}
+	return plates, nil
+}
+
+func (s *Service) matchesLpr(ctx context.Context, tx pgx.Tx, ev EventContext, rule Rule) bool {
+	plates := ev.Plates
+	if len(plates) == 0 {
+		plates = ev.SubLabels
+	}
+	if len(plates) == 0 {
+		return false
+	}
+	wanted, err := s.lprPlatesIsolated(ctx, tx, ev.TenantID, rule.Conditions)
+	if err != nil {
+		s.Log.WarnContext(ctx, "resolve lpr conditions", "error", err, "rule_id", rule.ID)
+		return false
+	}
+	return MatchesPlates(plates, wanted)
+}
+
 // EvaluateEvent runs every enabled event rule of the tenant against a newly indexed event.
 // Alarm and notification announcements are enqueued with the evaluation state changes.
 func (s *Service) EvaluateEvent(ctx context.Context, ev EventContext) error {
@@ -741,6 +805,10 @@ func (s *Service) evaluateEventTx(ctx context.Context, tx pgx.Tx, ev EventContex
 			continue
 		}
 		if hasFaces && !s.matchesFaces(ctx, tx, ev, rule) {
+			continue
+		}
+		hasLpr := rule.Conditions.HasLprConditions()
+		if hasLpr && !s.matchesLpr(ctx, tx, ev, rule) {
 			continue
 		}
 
@@ -1163,6 +1231,28 @@ func checkFaceRefs(ctx context.Context, q *db.Queries, chk *access.Checker, tena
 		}
 		if len(locked) != len(newLists) {
 			return &ValidationError{Msg: "unknown or inaccessible id in conditions.face_watchlist_ids"}
+		}
+	}
+	return nil
+}
+
+// checkLprRefs validates the LPR watchlist conditions.
+func checkLprRefs(ctx context.Context, q *db.Queries, chk *access.Checker, tenantID uuid.UUID, c, prev Conditions) error {
+	newLists := subtractIDs(uniqueIDs(c.LprWatchlistIDs), prev.LprWatchlistIDs)
+	removed := len(subtractIDs(uniqueIDs(prev.LprWatchlistIDs), c.LprWatchlistIDs))
+	if len(newLists) == 0 && removed == 0 {
+		return nil
+	}
+	if err := chk.Require(authz.LPRView, access.Tenant(tenantID)); err != nil {
+		return err
+	}
+	if len(newLists) > 0 {
+		locked, err := q.LockLprWatchlistsByIDs(ctx, db.LockLprWatchlistsByIDsParams{TenantID: tenantID, Ids: newLists})
+		if err != nil {
+			return store.Classify(err)
+		}
+		if len(locked) != len(newLists) {
+			return &ValidationError{Msg: "unknown or inaccessible id in conditions.lpr_watchlist_ids"}
 		}
 	}
 	return nil

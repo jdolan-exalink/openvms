@@ -407,6 +407,7 @@ RETURNING id, (xmax = 0)`,
 					Severity: sev,
 					Labels:   labels,
 					Start:    seen.UTC(),
+					Plates:   plates,
 				}
 				if err := enqueueRuleEvaluation(ctx, tx, ev, ref.name, false); err != nil {
 					return fmt.Errorf("enqueue rule evaluation for agent event %s: %w", e.ID, err)

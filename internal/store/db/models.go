@@ -638,6 +638,33 @@ type LprRead struct {
 	CropKey         string
 	CropAttempts    int32
 	SnapshotKey     string
+	PlateBox        []float32
+}
+
+type LprWatchlist struct {
+	ID          uuid.UUID
+	TenantID    uuid.UUID
+	Name        string
+	Description string
+	Color       string
+	CreatedBy   *uuid.UUID
+	UpdatedBy   *uuid.UUID
+	CreatedAt   time.Time
+	UpdatedAt   time.Time
+}
+
+type LprWatchlistItem struct {
+	ID           uuid.UUID
+	TenantID     uuid.UUID
+	WatchlistID  uuid.UUID
+	Plate        string
+	Notes        string
+	VehicleBrand string
+	VehicleModel string
+	VehicleColor string
+	OwnerName    string
+	CreatedAt    time.Time
+	UpdatedAt    time.Time
 }
 
 type MapBuilding struct {

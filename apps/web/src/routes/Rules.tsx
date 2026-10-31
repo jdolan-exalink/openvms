@@ -4,7 +4,7 @@ import { Plus } from "lucide-react";
 import { Icon } from "@/components/Icon";
 import { type FormEvent, useState } from "react";
 import { ApiError, api, type Schemas, unwrap } from "@/api/client";
-import { cameraGroupsQuery, camerasQuery, channelsQuery, facePersonsQuery, faceWatchlistsQuery, meQuery, rulesQuery, serversQuery, sitesQuery } from "@/api/queries";
+import { cameraGroupsQuery, camerasQuery, channelsQuery, facePersonsQuery, faceWatchlistsQuery, lprWatchlistsQuery, meQuery, rulesQuery, serversQuery, sitesQuery } from "@/api/queries";
 import { ConfirmDialog } from "@/components/ConfirmDialog";
 import { Modal } from "@/components/Modal";
 import { TagInput } from "@/components/TagInput";
@@ -159,8 +159,10 @@ function RuleForm({ rule, onDone, onCancel, onReloadRule }: { rule?: Rule; onDon
   // without a tenant cannot manage rules, so they never load a tenant's persons either.
   const me = useQuery(meQuery);
   const canFaces = can(me.data, "faces.view") && !!me.data?.tenant_id;
+  const canLpr = can(me.data, "lpr.view") && !!me.data?.tenant_id;
   const persons = useQuery({ ...facePersonsQuery(), enabled: canFaces });
   const watchlists = useQuery({ ...faceWatchlistsQuery(), enabled: canFaces });
+  const lprWatchlists = useQuery({ ...lprWatchlistsQuery(), enabled: canLpr });
   const templates = useQuery({ queryKey: ["rule-templates"], queryFn: async () => unwrap(await api.GET("/api/v1/rules/templates")).items });
   const c = rule?.conditions ?? {};
   const [f, setF] = useState({
@@ -178,6 +180,7 @@ function RuleForm({ rule, onDone, onCancel, onReloadRule }: { rule?: Rule; onDon
     map_zone_ids: c.map_zone_ids ?? ([] as string[]),
     face_person_ids: c.face_person_ids ?? ([] as string[]),
     face_watchlist_ids: c.face_watchlist_ids ?? ([] as string[]),
+    lpr_watchlist_ids: c.lpr_watchlist_ids ?? ([] as string[]),
     cooldown_seconds: c.cooldown_seconds === undefined ? "" : String(c.cooldown_seconds),
     schedule_days: c.schedule?.days_of_week ?? ([] as number[]),
     schedule_start: c.schedule?.start_time ?? "",
@@ -229,6 +232,9 @@ function RuleForm({ rule, onDone, onCancel, onReloadRule }: { rule?: Rule; onDon
         if (f.face_person_ids.length) out.face_person_ids = f.face_person_ids; else delete out.face_person_ids;
         if (f.face_watchlist_ids.length) out.face_watchlist_ids = f.face_watchlist_ids; else delete out.face_watchlist_ids;
       }
+      if (canLpr) {
+        if (f.lpr_watchlist_ids.length) out.lpr_watchlist_ids = f.lpr_watchlist_ids; else delete out.lpr_watchlist_ids;
+      }
       const cooldown = Number(f.cooldown_seconds);
       if (f.cooldown_seconds.trim() && Number.isFinite(cooldown)) out.cooldown_seconds = cooldown; else delete out.cooldown_seconds;
       if (f.schedule_start || f.schedule_end || f.schedule_days.length || f.schedule_timezone.trim()) {
@@ -257,6 +263,7 @@ function RuleForm({ rule, onDone, onCancel, onReloadRule }: { rule?: Rule; onDon
     delete out.map_zone_ids;
     delete out.face_person_ids;
     delete out.face_watchlist_ids;
+    delete out.lpr_watchlist_ids;
     delete out.schedule;
     delete out.cooldown_seconds;
     out.duration_seconds = Math.max(1, Number(f.minutes) || defaultMinutes) * 60;
@@ -339,7 +346,7 @@ function RuleForm({ rule, onDone, onCancel, onReloadRule }: { rule?: Rule; onDon
           <Select value="" onChange={(e) => {
             const item = templates.data?.find((template) => template.id === e.target.value);
             if (!item) return;
-            setF((current) => ({ ...current, trigger: item.trigger_type, camera_ids: [], server_ids: [], site_ids: [], labels: item.conditions.labels ?? [], zones: item.conditions.zones ?? [], severities: item.conditions.severities ?? [], vehicle_types: item.conditions.vehicle_types ?? [], vehicle_colors: item.conditions.vehicle_colors ?? [], camera_group_ids: item.conditions.camera_group_ids ?? [], map_zone_ids: item.conditions.map_zone_ids ?? [], face_person_ids: item.conditions.face_person_ids ?? [], face_watchlist_ids: item.conditions.face_watchlist_ids ?? [], cooldown_seconds: item.conditions.cooldown_seconds === undefined ? "" : String(item.conditions.cooldown_seconds), schedule_days: item.conditions.schedule?.days_of_week ?? [], schedule_start: item.conditions.schedule?.start_time ?? "", schedule_end: item.conditions.schedule?.end_time ?? "", schedule_timezone: item.conditions.schedule?.timezone ?? "", minutes: String(item.conditions.duration_seconds ? Math.round(item.conditions.duration_seconds / 60) : defaultMinutes), create_alarm: item.actions.create_alarm ?? true, notify_in_app: item.actions.notify_in_app ?? true, severity: item.actions.severity ?? "warning", channel_ids: item.actions.channel_ids ?? [] }));
+            setF((current) => ({ ...current, trigger: item.trigger_type, camera_ids: [], server_ids: [], site_ids: [], labels: item.conditions.labels ?? [], zones: item.conditions.zones ?? [], severities: item.conditions.severities ?? [], vehicle_types: item.conditions.vehicle_types ?? [], vehicle_colors: item.conditions.vehicle_colors ?? [], camera_group_ids: item.conditions.camera_group_ids ?? [], map_zone_ids: item.conditions.map_zone_ids ?? [], face_person_ids: item.conditions.face_person_ids ?? [], face_watchlist_ids: item.conditions.face_watchlist_ids ?? [], lpr_watchlist_ids: item.conditions.lpr_watchlist_ids ?? [], cooldown_seconds: item.conditions.cooldown_seconds === undefined ? "" : String(item.conditions.cooldown_seconds), schedule_days: item.conditions.schedule?.days_of_week ?? [], schedule_start: item.conditions.schedule?.start_time ?? "", schedule_end: item.conditions.schedule?.end_time ?? "", schedule_timezone: item.conditions.schedule?.timezone ?? "", minutes: String(item.conditions.duration_seconds ? Math.round(item.conditions.duration_seconds / 60) : defaultMinutes), create_alarm: item.actions.create_alarm ?? true, notify_in_app: item.actions.notify_in_app ?? true, severity: item.actions.severity ?? "warning", channel_ids: item.actions.channel_ids ?? [] }));
           }}>
             <option value="">Elegir plantilla…</option>
             {(templates.data ?? []).map((template) => <option key={template.id} value={template.id}>{template.name}</option>)}
@@ -439,6 +446,18 @@ function RuleForm({ rule, onDone, onCancel, onReloadRule }: { rule?: Rule; onDon
                 <ErrorNote error={persons.error ?? watchlists.error} />
               </>
             )}
+            {canLpr && (
+              <>
+                <CheckGroup
+                  legend="Listas de matrículas (LPR) (vacío = cualquiera)"
+                  options={(lprWatchlists.data ?? []).map((list) => ({ value: list.id, label: list.name }))}
+                  selected={f.lpr_watchlist_ids}
+                  onToggle={(id) => setF({ ...f, lpr_watchlist_ids: flip(f.lpr_watchlist_ids, id) })}
+                  empty="No hay listas LPR disponibles."
+                />
+                <ErrorNote error={lprWatchlists.error} />
+              </>
+            )}
             <CheckGroup
               legend="Severidad del evento (vacío = todas)"
               options={eventSeverities}
@@ -504,7 +523,7 @@ function RuleForm({ rule, onDone, onCancel, onReloadRule }: { rule?: Rule; onDon
           <dl className="mt-2 grid gap-2 text-sm">
             <div><dt className="font-medium">Nombre y disparador</dt><dd>{f.name.trim() || "Sin nombre"} · {triggerLabel[f.trigger]}</dd></div>
             <div><dt className="font-medium">Alcance</dt><dd>{f.camera_ids.length ? cameras.data?.filter((camera) => f.camera_ids.includes(camera.id)).map((camera) => camera.display_name).join(", ") : "Todas las cámaras"}; {f.camera_group_ids.length ? cameraGroups.data?.filter((group) => f.camera_group_ids.includes(group.id)).map((group) => group.name).join(", ") : "Todos los grupos"}</dd></div>
-            <div><dt className="font-medium">Condiciones</dt><dd>{f.labels.length ? `Etiquetas: ${f.labels.join(", ")}` : "Sin filtro de etiquetas"}{f.zones.length ? ` · Zonas: ${f.zones.join(", ")}` : ""}{f.face_person_ids.length + f.face_watchlist_ids.length > 0 ? " · Personas: según la selección" : ""}</dd></div>
+            <div><dt className="font-medium">Condiciones</dt><dd>{f.labels.length ? `Etiquetas: ${f.labels.join(", ")}` : "Sin filtro de etiquetas"}{f.zones.length ? ` · Zonas: ${f.zones.join(", ")}` : ""}{f.face_person_ids.length + f.face_watchlist_ids.length > 0 ? " · Personas: según la selección" : ""}{f.lpr_watchlist_ids.length > 0 ? " · Matrículas LPR: según listas" : ""}</dd></div>
             <div><dt className="font-medium">Acciones</dt><dd>{describeActions({ create_alarm: f.create_alarm, notify_in_app: f.notify_in_app, channel_ids: f.channel_ids })}</dd></div>
           </dl>
         </section>

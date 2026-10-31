@@ -193,6 +193,7 @@ func run() error {
 		return err
 	}
 	handlers := &api.Handlers{
+		Store:         st,
 		Inv:           inv,
 		Provision:     provisioner,
 		CameraWeb:     api.NewCameraWebService(inv, provisioner),

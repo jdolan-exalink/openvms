@@ -1,5 +1,6 @@
 import { useState } from "react";
 import { createPortal } from "react-dom";
+import { ShieldAlert } from "lucide-react";
 import type { Schemas } from "@/api/client";
 import { VehicleFacts } from "@/components/VehicleMark";
 import { fmtDateTime } from "@/lib/format";
@@ -41,6 +42,20 @@ export function PlateReadCard({
         )}
       </span>
       <VehicleFacts labels={read.label ? [read.label] : []} vehicle={read.vehicle} serverName={read.server_name} />
+      {read.watchlists && read.watchlists.length > 0 && (
+        <div className="flex flex-wrap gap-1 pt-0.5">
+          {read.watchlists.map((w) => (
+            <span
+              key={w.id}
+              className="inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-[10px] font-semibold text-white shadow-xs"
+              style={{ backgroundColor: w.color || "#ef4444" }}
+            >
+              <ShieldAlert className="size-3" aria-hidden />
+              {w.name}
+            </span>
+          ))}
+        </div>
+      )}
     </>
   );
   const frame = "flex w-full flex-col gap-1.5 rounded-m3-lg bg-surface-1 p-3 text-left";

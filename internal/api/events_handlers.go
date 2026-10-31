@@ -3,11 +3,14 @@ package api
 import (
 	"bytes"
 	"context"
+	"strings"
 
 	"github.com/google/uuid"
 
 	"github.com/jdolan-exalink/openvms/internal/api/gen"
 	"github.com/jdolan-exalink/openvms/internal/events"
+	"github.com/jdolan-exalink/openvms/internal/store"
+	"github.com/jdolan-exalink/openvms/internal/store/db"
 )
 
 func uuids(p *[]uuid.UUID) []uuid.UUID {
@@ -229,6 +232,47 @@ func (h *Handlers) ListPlateReads(ctx context.Context, r gen.ListPlateReadsReque
 	if err != nil {
 		return nil, err
 	}
+	var plateMatches map[string][]gen.LprWatchlistSummary
+	if a.TenantID != nil && len(page.Items) > 0 {
+		plateSet := make(map[string]struct{}, len(page.Items))
+		plateList := make([]string, 0, len(page.Items))
+		for _, pr := range page.Items {
+			p := strings.ToUpper(strings.TrimSpace(pr.Normalized))
+			if p == "" {
+				p = strings.ToUpper(strings.TrimSpace(pr.Plate))
+			}
+			if p != "" {
+				if _, seen := plateSet[p]; !seen {
+					plateSet[p] = struct{}{}
+					plateList = append(plateList, p)
+				}
+			}
+		}
+		if len(plateList) > 0 {
+			if st := h.store(); st != nil {
+				_ = st.Tx(ctx, store.ScopeFor(a), func(q *db.Queries) error {
+					matches, err := q.MatchLprWatchlistsForPlates(ctx, db.MatchLprWatchlistsForPlatesParams{
+						TenantID: *a.TenantID,
+						Plates:   plateList,
+					})
+					if err != nil {
+						return err
+					}
+					plateMatches = make(map[string][]gen.LprWatchlistSummary)
+					for _, m := range matches {
+						p := strings.ToUpper(strings.TrimSpace(m.Plate))
+						plateMatches[p] = append(plateMatches[p], gen.LprWatchlistSummary{
+							Id:    m.WatchlistID,
+							Name:  m.WatchlistName,
+							Color: m.WatchlistColor,
+						})
+					}
+					return nil
+				})
+			}
+		}
+	}
+
 	out := gen.ListPlateReads200JSONResponse{Items: make([]gen.PlateRead, 0, len(page.Items)), NextCursor: nextCursor(page.Next)}
 	for _, pr := range page.Items {
 		var score *float32
@@ -240,6 +284,13 @@ func (h *Handlers) ListPlateReads(ctx context.Context, r gen.ListPlateReadsReque
 			CameraId: pr.CameraID, CameraName: pr.CameraName, Plate: pr.Plate, PlateNormalized: pr.Normalized,
 			Score: score, Label: pr.Label, Zones: pr.Zones, SeenAt: pr.SeenAt, EventId: pr.EventID,
 			HasCrop: &pr.HasCrop,
+		}
+		p := strings.ToUpper(strings.TrimSpace(pr.Normalized))
+		if p == "" {
+			p = strings.ToUpper(strings.TrimSpace(pr.Plate))
+		}
+		if wl, ok := plateMatches[p]; ok && len(wl) > 0 {
+			item.Watchlists = &wl
 		}
 		if pr.Vehicle != nil {
 			item.Vehicle = &gen.VehicleAttributes{

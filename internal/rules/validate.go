@@ -46,6 +46,9 @@ func ValidateConditions(trigger TriggerType, c Conditions) error {
 	if len(c.FaceWatchlistIDs) > MaxFaceRefs {
 		return invalid("conditions.face_watchlist_ids must not exceed %d entries", MaxFaceRefs)
 	}
+	if len(c.LprWatchlistIDs) > MaxLprRefs {
+		return invalid("conditions.lpr_watchlist_ids must not exceed %d entries", MaxLprRefs)
+	}
 	if c.CooldownSeconds != nil && (*c.CooldownSeconds < 0 || *c.CooldownSeconds > MaxCooldownSeconds) {
 		return invalid("conditions.cooldown_seconds must be between 0 and %d", MaxCooldownSeconds)
 	}
@@ -65,10 +68,11 @@ func rejectEventOnly(trigger TriggerType, c Conditions) error {
 		"cooldown_seconds":   c.CooldownSeconds != nil,
 		"face_person_ids":    len(c.FacePersonIDs) > 0,
 		"face_watchlist_ids": len(c.FaceWatchlistIDs) > 0,
+		"lpr_watchlist_ids":  len(c.LprWatchlistIDs) > 0,
 		"camera_group_ids":   len(c.CameraGroupIDs) > 0 && trigger == TriggerCameraOffline,
 	}
 	// Deterministic order for stable messages.
-	for _, k := range []string{"labels", "zones", "map_zone_ids", "severities", "vehicle_types", "vehicle_colors", "schedule", "cooldown_seconds", "face_person_ids", "face_watchlist_ids", "camera_group_ids"} {
+	for _, k := range []string{"labels", "zones", "map_zone_ids", "severities", "vehicle_types", "vehicle_colors", "schedule", "cooldown_seconds", "face_person_ids", "face_watchlist_ids", "lpr_watchlist_ids", "camera_group_ids"} {
 		if set[k] {
 			return invalid("conditions.%s is only valid for event rules", k)
 		}

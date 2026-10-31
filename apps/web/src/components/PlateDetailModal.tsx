@@ -1,5 +1,5 @@
 import { useMutation, useQuery } from "@tanstack/react-query";
-import { Camera, Download, Film, Maximize2, X } from "lucide-react";
+import { Camera, Download, Film, Maximize2, ShieldAlert, X } from "lucide-react";
 import { type KeyboardEvent, useRef, useState } from "react";
 import { api, type Schemas, unwrap } from "@/api/client";
 import { brandingQuery, meQuery } from "@/api/queries";
@@ -171,7 +171,23 @@ export function PlateDetailModal({ read, onClose }: { read: Schemas["PlateRead"]
   return (
     <Modal title={tr("plates.detailTitle", { plate: read.plate_normalized })} onClose={onClose}>
       <div className="flex flex-col gap-4">
-        <ArPlate plate={read.plate_normalized || read.plate} large />
+        <div className="flex flex-wrap items-center justify-between gap-3">
+          <ArPlate plate={read.plate_normalized || read.plate} large />
+          {read.watchlists && read.watchlists.length > 0 && (
+            <div className="flex flex-wrap items-center gap-1.5">
+              {read.watchlists.map((w) => (
+                <span
+                  key={w.id}
+                  className="inline-flex items-center gap-1.5 rounded-full px-3 py-1 text-xs font-bold text-white shadow-xs"
+                  style={{ backgroundColor: w.color || "#ef4444" }}
+                >
+                  <ShieldAlert className="size-3.5" aria-hidden />
+                  {w.name}
+                </span>
+              ))}
+            </div>
+          )}
+        </div>
         <dl className="grid grid-cols-2 gap-x-4 gap-y-1 text-sm sm:grid-cols-4">
           <div>
             <dt className="text-xs text-muted">{tr("plates.date")}</dt>

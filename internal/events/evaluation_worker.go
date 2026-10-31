@@ -155,11 +155,15 @@ func (w *RuleEvaluationWorker) evaluateAndComplete(ctx context.Context, item cla
 	actor := authz.Actor{TenantID: &item.tenantID}
 	err := w.Store.TxRaw(ctx, store.ScopeFor(actor), func(tx pgx.Tx) error {
 		var eventTenant uuid.UUID
-		if err := tx.QueryRow(ctx, `SELECT tenant_id FROM events WHERE id=$1`, job.EventID).Scan(&eventTenant); err != nil {
+		var eventPlates []string
+		if err := tx.QueryRow(ctx, `SELECT tenant_id, coalesce(plates, '{}') FROM events WHERE id=$1`, job.EventID).Scan(&eventTenant, &eventPlates); err != nil {
 			return fmt.Errorf("load tenant event %s: %w", job.EventID, err)
 		}
 		if eventTenant != item.tenantID || ev.TenantID != eventTenant {
 			return errors.New("evaluation event tenant changed after claim")
+		}
+		if len(eventPlates) > 0 {
+			ev.Plates = append(ev.Plates, eventPlates...)
 		}
 		var err error
 		if err := w.Rules.EvaluateEventTx(ctx, tx, ev); err != nil {
