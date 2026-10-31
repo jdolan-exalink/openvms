@@ -86,6 +86,10 @@ test: ## Unit tests (Go + web)
 test-integration: ## Integration tests against real containers (needs Docker)
 	go test -race -tags integration ./...
 
+.PHONY: web-apk-refresh-test
+web-apk-refresh-test: ## Tests of the weekly web image apk refresh (stubbed docker)
+	bash deploy/maintenance/web_apk_refresh_test.sh
+
 .PHONY: agent-version-check
 agent-version-check: ## Fail when the edge agent changed without a version bump (see docs/VERSIONING.md)
 	bash tools/agent_version_test.sh

@@ -1,0 +1,15 @@
+[Unit]
+Description=OpenVMS web image Alpine package refresh
+Documentation=file:///usr/local/share/doc/openvms/maintenance-web-apk-refresh.md
+After=docker.service
+Requires=docker.service
+
+[Service]
+Type=oneshot
+WorkingDirectory=@ROOT@
+Environment=APK_REFRESH_ROOT=@ROOT@
+ExecStart=/usr/local/sbin/openvms-web-apk-refresh
+# The script writes its own log (/var/log/openvms/web-apk-refresh.log); the journal keeps a copy.
+SyslogIdentifier=openvms-web-apk-refresh
+TimeoutStartSec=30min
+Nice=10
