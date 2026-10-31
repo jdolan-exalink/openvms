@@ -58,13 +58,19 @@ export function buildCameraTabs(input: CameraTabsInput): CameraTab[] {
   tabs.push({ id: "zones", label: "Zonas", sections: ZONES });
   if (input.ptz) tabs.push({ id: "ptz", label: "PTZ", sections: [PTZ_CONTROL, ...known(PTZ)] });
   if (input.fisheye) tabs.push({ id: "fisheye", label: "Fisheye", sections: [FISHEYE] });
-  tabs.push({ id: "integrations", label: "Integraciones", sections: [INTEGRATIONS_STATUS, ...(input.cameraWeb ? [CAMERA_WEB] : []), ONVIF_INFO] });
 
   const owned = new Set([...tabs.flatMap((t) => t.sections), ...(input.generalSections ?? [])]);
   tabs.push({
     id: "advanced",
     label: "Avanzado",
-    sections: [ADVANCED_PANELS, ...input.sections.filter((s) => !owned.has(s)), ...(input.fisheye ? [] : [FISHEYE]), HISTORY],
+    sections: [
+      ADVANCED_PANELS,
+      ...(input.cameraWeb ? [CAMERA_WEB] : []),
+      ONVIF_INFO,
+      ...input.sections.filter((s) => !owned.has(s)),
+      ...(input.fisheye ? [] : [FISHEYE]),
+      HISTORY,
+    ],
   });
   return tabs;
 }
@@ -78,7 +84,8 @@ export function analyticsTabVisible(input: { modules: readonly { available: bool
 }
 
 /** The tab that owns a section, if any. */
-export const tabOfSection = (tabs: CameraTab[], section: string): CameraTab | undefined => tabs.find((t) => t.sections.includes(section));
+export const tabOfSection = (tabs: CameraTab[], section: string): CameraTab | undefined =>
+  tabs.find((t) => t.sections.includes(section)) ?? (section === INTEGRATIONS_STATUS ? tabs.find((t) => t.id === "analytics") : undefined);
 
 /** Camera tags that mark a fisheye lens. */
 export const isFisheyeTagged = (tags: string[] | undefined) => !!tags?.some((t) => t === "fisheye" || t === "ojo_de_pez");

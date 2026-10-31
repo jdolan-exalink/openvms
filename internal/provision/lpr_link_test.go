@@ -458,3 +458,39 @@ func TestNotLPRResult(t *testing.T) {
 		t.Fatalf("result = %+v", res)
 	}
 }
+
+func TestCheckProvisionAnalytics(t *testing.T) {
+	agent := &fakeLinkAgent{
+		statuses: []map[string]any{{
+			"cameras": []any{
+				map[string]any{"camera_id": "11111111-1111-1111-1111-111111111111", "online": true, "event_count": float64(42), "last_event_time": linkNow.Format(time.RFC3339Nano)},
+			},
+		}},
+		ingestion: LPRIngestion{Known: true, LastPullAt: &linkNow, IngestedTotal: 100},
+	}
+	tester := &LPRLinkTester{Agent: agent, Now: func() time.Time { return linkNow }}
+	caps := json.RawMessage(`{"has_analytics": true, "has_events": true}`)
+	res, err := tester.CheckProvisionAnalytics(context.Background(), authz.Actor{}, LPRProvisionTarget{CameraID: uuid.MustParse("11111111-1111-1111-1111-111111111111")}, caps)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if !res.Passed {
+		t.Errorf("expected passed, got checks = %+v", res.Checks)
+	}
+	want(t, res, "onvif_analytics", LPRCheckPass)
+	want(t, res, "event_seen", LPRCheckPass)
+}
+
+func TestCheckFrigateAnalytics(t *testing.T) {
+	probe := FrigateAnalyticsProbe{
+		DetectionEnabled: func(context.Context) (bool, error) { return true, nil },
+		ObjectsTracked:   func(context.Context) ([]string, error) { return []string{"person", "car"}, nil },
+		Events24h:        func(context.Context) (int, error) { return 15, nil },
+	}
+	res := CheckFrigateAnalytics(context.Background(), probe)
+	if !res.Passed {
+		t.Errorf("expected passed, got checks = %+v", res.Checks)
+	}
+	want(t, res, "detection_enabled", LPRCheckPass)
+	want(t, res, "objects_tracked", LPRCheckPass)
+}

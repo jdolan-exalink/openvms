@@ -32,15 +32,53 @@ func mustModule(t *testing.T, c Camera, id string) AnalyticsModule {
 
 func TestModulesListedInOrderWithLabels(t *testing.T) {
 	cam := modulesOfDoc(t, Inventory{CameraID: "c", RemoteName: "c"}, `{}`)
-	want := []string{"Matrículas (LPR)", "Detección facial", "Reconocimiento facial", "Clasificación de vehículo", "Color de vehículo", "Color de ropa", "Buscar similares cuando corresponda"}
+	want := []string{"LPR", "Detección facial", "Reconocimiento facial", "Cruce de línea", "Intrusión en área", "Conteo de personas", "Clasificación de vehículo", "Color de vehículo", "Color de ropa", "Buscar similares cuando corresponda"}
 	if len(cam.Analytics.Modules) != len(want) {
-		t.Fatalf("modules = %d", len(cam.Analytics.Modules))
+		t.Fatalf("modules = %d, want %d", len(cam.Analytics.Modules), len(want))
 	}
 	for i, m := range cam.Analytics.Modules {
 		if m.Label != want[i] {
-			t.Fatalf("module %d label = %q", i, m.Label)
+			t.Fatalf("module %d label = %q, want %q", i, m.Label, want[i])
 		}
 	}
+}
+
+func TestAnalyticsModuleOriginAndLabels(t *testing.T) {
+	t.Run("frigate LPR has LPR label and Frigate origin", func(t *testing.T) {
+		cam := modulesOfDoc(t, Inventory{CameraID: "c", RemoteName: "c", LPR: true}, `{"lpr":{"enabled":true}}`)
+		m := mustModule(t, cam, ModuleLPR)
+		if m.Label != "LPR" {
+			t.Errorf("label = %q, want 'LPR'", m.Label)
+		}
+		if m.OriginLabel != "Internas de Frigate" {
+			t.Errorf("origin_label = %q, want 'Internas de Frigate'", m.OriginLabel)
+		}
+	})
+
+	t.Run("provision LPR has LPR Provision-ISR label and Provision origin", func(t *testing.T) {
+		cam := modulesOfDoc(t, Inventory{CameraID: "c", RemoteName: "c", Tags: []string{"lpr_provision"}}, `{}`)
+		m := mustModule(t, cam, ModuleLPR)
+		if m.Label != "LPR Provision-ISR" {
+			t.Errorf("label = %q, want 'LPR Provision-ISR'", m.Label)
+		}
+		if m.OriginLabel != "Internas de cámaras Provision" {
+			t.Errorf("origin_label = %q, want 'Internas de cámaras Provision'", m.OriginLabel)
+		}
+
+		line := mustModule(t, cam, ModuleLineCrossing)
+		if !line.Available || line.OriginLabel != "Internas de cámaras Provision" {
+			t.Errorf("line_crossing = %+v, want available with Provision origin", line)
+		}
+	})
+
+	t.Run("onvif analytics camera has ONVIF origin for analytics", func(t *testing.T) {
+		onvifCaps := []byte(`{"has_analytics":true}`)
+		cam := modulesOfDoc(t, Inventory{CameraID: "c", RemoteName: "c", ONVIFCapabilities: onvifCaps}, `{}`)
+		line := mustModule(t, cam, ModuleLineCrossing)
+		if !line.Available || line.OriginLabel != "ONVIF" {
+			t.Errorf("line_crossing = %+v, want available with ONVIF origin", line)
+		}
+	})
 }
 
 func TestFrigateLPRModuleFromEngineSection(t *testing.T) {

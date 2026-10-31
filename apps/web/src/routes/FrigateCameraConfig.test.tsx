@@ -399,32 +399,36 @@ describe("FrigateCameraConfig", () => {
   });
 
   describe("integration of the LPR test and the camera web view", () => {
-    it("lists the camera web view in the sidebar and shows the viewer when selected", async () => {
+    it("lists the camera web view in Avanzado and shows the viewer when selected", async () => {
       mountFull({}, { "/api/v1/me": () => json({ id: "u", tenant_id: "t", grants: [{ permission: "cameras.manage", effect: "allow" }, { permission: "servers.manage", effect: "allow" }, { permission: "servers.config.secrets", effect: "allow" }] }) });
-      await goTo("Integraciones");
+      await goTo("Avanzado");
       fireEvent.click(await screen.findByRole("button", { name: /^Web de la cámara/ }));
       expect(await screen.findByRole("region", { name: "Web de la cámara" })).toBeInTheDocument();
       expect(screen.getByRole("button", { name: "Abrir" })).toBeInTheDocument();
     });
 
-    it("opens Integraciones on the status of each backend", async () => {
+    it("opens Analíticas on the status of each backend", async () => {
       const integrations = [
         { name: "frigate", enabled: true, id: "frigate", label: "Frigate", status: "connected" },
         { name: "onvif", enabled: true, id: "onvif", label: "ONVIF", status: "connected" },
         { name: "provision_isr", enabled: false, id: "provision_isr", label: "Provision ISR", status: "not_configured" },
       ];
-      mountFull({}, { "/api/v1/cameras/c1/normalized-config": () => json({ integrations, state: { desired_revision: 0, applied_revision: 0, sync_state: "synced", last_error: "", drift: [] } }) });
-      await goTo("Integraciones");
+      mountFull({}, {
+        "/api/v1/cameras/c1/normalized-config": () => json({
+          integrations,
+          analytics: { modules: [{ id: "lpr", label: "LPR", available: true, enabled: false, writable: true, engine: "frigate", settings: {}, advanced: [] }] },
+          state: { desired_revision: 0, applied_revision: 0, sync_state: "synced", last_error: "", drift: [] },
+        }),
+      });
+      await goTo("Analíticas");
       expect(await screen.findByTestId("integration-provision_isr")).toHaveTextContent("No configurado");
       expect(screen.getByTestId("integration-frigate")).toHaveTextContent("Conectado");
-      expect(screen.getByRole("button", { name: /^Capacidades ONVIF/ })).toBeInTheDocument();
     });
 
     it("hides the camera web view entry when the user cannot manage the camera", async () => {
       mountFull({}, { "/api/v1/me": () => json({ id: "u", tenant_id: "t", grants: [{ permission: "cameras.view", effect: "allow" }] }) });
-      await goTo("Integraciones");
-      fireEvent.click(await screen.findByRole("button", { name: /^Capacidades ONVIF/ }));
-      expect(await screen.findByRole("region", { name: "Capacidades ONVIF" })).toBeInTheDocument();
+      await goTo("Avanzado");
+      expect(await screen.findByRole("button", { name: /^Capacidades ONVIF/ })).toBeInTheDocument();
       expect(screen.queryByRole("region", { name: "Acceso web a la cámara" })).not.toBeInTheDocument();
       expect(screen.queryByRole("button", { name: /^Web de la cámara/ })).not.toBeInTheDocument();
     });
@@ -742,7 +746,7 @@ describe("FrigateCameraConfig", () => {
     it("lists only the tabs the camera needs", async () => {
       mountFull({}, { "/api/v1/cameras/c1": () => cam({ tags: [], lpr: false }) });
       await screen.findByRole("tab", { name: "General" });
-      expect(screen.getAllByRole("tab").map((t) => t.textContent)).toEqual(expect.arrayContaining(["General", "Video", "Grabación", "Detección", "Zonas", "Integraciones", "Avanzado"]));
+      expect(screen.getAllByRole("tab").map((t) => t.textContent)).toEqual(expect.arrayContaining(["General", "Video", "Grabación", "Detección", "Zonas", "Avanzado"]));
       expect(screen.queryByRole("tab", { name: "PTZ" })).not.toBeInTheDocument();
       expect(screen.queryByRole("tab", { name: "Fisheye" })).not.toBeInTheDocument();
     });

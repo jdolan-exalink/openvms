@@ -15,6 +15,9 @@ const (
 	ModuleLPR                   = "lpr"
 	ModuleFaceDetection         = "face_detection"
 	ModuleFaceRecognition       = "face_recognition"
+	ModuleLineCrossing          = "line_crossing"
+	ModuleIntrusion             = "intrusion"
+	ModulePeopleCounting        = "people_counting"
 	ModuleVehicleClassification = "vehicle_classification"
 	ModuleVehicleColor          = "vehicle_color"
 	ModuleClothingColor         = "clothing_color"
@@ -25,10 +28,28 @@ const (
 const (
 	ModuleEngineFrigate   = "frigate"
 	ModuleEngineProvision = "provision"
+	ModuleEngineONVIF     = "onvif"
 	ModuleEngineNative    = "native"
 	ModuleEngineOpenVMS   = "openvms"
 	ModuleEngineNone      = "none"
 )
+
+// OriginLabel returns the human-readable origin required:
+// "Internas de Frigate", "Internas de cámaras Provision", "ONVIF", "OpenVMS".
+func OriginLabel(engine string) string {
+	switch engine {
+	case ModuleEngineFrigate:
+		return "Internas de Frigate"
+	case ModuleEngineProvision:
+		return "Internas de cámaras Provision"
+	case ModuleEngineONVIF:
+		return "ONVIF"
+	case ModuleEngineOpenVMS:
+		return "OpenVMS"
+	default:
+		return ""
+	}
+}
 
 // Reasons shown when a module cannot be switched on.
 const (
@@ -51,9 +72,12 @@ type faceGlobals interface {
 
 // moduleOrder is the order of the cards and the label of each module.
 var moduleOrder = []struct{ id, label string }{
-	{ModuleLPR, "Matrículas (LPR)"},
+	{ModuleLPR, "LPR"},
 	{ModuleFaceDetection, "Detección facial"},
 	{ModuleFaceRecognition, "Reconocimiento facial"},
+	{ModuleLineCrossing, "Cruce de línea"},
+	{ModuleIntrusion, "Intrusión en área"},
+	{ModulePeopleCounting, "Conteo de personas"},
 	{ModuleVehicleClassification, "Clasificación de vehículo"},
 	{ModuleVehicleColor, "Color de vehículo"},
 	{ModuleClothingColor, "Color de ropa"},
@@ -75,10 +99,11 @@ func ModuleLabel(id string) (string, bool) {
 // A module is Available (and Enabled) only with positive evidence in the data OpenVMS already
 // reads; otherwise Available is false and Reason says why. Nothing is invented.
 type AnalyticsModule struct {
-	ID        string `json:"id"`
-	Label     string `json:"label"`
-	Available bool   `json:"available"`
-	Enabled   bool   `json:"enabled"`
+	ID          string `json:"id"`
+	Label       string `json:"label"`
+	OriginLabel string `json:"origin_label,omitempty"`
+	Available   bool   `json:"available"`
+	Enabled     bool   `json:"enabled"`
 	// Writable says whether OpenVMS can switch the module through its engine. Provision cameras
 	// report their LPR but cannot be configured remotely.
 	Writable bool   `json:"writable"`
@@ -127,6 +152,8 @@ func deriveModulesWith(cam *Camera, in Inventory, doc map[string]any, face *frig
 	provision := hasAnyTag(in.Tags, "lpr_provision") || (lprTag && hasAnyTag(in.Tags, "provision", "provision_isr"))
 	lprDoc, _ := doc["lpr"].(map[string]any)
 	faceDoc, _ := doc["face_recognition"].(map[string]any)
+	caps, haveCaps := readONVIFCaps(in.ONVIFCapabilities)
+	hasOnvifAnalytics := haveCaps && caps.HasAnalytics
 
 	mods := make([]AnalyticsModule, 0, len(moduleOrder))
 	for _, def := range moduleOrder {
@@ -139,17 +166,24 @@ func deriveModulesWith(cam *Camera, in Inventory, doc map[string]any, face *frig
 			switch {
 			case provision:
 				m.Available, m.Enabled, m.Engine, m.Reason = true, true, ModuleEngineProvision, ReasonConfiguredOnCam
+				m.Label = "LPR Provision-ISR"
+				m.OriginLabel = OriginLabel(ModuleEngineProvision)
 				m.Advanced = append(m.Advanced, ModuleDetail{Label: "Origen", Value: "Analítica integrada Provision"})
 			case lprDoc != nil || lprTag:
 				m.Available, m.Engine, m.Reason = true, ModuleEngineFrigate, ""
+				m.Label = "LPR"
+				m.OriginLabel = OriginLabel(ModuleEngineFrigate)
 				m.Enabled = isTrue(cam.Analytics.LPR)
 				m.Writable = doc != nil
 				frigateSettings(&m, lprDoc, "expire_time")
 				m.Advanced = append(m.Advanced, ModuleDetail{Label: "Resultados", Value: "OpenVMS guarda cada lectura en el evento y permite buscar matrículas"})
+			default:
+				m.Label = "LPR"
 			}
 		case ModuleFaceRecognition:
 			if faceDoc != nil {
 				m.Available, m.Engine, m.Reason = true, ModuleEngineFrigate, ""
+				m.OriginLabel = OriginLabel(ModuleEngineFrigate)
 				m.Enabled = isTrue(boolPtr(doc, "face_recognition", "enabled"))
 				m.Writable = true
 				frigateSettings(&m, faceDoc)
@@ -161,16 +195,36 @@ func deriveModulesWith(cam *Camera, in Inventory, doc map[string]any, face *frig
 			// "detect without recognizing" mode, so the module mirrors recognition and is read-only.
 			if faceDoc != nil {
 				m.Available, m.Engine, m.Reason = true, ModuleEngineFrigate, ReasonFaceDetectionImplicit
+				m.OriginLabel = OriginLabel(ModuleEngineFrigate)
 				m.Enabled = isTrue(boolPtr(doc, "face_recognition", "enabled"))
 				m.Advanced = append(m.Advanced, ModuleDetail{Label: "Motor", Value: "Frigate"})
 				if face != nil {
 					m.Advanced = append(m.Advanced, ModuleDetail{Label: "Umbral de detección (servidor)", Value: strconv.FormatFloat(face.DetectionThreshold, 'f', -1, 64)})
 				}
 			}
+		case ModuleLineCrossing, ModuleIntrusion, ModulePeopleCounting:
+			switch {
+			case provision:
+				m.Available, m.Enabled, m.Engine, m.Reason = true, true, ModuleEngineProvision, ReasonConfiguredOnCam
+				m.OriginLabel = OriginLabel(ModuleEngineProvision)
+				m.Advanced = append(m.Advanced, ModuleDetail{Label: "Origen", Value: "Analítica inteligente integrada de la cámara Provision-ISR"})
+			case hasOnvifAnalytics:
+				m.Available, m.Enabled, m.Engine, m.Reason = true, true, ModuleEngineONVIF, ReasonConfiguredOnCam
+				m.OriginLabel = OriginLabel(ModuleEngineONVIF)
+				m.Advanced = append(m.Advanced, ModuleDetail{Label: "Origen", Value: "Reglas de analítica inteligente ONVIF (Profile M / T)"})
+			default:
+				m.Reason = ReasonNotAvailable
+			}
 		case ModuleVehicleClassification, ModuleVehicleColor, ModuleClothingColor:
 			localModule(&m, in.Local)
+			if m.Available {
+				m.OriginLabel = OriginLabel(ModuleEngineOpenVMS)
+			}
 		case ModuleSimilarSearch:
 			m.Reason = ReasonSimilarSearch
+		}
+		if m.OriginLabel == "" && m.Engine != ModuleEngineNone {
+			m.OriginLabel = OriginLabel(m.Engine)
 		}
 		mods = append(mods, m)
 	}

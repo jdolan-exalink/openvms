@@ -1716,6 +1716,28 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/cameras/{cameraId}/analytics/test": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                cameraId: string;
+            };
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Check an analytics or LPR engine of a camera
+         * @description Interactive test of an analytics or LPR service (lpr_provision, analytics_provision, analytics_frigate, lpr_frigate).
+         */
+        post: operations["testCameraAnalytics"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/cameras/{cameraId}/onvif/snapshot": {
         parameters: {
             query?: never;
@@ -5210,6 +5232,21 @@ export interface components {
             hints: string[];
             observed: components["schemas"]["CameraLprTestObserved"];
         };
+        CameraAnalyticsTestRequest: {
+            /** @enum {string} */
+            target?: "lpr_provision" | "analytics_provision" | "analytics_frigate" | "lpr_frigate";
+            wait_seconds?: number;
+        };
+        CameraAnalyticsTest: {
+            target: string;
+            engine: string;
+            passed: boolean;
+            checks: components["schemas"]["CameraLprTestCheck"][];
+            hints: string[];
+            observed: {
+                [key: string]: unknown;
+            };
+        };
         CameraOnvifCheckRequest: {
             endpoint?: string;
             username?: string;
@@ -5867,7 +5904,7 @@ export interface components {
                 name: string;
                 enabled: boolean;
                 /** @enum {string} */
-                id?: "frigate" | "onvif" | "provision_isr";
+                id?: "frigate" | "onvif" | "provision_isr" | "lpr_provision" | "analytics_provision" | "analytics_frigate" | "lpr_frigate";
                 label?: string;
                 /** @enum {string} */
                 status?: "connected" | "not_configured" | "error" | "unknown";
@@ -5952,15 +5989,17 @@ export interface components {
         CameraConfigOrigin: "ui" | "profile" | "group" | "api" | "sync" | "yaml" | "external_device";
         CameraAnalyticsModule: {
             /** @enum {string} */
-            id: "lpr" | "face_detection" | "face_recognition" | "vehicle_classification" | "vehicle_color" | "clothing_color" | "similar_search";
+            id: "lpr" | "face_detection" | "face_recognition" | "line_crossing" | "intrusion" | "people_counting" | "vehicle_classification" | "vehicle_color" | "clothing_color" | "similar_search";
             /** @example Matrículas (LPR) */
             label: string;
+            /** @example Internas de Frigate */
+            origin_label?: string;
             available: boolean;
             enabled: boolean;
             /** @description OpenVMS can switch the module through its engine */
             writable: boolean;
             /** @enum {string} */
-            engine: "frigate" | "provision" | "native" | "openvms" | "none";
+            engine: "frigate" | "provision" | "onvif" | "native" | "openvms" | "none";
             /** @description Why the module cannot be switched on from here */
             reason?: string;
             /** @description Only fields with a real backing in the engine */
@@ -11160,6 +11199,37 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["CameraLprTest"];
+                };
+            };
+            400: components["responses"]["BadRequest"];
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+            502: components["responses"]["FrigateUnreachable"];
+        };
+    };
+    testCameraAnalytics: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                cameraId: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: {
+            content: {
+                "application/json": components["schemas"]["CameraAnalyticsTestRequest"];
+            };
+        };
+        responses: {
+            /** @description Result of the checks */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["CameraAnalyticsTest"];
                 };
             };
             400: components["responses"]["BadRequest"];

@@ -45,9 +45,36 @@ export function draftEnhancement(patch: Draft, m: AnalyticsModule): number | und
 /** Whether any module can be shown: the Analíticas tab stays hidden otherwise. */
 export const anyModuleAvailable = (modules: readonly Pick<AnalyticsModule, "available">[] | undefined): boolean => !!modules?.some((m) => m.available);
 
+export const originLabelOf = (m: Pick<AnalyticsModule, "origin_label" | "engine">): string => {
+  if (m.origin_label) return m.origin_label;
+  switch (m.engine) {
+    case "frigate":
+      return "Internas de Frigate";
+    case "provision":
+      return "Internas de cámaras Provision";
+    case "onvif":
+    case "native":
+      return "ONVIF";
+    case "openvms":
+      return "OpenVMS";
+    default:
+      return "";
+  }
+};
+
+export const displayModuleLabel = (m: Pick<AnalyticsModule, "id" | "label" | "engine">): string => {
+  if (m.id === "lpr") {
+    return m.engine === "provision" || m.label?.toLowerCase().includes("provision")
+      ? "LPR Provision-ISR"
+      : "LPR";
+  }
+  return m.label;
+};
+
 export const engineLabel: Record<AnalyticsModule["engine"], string> = {
   frigate: "Frigate",
   provision: "Provision ISR",
+  onvif: "ONVIF",
   native: "Analítica nativa de la cámara",
   openvms: "OpenVMS",
   none: "Sin motor",

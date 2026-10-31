@@ -165,4 +165,62 @@ describe("draft helpers", () => {
     expect(anyModuleAvailable(all().map((m) => ({ ...m, available: false })))).toBe(false);
     expect(anyModuleAvailable(undefined)).toBe(false);
   });
+
+  it("distinguishes LPR label and displays origin chips for Frigate, Provision, ONVIF and OpenVMS", () => {
+    const setPatch = vi.fn();
+    const modules: AnalyticsModule[] = [
+      mod({ id: "lpr", label: "LPR", engine: "frigate", available: true, writable: true, origin_label: "Internas de Frigate" }),
+      mod({ id: "line_crossing", label: "Cruce de línea", engine: "provision", available: true, writable: false, origin_label: "Internas de cámaras Provision" }),
+      mod({ id: "intrusion", label: "Intrusión en área", engine: "onvif", available: true, writable: false, origin_label: "ONVIF" }),
+      mod({ id: "vehicle_classification", label: "Clasificación de vehículo", engine: "openvms", available: true, writable: false, origin_label: "OpenVMS" }),
+    ];
+
+    render(
+      <QueryClientProvider client={new QueryClient()}>
+        <AnalyticsTab cameraId="c1" modules={modules} patch={{}} setPatch={setPatch} />
+      </QueryClientProvider>,
+    );
+
+    // LPR Frigate label
+    expect(screen.getByText("LPR")).toBeInTheDocument();
+    // Origin chips
+    expect(screen.getByText("Internas de Frigate")).toBeInTheDocument();
+    expect(screen.getByText("Internas de cámaras Provision")).toBeInTheDocument();
+    expect(screen.getByText("ONVIF")).toBeInTheDocument();
+    expect(screen.getByText("OpenVMS")).toBeInTheDocument();
+  });
+
+  it("labels Provision LPR as LPR Provision-ISR", () => {
+    const setPatch = vi.fn();
+    const modules: AnalyticsModule[] = [
+      mod({ id: "lpr", label: "LPR Provision-ISR", engine: "provision", available: true, writable: false, origin_label: "Internas de cámaras Provision" }),
+    ];
+
+    render(
+      <QueryClientProvider client={new QueryClient()}>
+        <AnalyticsTab cameraId="c1" modules={modules} patch={{}} setPatch={setPatch} />
+      </QueryClientProvider>,
+    );
+
+    expect(screen.getByText("LPR Provision-ISR")).toBeInTheDocument();
+    expect(screen.getByText("Internas de cámaras Provision")).toBeInTheDocument();
+  });
+
+  it("renders the integrations panel at the top when integrations are provided", () => {
+    const setPatch = vi.fn();
+    const integrations = [
+      { id: "lpr_provision", label: "LPR Provision-ISR", status: "connected" as const, detail: "En línea" },
+      { id: "analytics_frigate", label: "Analíticas Frigate", status: "connected" as const, detail: "Detección activa" },
+    ];
+
+    render(
+      <QueryClientProvider client={new QueryClient()}>
+        <AnalyticsTab cameraId="c1" integrations={integrations} modules={all()} patch={{}} setPatch={setPatch} />
+      </QueryClientProvider>,
+    );
+
+    expect(screen.getByRole("region", { name: "Estado de integraciones" })).toBeInTheDocument();
+    expect(screen.getByTestId("integration-lpr_provision")).toBeInTheDocument();
+    expect(screen.getByTestId("integration-analytics_frigate")).toBeInTheDocument();
+  });
 });

@@ -519,3 +519,95 @@ func NotLPRResult() LPRLinkResult {
 	res.finish()
 	return res
 }
+
+// CheckProvisionAnalytics runs checks on Provision/ONVIF camera analytics.
+func (t *LPRLinkTester) CheckProvisionAnalytics(ctx context.Context, actor authz.Actor, target LPRProvisionTarget, onvifCaps json.RawMessage) (LPRLinkResult, error) {
+	res := LPRLinkResult{Engine: LPREngineProvision}
+	status, statusErr := t.Agent.GetProvisionLPRStatus(ctx, actor, target.ServerID)
+	if err := ctx.Err(); err != nil {
+		return res, err
+	}
+	// 1. Agent configured & reachable
+	if errors.Is(statusErr, ErrAgentUnprovisioned) {
+		res.add("agent_configured", LPRCheckFail, "El servidor no tiene un agente registrado", "")
+		res.finish()
+		return res, nil
+	}
+	res.add("agent_configured", LPRCheckPass, "El servidor tiene un agente registrado", "")
+	if statusErr != nil && (errors.Is(statusErr, ErrAgentProbeUnavailable) || errors.Is(statusErr, ErrAgentProbeFailed)) {
+		res.add("agent_reachable", LPRCheckFail, "OpenVMS no puede comunicarse con el agente", statusErr.Error())
+		res.finish()
+		return res, nil
+	}
+	res.add("agent_reachable", LPRCheckPass, "OpenVMS alcanza al agente", "")
+
+	// 2. Camera ONVIF capabilities
+	var caps struct {
+		HasAnalytics bool `json:"has_analytics"`
+		HasEvents    bool `json:"has_events"`
+	}
+	_ = json.Unmarshal(onvifCaps, &caps)
+	if caps.HasAnalytics {
+		res.add("onvif_analytics", LPRCheckPass, "La cámara declara soporte de analítica inteligente (Profile M / ver20)", "")
+	} else if caps.HasEvents {
+		res.add("onvif_analytics", LPRCheckPass, "La cámara declara soporte de eventos ONVIF", "")
+	} else {
+		res.add("onvif_analytics", LPRCheckWarn, "La cámara no declara analíticas ONVIF explícitas; usa alarmas HTTP nativas", "")
+	}
+
+	// 3. Events received by agent
+	entry := FindLPRCameraStatus(status, target.CameraID, target.CameraIP, target.RemoteName, target.DisplayName)
+	snap := snapshotOf(entry)
+	snap.observe(&res.Observed)
+	if snap.hasEvents() {
+		res.add("event_seen", LPRCheckPass, "El agente ha recibido eventos de esta cámara", fmt.Sprintf("Eventos totales: %d.", *snap.eventCount))
+	} else if snap.lastSeen != nil {
+		res.add("event_seen", LPRCheckWarn, "La cámara reporta keepalives pero todavía no emitió eventos de analítica", "")
+	} else {
+		res.add("event_seen", LPRCheckWarn, "Todavía no se recibieron eventos ni keepalives de esta cámara", "Configurá el servidor de alarmas HTTP en la cámara apuntando al agente.")
+	}
+
+	t.checkIngestion(ctx, actor, target.ServerID, &res, true)
+	res.finish()
+	return res, nil
+}
+
+// FrigateAnalyticsProbe holds lookups for checking Frigate detection and analytics.
+type FrigateAnalyticsProbe struct {
+	DetectionEnabled func(ctx context.Context) (bool, error)
+	ObjectsTracked   func(ctx context.Context) ([]string, error)
+	Events24h        func(ctx context.Context) (int, error)
+}
+
+// CheckFrigateAnalytics runs checks on Frigate object detection and analytics.
+func CheckFrigateAnalytics(ctx context.Context, p FrigateAnalyticsProbe) LPRLinkResult {
+	res := LPRLinkResult{Engine: LPREngineFrigate}
+	enabled, err := p.DetectionEnabled(ctx)
+	if err != nil {
+		res.add("frigate_reachable", LPRCheckFail, "No se pudo leer la configuración de Frigate", err.Error())
+		res.finish()
+		return res
+	}
+	res.add("frigate_reachable", LPRCheckPass, "Frigate responde correctamente", "")
+	if enabled {
+		res.add("detection_enabled", LPRCheckPass, "Detección de objetos activa en Frigate", "")
+	} else {
+		res.add("detection_enabled", LPRCheckWarn, "Detección de objetos desactivada en Frigate para esta cámara", "")
+	}
+	objects, oerr := p.ObjectsTracked(ctx)
+	if oerr == nil && len(objects) > 0 {
+		res.add("objects_tracked", LPRCheckPass, fmt.Sprintf("Objetos rastreados: %s", strings.Join(objects, ", ")), "")
+	} else {
+		res.add("objects_tracked", LPRCheckWarn, "No hay objetos configurados para rastrear", "")
+	}
+	if p.Events24h != nil {
+		count, cerr := p.Events24h(ctx)
+		if cerr == nil && count > 0 {
+			res.add("events_recent", LPRCheckPass, fmt.Sprintf("Eventos detectados en las últimas 24 horas: %d", count), "")
+		} else {
+			res.add("events_recent", LPRCheckWarn, "No se registraron eventos en las últimas 24 horas", "")
+		}
+	}
+	res.finish()
+	return res
+}
