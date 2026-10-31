@@ -328,6 +328,8 @@ export type PlateFilter = {
   camera_group_id?: string[];
   vehicle_type?: string[];
   vehicle_color?: string[];
+  vehicle_brand?: string;
+  vehicle_model?: string;
   from?: string;
   to?: string;
   limit?: number;

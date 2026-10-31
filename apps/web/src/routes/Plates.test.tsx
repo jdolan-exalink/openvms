@@ -122,6 +122,41 @@ describe("Plates", () => {
     });
   });
 
+  it("sends vehicle_brand and vehicle_model query params and shows filter chips", async () => {
+    let lastReadsUrl: URL | undefined;
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (input: Request) => {
+        const url = new URL(input.url);
+        if (url.pathname === "/api/v1/lpr/reads") {
+          lastReadsUrl = url;
+          return json({ items: [] });
+        }
+        return stubApi({
+          "/api/v1/me": () => meResponse("lpr.search"),
+          ...noCatalogs,
+        })(input);
+      }),
+    );
+
+    renderPage(Plates);
+
+    expect(await screen.findByText("No hay lecturas que coincidan.")).toBeInTheDocument();
+
+    fireEvent.change(screen.getByLabelText("Marca"), { target: { value: "Ford" } });
+    fireEvent.change(screen.getByLabelText("Modelo"), { target: { value: "Focus" } });
+    fireEvent.click(screen.getByRole("button", { name: "Buscar" }));
+
+    await waitFor(() => {
+      const p = lastReadsUrl?.searchParams;
+      expect(p?.get("vehicle_brand")).toBe("Ford");
+      expect(p?.get("vehicle_model")).toBe("Focus");
+    });
+
+    expect(screen.getByText("Marca: Ford")).toBeInTheDocument();
+    expect(screen.getByText("Modelo: Focus")).toBeInTheDocument();
+  });
+
   it("disables the Patente filter without lpr.search", async () => {
     vi.stubGlobal(
       "fetch",
