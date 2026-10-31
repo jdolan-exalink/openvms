@@ -223,4 +223,23 @@ describe("PlateDetailModal", () => {
     const cropDownload = screen.getByRole("link", { name: "Descargar recorte" });
     expect(cropDownload).toHaveAttribute("href", "/media/v1/lpr/reads/r1/snapshot.jpg?crop=1&quality=100&download=1");
   });
+
+  it("opens the high-res photo lightbox when clicking the crop image", async () => {
+    const readWithCrop: Schemas["PlateRead"] = { ...read, has_crop: true };
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (input: Request) => {
+        const url = new URL(input.url);
+        if (url.pathname === "/api/v1/tenants/t1/branding") return brandingResponse();
+        return stubApi({ "/api/v1/me": () => meResponse("lpr.view", "snapshots.view", "snapshots.download") })(input);
+      }),
+    );
+    renderPage(() => <PlateDetailModal read={readWithCrop} onClose={() => {}} />);
+
+    const cropImg = await screen.findByRole("img", { name: "Recorte de la matrícula AB123CD" });
+    fireEvent.click(cropImg);
+
+    const lightbox = await screen.findByRole("dialog", { name: "Foto en alta resolución" });
+    expect(lightbox).toBeInTheDocument();
+  });
 });

@@ -425,7 +425,7 @@ func (g *Gateway) lprReadSnapshot(w http.ResponseWriter, r *http.Request) {
 		// Fallback to camera frame from Frigate recordings at the read's timestamp.
 		if ad, err := g.Svc.Adapters.Get(r.Context(), cam.Server); err == nil {
 			ts := strconv.FormatInt(lr.SeenAt.Unix(), 10)
-			resp, err := ad.Media().Open(r.Context(), "/api/"+url.PathEscape(cam.RemoteName)+"/"+ts+"/snapshot.jpg", nil, r.Header)
+			resp, err := ad.Media().Open(r.Context(), "/api/"+url.PathEscape(cam.RemoteName)+"/recordings/"+ts+"/snapshot.jpg", nil, r.Header)
 			if err == nil {
 				if resp.StatusCode == http.StatusOK {
 					if isDownload {
@@ -554,7 +554,7 @@ func (g *Gateway) lprReadSnapshot(w http.ResponseWriter, r *http.Request) {
 			_ = resp.Body.Close()
 			// Fallback to camera frame from Frigate recordings at the read's timestamp.
 			ts := strconv.FormatInt(lr.SeenAt.Unix(), 10)
-			recResp, rerr := ad.Media().Open(r.Context(), "/api/"+url.PathEscape(cam.RemoteName)+"/"+ts+"/snapshot.jpg", nil, r.Header)
+			recResp, rerr := ad.Media().Open(r.Context(), "/api/"+url.PathEscape(cam.RemoteName)+"/recordings/"+ts+"/snapshot.jpg", nil, r.Header)
 			if rerr == nil {
 				if recResp.StatusCode == http.StatusOK {
 					relay(w, recResp, "private, max-age=3600")
@@ -571,7 +571,7 @@ func (g *Gateway) lprReadSnapshot(w http.ResponseWriter, r *http.Request) {
 	if resp.StatusCode != http.StatusOK {
 		_ = resp.Body.Close()
 		ts := strconv.FormatInt(lr.SeenAt.Unix(), 10)
-		recResp, rerr := ad.Media().Open(r.Context(), "/api/"+url.PathEscape(cam.RemoteName)+"/"+ts+"/snapshot.jpg", nil, r.Header)
+		recResp, rerr := ad.Media().Open(r.Context(), "/api/"+url.PathEscape(cam.RemoteName)+"/recordings/"+ts+"/snapshot.jpg", nil, r.Header)
 		if rerr == nil {
 			if recResp.StatusCode == http.StatusOK {
 				g.lprReadSnapshotDownload(w, r, a, cam, lr, recResp)
