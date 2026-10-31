@@ -14,11 +14,11 @@ Empower operators with two major LPR capabilities:
 - [x] Unit tests in `apps/web/src/routes/Plates.test.tsx`.
 
 ### Slice 2: Database Migration & Storage for LPR Watchlists
-- [ ] Migration `migrations/00088_lpr_watchlists.sql`:
+- [x] Migration `migrations/00088_lpr_watchlists.sql`:
   - `lpr_watchlists` (tenant_id, name, description, color, created_at, updated_at).
   - `lpr_watchlist_items` (tenant_id, watchlist_id, plate, notes, brand, model, color, owner_name, created_at).
-- [ ] SQL queries in `internal/store/queries/lpr_watchlists.sql` and `sqlc generate`.
-- [ ] Store repository tests.
+- [x] SQL queries in `internal/store/queries/lpr_watchlists.sql` and `sqlc generate`.
+- [x] Store repository tests.
 
 ### Slice 3: Rules & Alarm Engine Integration
 - [ ] Add `LprWatchlistIDs []uuid.UUID` to `rules.Conditions`.
