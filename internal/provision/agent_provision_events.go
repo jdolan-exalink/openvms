@@ -37,12 +37,23 @@ type LPRAgentEvent struct {
 	EventTime      time.Time `json:"event_time"`
 	ReceivedTime   time.Time `json:"received_time"`
 	Confidence     *float64  `json:"confidence,omitempty"`
+	ListStatus     *string   `json:"list_status,omitempty"`
 	VehicleColor   *string   `json:"vehicle_color,omitempty"`
 	VehicleBrand   *string   `json:"vehicle_brand,omitempty"`
 	VehicleModel   *string   `json:"vehicle_model,omitempty"`
 	VehicleType    *string   `json:"vehicle_type,omitempty"`
 	PlateCrop      *string   `json:"plate_crop,omitempty"`
 	PanoramicImage *string   `json:"panoramic_image,omitempty"`
+
+	PlateBox []float32 `json:"plate_box,omitempty"`
+
+	PersonName *string  `json:"person_name,omitempty"`
+	FaceScore  *float64 `json:"face_score,omitempty"`
+	FaceID     *string  `json:"face_id,omitempty"`
+
+	EnterCount *int `json:"enter_count,omitempty"`
+	ExitCount  *int `json:"exit_count,omitempty"`
+	PassCount  *int `json:"pass_count,omitempty"`
 }
 
 // LPRQueuedEvent is one event waiting in an agent's queue. Seq is the agent's cursor; ID is random,

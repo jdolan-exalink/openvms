@@ -113,6 +113,11 @@ func (p *Parser) Parse(r *http.Request, body []byte, receivedAt time.Time) (LPRE
 		if event.EventType == "" {
 			event.EventType = "lpr"
 		}
+	} else if strings.EqualFold(strings.TrimSpace(event.Plate), "COUNT") || event.EnterCount != nil || event.ExitCount != nil || event.PassCount != nil {
+		event.Plate = ""
+		if event.EventType == "" {
+			event.EventType = "people_counting"
+		}
 	} else if event.EventType != "" {
 		event.Plate = ""
 	} else {
@@ -206,6 +211,56 @@ func (p *Parser) parseXML(data []byte, ev *LPREvent) (bool, error) {
 				}
 			}
 			switch {
+			case isPeopleCountAlarmKey(name):
+				var s string
+				if err := decoder.DecodeElement(&s, &se); err == nil && isXMLBoolTrue(s) {
+					activeAlarms["people_counting"] = true
+				}
+			case isEnterCountKey(name):
+				var s string
+				if err := decoder.DecodeElement(&s, &se); err == nil && s != "" {
+					if n, err := strconv.Atoi(strings.TrimSpace(s)); err == nil {
+						ev.EnterCount = &n
+					}
+				}
+			case isExitCountKey(name):
+				var s string
+				if err := decoder.DecodeElement(&s, &se); err == nil && s != "" {
+					if n, err := strconv.Atoi(strings.TrimSpace(s)); err == nil {
+						ev.ExitCount = &n
+					}
+				}
+			case isPassCountKey(name):
+				var s string
+				if err := decoder.DecodeElement(&s, &se); err == nil && s != "" {
+					if n, err := strconv.Atoi(strings.TrimSpace(s)); err == nil {
+						ev.PassCount = &n
+					}
+				}
+			case isPersonNameKey(name):
+				var s string
+				if err := decoder.DecodeElement(&s, &se); err == nil && s != "" {
+					ev.PersonName = &s
+				}
+			case isFaceScoreKey(name):
+				var s string
+				if err := decoder.DecodeElement(&s, &se); err == nil && s != "" {
+					if score, err := strconv.ParseFloat(strings.TrimSpace(s), 64); err == nil {
+						if score > 1.0 {
+							score = score / 100.0
+						}
+						ev.FaceScore = &score
+					}
+				}
+			case isFaceIDKey(name):
+				var s string
+				if err := decoder.DecodeElement(&s, &se); err == nil && s != "" {
+					ev.FaceID = &s
+				}
+			case isRectKey(name):
+				if box := parseXMLRect(decoder, se); len(box) == 4 {
+					ev.PlateBox = box
+				}
 			case isLineCrossingKey(name):
 				var s string
 				if err := decoder.DecodeElement(&s, &se); err == nil && isXMLBoolTrue(s) {
@@ -346,7 +401,7 @@ func (p *Parser) parseXML(data []byte, ev *LPREvent) (bool, error) {
 			}
 		}
 	}
-	alarmPriority := []string{"line_crossing", "intrusion", "face", "vehicle", "human", "tamper", "motion"}
+	alarmPriority := []string{"line_crossing", "intrusion", "face", "vehicle", "human", "people_counting", "tamper", "motion"}
 	for _, p := range alarmPriority {
 		if activeAlarms[p] {
 			ev.EventType = p
@@ -439,6 +494,33 @@ func extractFromMap(m map[string]any, ev *LPREvent) {
 				ev.CameraID = val
 			case isListStatusKey(kLower):
 				ev.ListStatus = &val
+			case isPersonNameKey(kLower):
+				if val != "" {
+					ev.PersonName = &val
+				}
+			case isFaceIDKey(kLower):
+				if val != "" {
+					ev.FaceID = &val
+				}
+			case isFaceScoreKey(kLower):
+				if score, err := strconv.ParseFloat(strings.TrimSpace(val), 64); err == nil {
+					if score > 1.0 {
+						score = score / 100.0
+					}
+					ev.FaceScore = &score
+				}
+			case isEnterCountKey(kLower):
+				if n, err := strconv.Atoi(strings.TrimSpace(val)); err == nil {
+					ev.EnterCount = &n
+				}
+			case isExitCountKey(kLower):
+				if n, err := strconv.Atoi(strings.TrimSpace(val)); err == nil {
+					ev.ExitCount = &n
+				}
+			case isPassCountKey(kLower):
+				if n, err := strconv.Atoi(strings.TrimSpace(val)); err == nil {
+					ev.PassCount = &n
+				}
 			case isCropKey(kLower):
 				val = strings.TrimSpace(val)
 				if val != "" {
@@ -461,19 +543,51 @@ func extractFromMap(m map[string]any, ev *LPREvent) {
 				ev.Direction = &val
 			}
 		case float64:
-			if isConfidenceKey(kLower) {
+			switch {
+			case isConfidenceKey(kLower):
 				c := val
 				ev.Confidence = &c
-			} else if isSpeedKey(kLower) {
+			case isSpeedKey(kLower):
 				s := val
 				ev.Speed = &s
+			case isFaceScoreKey(kLower):
+				score := val
+				if score > 1.0 {
+					score = score / 100.0
+				}
+				ev.FaceScore = &score
+			case isEnterCountKey(kLower):
+				n := int(val)
+				ev.EnterCount = &n
+			case isExitCountKey(kLower):
+				n := int(val)
+				ev.ExitCount = &n
+			case isPassCountKey(kLower):
+				n := int(val)
+				ev.PassCount = &n
+			}
+		case bool:
+			if isPeopleCountAlarmKey(kLower) && val {
+				ev.EventType = "people_counting"
 			}
 		case map[string]any:
-			extractFromMap(val, ev)
+			if isRectKey(kLower) {
+				if box := extractRectFromMap(val); len(box) == 4 {
+					ev.PlateBox = box
+				}
+			} else {
+				extractFromMap(val, ev)
+			}
 		case []any:
-			for _, item := range val {
-				if itemMap, ok := item.(map[string]any); ok {
-					extractFromMap(itemMap, ev)
+			if isRectKey(kLower) {
+				if box := extractRectFromSlice(val); len(box) == 4 {
+					ev.PlateBox = box
+				}
+			} else {
+				for _, item := range val {
+					if itemMap, ok := item.(map[string]any); ok {
+						extractFromMap(itemMap, ev)
+					}
 				}
 			}
 		}
@@ -604,6 +718,314 @@ func isSpeedKey(k string) bool {
 
 func isDirectionKey(k string) bool {
 	return k == "direction" || k == "heading" || k == "direccion"
+}
+
+func isRectKey(k string) bool {
+	return k == "rect" || k == "plate_rect" || k == "platerect" || k == "location" ||
+		k == "bounding_box" || k == "bbox" || k == "target_rect" || k == "targetrect"
+}
+
+func isPersonNameKey(k string) bool {
+	return k == "personname" || k == "person_name" || k == "facename" || k == "face_name" ||
+		k == "targetname" || k == "target_name"
+}
+
+func isFaceScoreKey(k string) bool {
+	return k == "facescore" || k == "face_score" || k == "similarity" || k == "matchscore" || k == "match_score"
+}
+
+func isFaceIDKey(k string) bool {
+	return k == "faceid" || k == "face_id" || k == "personid" || k == "person_id"
+}
+
+func isPeopleCountAlarmKey(k string) bool {
+	return k == "peoplecountalarm" || k == "peoplecount" || k == "targetcountalarm" ||
+		k == "countalarm" || k == "flowcountalarm" || k == "flowcount"
+}
+
+func isEnterCountKey(k string) bool {
+	return k == "entercount" || k == "enter_count" || k == "incount" || k == "in_count"
+}
+
+func isExitCountKey(k string) bool {
+	return k == "exitcount" || k == "exit_count" || k == "outcount" || k == "out_count"
+}
+
+func isPassCountKey(k string) bool {
+	return k == "passcount" || k == "pass_count" || k == "totalcount" || k == "total_count"
+}
+
+func parseXMLRect(decoder *xml.Decoder, se xml.StartElement) []float32 {
+	var x, y, w, h, left, top, right, bottom float64
+	var picW, picH float64
+	var hasXY, hasLTRB bool
+
+	for _, a := range se.Attr {
+		k := strings.ToLower(a.Name.Local)
+		val, err := strconv.ParseFloat(strings.TrimSpace(a.Value), 64)
+		if err != nil {
+			continue
+		}
+		switch k {
+		case "x":
+			x = val
+			hasXY = true
+		case "y":
+			y = val
+			hasXY = true
+		case "w", "width":
+			w = val
+			hasXY = true
+		case "h", "height":
+			h = val
+			hasXY = true
+		case "left":
+			left = val
+			hasLTRB = true
+		case "top":
+			top = val
+			hasLTRB = true
+		case "right":
+			right = val
+			hasLTRB = true
+		case "bottom":
+			bottom = val
+			hasLTRB = true
+		case "picwidth", "pic_width", "imgwidth", "img_width":
+			picW = val
+		case "picheight", "pic_height", "imgheight", "img_height":
+			picH = val
+		}
+	}
+
+	if hasXY || hasLTRB {
+		return normalizeBox(x, y, w, h, left, top, right, bottom, picW, picH, hasXY, hasLTRB)
+	}
+
+	depth := 1
+	for depth > 0 {
+		token, err := decoder.Token()
+		if err != nil {
+			break
+		}
+		switch t := token.(type) {
+		case xml.StartElement:
+			depth++
+			tag := strings.ToLower(t.Name.Local)
+			var text string
+			if err := decoder.DecodeElement(&text, &t); err == nil {
+				depth--
+				if val, err := strconv.ParseFloat(strings.TrimSpace(text), 64); err == nil {
+					switch tag {
+					case "x":
+						x = val
+						hasXY = true
+					case "y":
+						y = val
+						hasXY = true
+					case "w", "width":
+						w = val
+						hasXY = true
+					case "h", "height":
+						h = val
+						hasXY = true
+					case "left":
+						left = val
+						hasLTRB = true
+					case "top":
+						top = val
+						hasLTRB = true
+					case "right":
+						right = val
+						hasLTRB = true
+					case "bottom":
+						bottom = val
+						hasLTRB = true
+					case "picwidth", "pic_width", "imgwidth", "img_width":
+						picW = val
+					case "picheight", "pic_height", "imgheight", "img_height":
+						picH = val
+					}
+				}
+			}
+		case xml.EndElement:
+			depth--
+		}
+	}
+
+	if hasXY || hasLTRB {
+		return normalizeBox(x, y, w, h, left, top, right, bottom, picW, picH, hasXY, hasLTRB)
+	}
+	return nil
+}
+
+func extractRectFromMap(m map[string]any) []float32 {
+	var x, y, w, h, left, top, right, bottom float64
+	var picW, picH float64
+	var hasXY, hasLTRB bool
+
+	for k, v := range m {
+		kLower := strings.ToLower(k)
+		val, ok := toFloat(v)
+		if !ok {
+			continue
+		}
+		switch kLower {
+		case "x":
+			x = val
+			hasXY = true
+		case "y":
+			y = val
+			hasXY = true
+		case "w", "width":
+			w = val
+			hasXY = true
+		case "h", "height":
+			h = val
+			hasXY = true
+		case "left":
+			left = val
+			hasLTRB = true
+		case "top":
+			top = val
+			hasLTRB = true
+		case "right":
+			right = val
+			hasLTRB = true
+		case "bottom":
+			bottom = val
+			hasLTRB = true
+		case "picwidth", "pic_width", "imgwidth", "img_width":
+			picW = val
+		case "picheight", "pic_height", "imgheight", "img_height":
+			picH = val
+		}
+	}
+	return normalizeBox(x, y, w, h, left, top, right, bottom, picW, picH, hasXY, hasLTRB)
+}
+
+func extractRectFromSlice(s []any) []float32 {
+	if len(s) != 4 {
+		return nil
+	}
+	var nums [4]float64
+	for i, v := range s {
+		n, ok := toFloat(v)
+		if !ok {
+			return nil
+		}
+		nums[i] = n
+	}
+	top := nums[0]
+	left := nums[1]
+	h := nums[2]
+	w := nums[3]
+	if nums[2] > nums[0] && nums[3] > nums[1] && nums[2] <= 1.0 && nums[3] <= 1.0 {
+		h = nums[2] - nums[0]
+		w = nums[3] - nums[1]
+	}
+	return normalizeBox(left, top, w, h, 0, 0, 0, 0, 0, 0, true, false)
+}
+
+func normalizeBox(x, y, w, h, left, top, right, bottom, picW, picH float64, hasXY, hasLTRB bool) []float32 {
+	var top0, left0, h0, w0 float64
+	if hasLTRB {
+		top0 = top
+		left0 = left
+		h0 = bottom - top
+		w0 = right - left
+	} else if hasXY {
+		top0 = y
+		left0 = x
+		h0 = h
+		w0 = w
+	} else {
+		return nil
+	}
+
+	if h0 <= 0 || w0 <= 0 {
+		return nil
+	}
+
+	var topNorm, leftNorm, heightNorm, widthNorm float64
+	if picW > 0 && picH > 0 {
+		topNorm = top0 / picH
+		leftNorm = left0 / picW
+		heightNorm = h0 / picH
+		widthNorm = w0 / picW
+	} else if top0 > 1.0 || left0 > 1.0 || h0 > 1.0 || w0 > 1.0 {
+		if top0 <= 10000 && left0 <= 10000 && (top0+h0) <= 10000 && (left0+w0) <= 10000 {
+			topNorm = top0 / 10000.0
+			leftNorm = left0 / 10000.0
+			heightNorm = h0 / 10000.0
+			widthNorm = w0 / 10000.0
+		} else {
+			topNorm = top0 / 1080.0
+			leftNorm = left0 / 1920.0
+			heightNorm = h0 / 1080.0
+			widthNorm = w0 / 1920.0
+		}
+	} else {
+		topNorm = top0
+		leftNorm = left0
+		heightNorm = h0
+		widthNorm = w0
+	}
+
+	clamp := func(val float64) float64 {
+		if val < 0 {
+			return 0
+		}
+		if val > 1.0 {
+			return 1.0
+		}
+		return val
+	}
+
+	topNorm = clamp(topNorm)
+	leftNorm = clamp(leftNorm)
+	heightNorm = clamp(heightNorm)
+	widthNorm = clamp(widthNorm)
+
+	if heightNorm <= 0 || widthNorm <= 0 {
+		return nil
+	}
+
+	return []float32{float32(topNorm), float32(leftNorm), float32(heightNorm), float32(widthNorm)}
+}
+
+func toFloat(v any) (float64, bool) {
+	switch n := v.(type) {
+	case float64:
+		return n, true
+	case float32:
+		return float64(n), true
+	case int:
+		return float64(n), true
+	case int64:
+		return float64(n), true
+	case string:
+		if f, err := strconv.ParseFloat(strings.TrimSpace(n), 64); err == nil {
+			return f, true
+		}
+	}
+	return 0, false
+}
+
+func toInt(v any) (int, bool) {
+	switch n := v.(type) {
+	case int:
+		return n, true
+	case int64:
+		return int(n), true
+	case float64:
+		return int(n), true
+	case string:
+		if i, err := strconv.Atoi(strings.TrimSpace(n)); err == nil {
+			return i, true
+		}
+	}
+	return 0, false
 }
 
 func looksLikeJSON(b []byte) bool {

@@ -33,6 +33,19 @@ type LPREvent struct {
 	VehicleType      *string   `json:"vehicle_type,omitempty"`
 	Speed            *float64  `json:"speed,omitempty"`
 	Direction        *string   `json:"direction,omitempty"`
+
+	// Target bounding box coordinates: [top, left, height, width] normalized (0.0 to 1.0)
+	PlateBox []float32 `json:"plate_box,omitempty"`
+
+	// Face identification analytics
+	PersonName *string  `json:"person_name,omitempty"`
+	FaceScore  *float64 `json:"face_score,omitempty"`
+	FaceID     *string  `json:"face_id,omitempty"`
+
+	// Flow & people counting analytics
+	EnterCount *int `json:"enter_count,omitempty"`
+	ExitCount  *int `json:"exit_count,omitempty"`
+	PassCount  *int `json:"pass_count,omitempty"`
 }
 
 // CameraStatus tracks the health and heartbeat of a Provision-ISR camera.
