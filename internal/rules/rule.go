@@ -38,6 +38,7 @@ type Conditions struct {
 	// a listed watchlist (see FaceResolver). Both empty means any person.
 	FacePersonIDs    []uuid.UUID   `json:"face_person_ids,omitempty"`
 	FaceWatchlistIDs []uuid.UUID   `json:"face_watchlist_ids,omitempty"`
+	LprWatchlistIDs  []uuid.UUID   `json:"lpr_watchlist_ids,omitempty"`
 	Severities       []string      `json:"severities,omitempty"`
 	VehicleTypes     []string      `json:"vehicle_types,omitempty"`
 	VehicleColors    []string      `json:"vehicle_colors,omitempty"`
@@ -104,6 +105,7 @@ type EventContext struct {
 	Start        time.Time
 	VehicleType  string
 	VehicleColor string
+	Plates       []string
 }
 
 func containsID(ids []uuid.UUID, id uuid.UUID) bool {

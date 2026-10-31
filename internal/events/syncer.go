@@ -86,6 +86,7 @@ type NewEvent struct {
 	// evaluation: never published or serialized, because they may be face names.
 	SubLabels       []string `json:"-"`
 	GainedSubLabels []string `json:"-"`
+	Plates          []string `json:"-"`
 }
 
 // OpenedAlarm is published when an alert event opens an alarm.
@@ -402,7 +403,7 @@ func ruleContext(ev NewEvent, cameraName string, faceUpdate bool) rules.EventCon
 	return rules.EventContext{
 		ID: ev.ID, TenantID: ev.TenantID, SiteID: ev.SiteID, ServerID: ev.ServerID, CameraID: ev.CameraID,
 		CameraName: cameraName, Severity: ev.Severity, Labels: ev.Labels, SubLabels: subLabels,
-		FaceUpdate: faceUpdate, Zones: ev.Zones, Start: ev.Start,
+		FaceUpdate: faceUpdate, Zones: ev.Zones, Start: ev.Start, Plates: ev.Plates,
 	}
 }
 

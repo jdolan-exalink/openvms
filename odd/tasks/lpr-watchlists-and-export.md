@@ -21,10 +21,10 @@ Empower operators with two major LPR capabilities:
 - [x] Store repository tests.
 
 ### Slice 3: Rules & Alarm Engine Integration
-- [ ] Add `LprWatchlistIDs []uuid.UUID` to `rules.Conditions`.
-- [ ] Add `StoreLprResolver` in `internal/rules/lpr.go` with tenant cache.
-- [ ] Evaluate rules on plate reads (both direct Provision LPR and Frigate events).
-- [ ] Unit & integration tests in `internal/rules/`.
+- [x] Add `LprWatchlistIDs []uuid.UUID` to `rules.Conditions`.
+- [x] Add `StoreLprResolver` in `internal/rules/lpr.go` with tenant cache.
+- [x] Evaluate rules on plate reads (both direct Provision LPR and Frigate events).
+- [x] Unit & integration tests in `internal/rules/`.
 
 ### Slice 4: REST API & OpenAPI Contract
 - [ ] OpenAPI endpoints in `packages/api-contract/openapi.yaml`:
