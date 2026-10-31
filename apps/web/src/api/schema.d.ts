@@ -12148,6 +12148,10 @@ export interface operations {
                 vehicle_type?: string[];
                 /** @description Match enriched vehicle colors. */
                 vehicle_color?: string[];
+                /** @description Filter by vehicle brand (e.g. Ford, Toyota, etc). */
+                vehicle_brand?: string;
+                /** @description Filter by vehicle model (e.g. Hilux, Focus, etc). */
+                vehicle_model?: string;
                 cursor?: string;
                 limit?: number;
             };
@@ -13268,6 +13272,10 @@ export interface operations {
                 vehicle_type?: string[];
                 /** @description Match enriched vehicle colors. */
                 vehicle_color?: string[];
+                /** @description Filter by vehicle brand (e.g. Ford, Toyota, etc). */
+                vehicle_brand?: string;
+                /** @description Filter by vehicle model (e.g. Hilux, Focus, etc). */
+                vehicle_model?: string;
                 from?: string;
                 to?: string;
                 cursor?: string;

@@ -417,21 +417,21 @@ RETURNING id, (xmax = 0)`,
 			// 3. Store vehicle attributes if present
 			vType := "unknown"
 			if e.Event.VehicleType != nil && *e.Event.VehicleType != "" {
-				vType = *e.Event.VehicleType
+				vType = NormalizeVehicleType(*e.Event.VehicleType)
 			} else if plate != "" {
 				vType = "car"
 			}
 			vColor := "unknown"
 			if e.Event.VehicleColor != nil && *e.Event.VehicleColor != "" {
-				vColor = *e.Event.VehicleColor
+				vColor = NormalizeVehicleColor(*e.Event.VehicleColor)
 			}
 			brand := ""
 			if e.Event.VehicleBrand != nil {
-				brand = *e.Event.VehicleBrand
+				brand = strings.TrimSpace(*e.Event.VehicleBrand)
 			}
 			model := ""
 			if e.Event.VehicleModel != nil {
-				model = *e.Event.VehicleModel
+				model = strings.TrimSpace(*e.Event.VehicleModel)
 			}
 			if vColor != "unknown" || brand != "" || model != "" || vType != "unknown" {
 				_, err = tx.Exec(ctx, `
@@ -446,6 +446,24 @@ ON CONFLICT (event_id) DO UPDATE SET
 					evID, tenantID, siteID, cam, vType, vColor, brand, model)
 				if err != nil {
 					return fmt.Errorf("store vehicle attributes for agent event %s: %w", e.ID, err)
+				}
+
+				// Cross-enrich any matching events on this camera within 20s if their brand/model/color are missing.
+				if plate != "" {
+					_, _ = tx.Exec(ctx, `
+UPDATE vehicle_attributes va
+SET brand = CASE WHEN (va.brand IS NULL OR va.brand = '') AND $1 <> '' THEN $1 ELSE va.brand END,
+    model = CASE WHEN (va.model IS NULL OR va.model = '') AND $2 <> '' THEN $2 ELSE va.model END,
+    vehicle_color = CASE WHEN (va.vehicle_color IS NULL OR va.vehicle_color = '' OR va.vehicle_color = 'unknown') AND $3 <> '' AND $3 <> 'unknown' THEN $3 ELSE va.vehicle_color END,
+    vehicle_type = CASE WHEN (va.vehicle_type IS NULL OR va.vehicle_type = '' OR va.vehicle_type = 'unknown') AND $4 <> '' AND $4 <> 'unknown' THEN $4 ELSE va.vehicle_type END,
+    processed_at = now()
+FROM events e
+WHERE va.event_id = e.id
+  AND e.camera_id = $5
+  AND e.plates @> ARRAY[$6]
+  AND e.start_time >= ($7::timestamptz - interval '20 seconds')
+  AND e.start_time <= ($7::timestamptz + interval '20 seconds')`,
+						brand, model, vColor, vType, cam, plate, seen.UTC())
 				}
 			}
 
@@ -672,5 +690,71 @@ ON CONFLICT (server_id) DO UPDATE SET last_pull_at = now(), last_error = exclude
 	})
 	if err != nil {
 		a.Log.WarnContext(ctx, "agent ingest: record error", "server_id", serverID, "error", err)
+	}
+}
+
+// NormalizeVehicleColor maps raw color strings from Provision cameras or smart analytics into canonical OpenVMS color keys.
+func NormalizeVehicleColor(raw string) string {
+	s := strings.ToLower(strings.TrimSpace(raw))
+	switch s {
+	case "1", "blanco", "white":
+		return "white"
+	case "2", "gris", "gray", "grey":
+		return "gray"
+	case "silver", "plateado":
+		return "silver"
+	case "3", "amarillo", "yellow":
+		return "yellow"
+	case "4", "rosa", "pink", "purple", "morado", "violeta":
+		return "purple"
+	case "5", "rojo", "red":
+		return "red"
+	case "6", "verde", "green":
+		return "green"
+	case "7", "azul", "blue":
+		return "blue"
+	case "8", "negro", "black":
+		return "black"
+	case "orange", "naranja":
+		return "orange"
+	case "brown", "marron", "marrón", "cafe", "café":
+		return "brown"
+	case "beige", "crema":
+		return "beige"
+	case "", "0", "unknown", "desconocido", "other", "otro":
+		return "unknown"
+	default:
+		return s
+	}
+}
+
+// NormalizeVehicleType maps raw vehicle types to canonical OpenVMS types.
+func NormalizeVehicleType(raw string) string {
+	s := strings.ToLower(strings.TrimSpace(raw))
+	switch s {
+	case "car", "auto", "automovil", "automóvil", "coche", "vehiculo", "vehículo", "passenger car":
+		return "car"
+	case "sedan":
+		return "sedan"
+	case "suv":
+		return "suv"
+	case "pickup", "pick-up", "camioneta":
+		return "pickup"
+	case "van", "furgoneta", "furgon", "furgón":
+		return "van"
+	case "truck", "camion", "camión", "lorry":
+		return "truck"
+	case "truck_trailer":
+		return "truck_trailer"
+	case "bus", "colectivo", "omnibus", "ómnibus":
+		return "bus"
+	case "motorcycle", "moto", "motocicleta":
+		return "motorcycle"
+	case "bicycle", "bici", "bicicleta":
+		return "bicycle"
+	case "", "unknown", "desconocido":
+		return "unknown"
+	default:
+		return s
 	}
 }
