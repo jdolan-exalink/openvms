@@ -62,6 +62,32 @@ func TestCameraWebNeedsTheControlScope(t *testing.T) {
 	}
 }
 
+// OpenVMS reaches installed agents over the ONVIF TLS listener, so the camera web view must answer
+// there too; a 404 would make the control plane read the agent as too old for the feature.
+func TestCameraWebAnswersOnTheTLSMux(t *testing.T) {
+	store := tokens.Open(filepath.Join(t.TempDir(), "agent.tokens.json"))
+	control, _, err := store.Create(string(tokens.ScopeControl), []tokens.Scope{tokens.ScopeControl}, 0, time.Now())
+	if err != nil {
+		t.Fatal(err)
+	}
+	read, _, err := store.Create(string(tokens.ScopeRead), []tokens.Scope{tokens.ScopeRead}, 0, time.Now())
+	if err != nil {
+		t.Fatal(err)
+	}
+	proxy := camproxy.New(camproxy.Config{BlockedPorts: ownListenPorts("0.0.0.0:7419", "")})
+	mux := buildTLSMux(&authenticator{secret: "legacy-secret", tokens: store}, nil, nil, nil, nil, proxy)
+	const blocked = "http://127.0.0.1:80" // refused by the proxy itself, so no upstream is needed
+	if got := callCameraWeb(mux, "", blocked); got != http.StatusUnauthorized {
+		t.Errorf("no token = %d, want 401", got)
+	}
+	if got := callCameraWeb(mux, read, blocked); got != http.StatusForbidden {
+		t.Errorf("read token = %d, want 403", got)
+	}
+	if got := callCameraWeb(mux, control, blocked); got != http.StatusForbidden {
+		t.Errorf("control token = %d, want 403 from the proxy itself (loopback blocked)", got)
+	}
+}
+
 func TestOwnListenPorts(t *testing.T) {
 	got := ownListenPorts("0.0.0.0:7419", "10.0.0.2:9000")
 	want := map[int]bool{7419: true, 7443: true, 9000: true}

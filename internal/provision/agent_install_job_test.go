@@ -134,7 +134,7 @@ func TestConfirmedReplacementPreservesExistingRegistrationUntilHealthSucceeds(t 
 					}
 					return nil
 				},
-				agentInstallRegister: func(context.Context, authz.Actor, uuid.UUID, string, uint16, string, []byte) error {
+				agentInstallRegister: func(context.Context, authz.Actor, uuid.UUID, string, uint16, string, []byte, bool) error {
 					registerCalls++
 					registrationPresent = true
 					return nil
@@ -229,7 +229,7 @@ func TestStartAgentInstallRegistersOnlyAfterRunnerSuccess(t *testing.T) {
 			update("activating")
 			return nil
 		},
-		agentInstallRegister: func(_ context.Context, _ authz.Actor, _ uuid.UUID, host string, port uint16, token string, ca []byte) error {
+		agentInstallRegister: func(_ context.Context, _ authz.Actor, _ uuid.UUID, host string, port uint16, token string, ca []byte, _ bool) error {
 			verificationOrder = append(verificationOrder, "register")
 			if host != "192.0.2.44" || port != agentInstallHTTPSPort {
 				t.Fatalf("registration target=%s:%d", host, port)
@@ -298,7 +298,7 @@ func TestStartAgentInstallWithoutEnrollmentFallsBackToPollingWhenHTTPSHealthPass
 			return errors.New("remote enrollment details must not escape")
 		},
 		agentInstallHealthCheck: func(context.Context, string, uint16, string, []byte) error { return nil },
-		agentInstallRegister: func(context.Context, authz.Actor, uuid.UUID, string, uint16, string, []byte) error {
+		agentInstallRegister: func(context.Context, authz.Actor, uuid.UUID, string, uint16, string, []byte, bool) error {
 			registered = true
 			return nil
 		},
@@ -337,7 +337,7 @@ func TestStartAgentInstallCancelledWhileWaitingForEnrollmentFails(t *testing.T) 
 			return context.Canceled
 		},
 		agentInstallHealthCheck: func(context.Context, string, uint16, string, []byte) error { return nil },
-		agentInstallRegister: func(context.Context, authz.Actor, uuid.UUID, string, uint16, string, []byte) error {
+		agentInstallRegister: func(context.Context, authz.Actor, uuid.UUID, string, uint16, string, []byte, bool) error {
 			registered = true
 			return nil
 		},
@@ -363,7 +363,7 @@ func TestStartAgentInstallWithoutEnrollmentAndWithoutHTTPSHealthDoesNotRegister(
 			return errors.New("remote enrollment details must not escape")
 		},
 		agentInstallHealthCheck: func(context.Context, string, uint16, string, []byte) error { return errors.New("unreachable") },
-		agentInstallRegister: func(context.Context, authz.Actor, uuid.UUID, string, uint16, string, []byte) error {
+		agentInstallRegister: func(context.Context, authz.Actor, uuid.UUID, string, uint16, string, []byte, bool) error {
 			registered = true
 			return nil
 		},
@@ -395,7 +395,7 @@ func TestStartAgentInstallHealthFailureDoesNotRegister(t *testing.T) {
 		agentInstallHealthCheck: func(context.Context, string, uint16, string, []byte) error {
 			return errors.New("remote health body secret")
 		},
-		agentInstallRegister: func(context.Context, authz.Actor, uuid.UUID, string, uint16, string, []byte) error {
+		agentInstallRegister: func(context.Context, authz.Actor, uuid.UUID, string, uint16, string, []byte, bool) error {
 			registered = true
 			return nil
 		},
@@ -425,7 +425,7 @@ func TestStartAgentInstallRunnerFailureDoesNotRegisterOrEchoRemoteOutput(t *test
 		agentInstallRun: func(context.Context, AgentInstallRequest, func(string)) error {
 			return errors.New("remote leaked " + password)
 		},
-		agentInstallRegister: func(context.Context, authz.Actor, uuid.UUID, string, uint16, string, []byte) error {
+		agentInstallRegister: func(context.Context, authz.Actor, uuid.UUID, string, uint16, string, []byte, bool) error {
 			registered = true
 			return nil
 		},

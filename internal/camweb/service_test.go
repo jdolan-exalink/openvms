@@ -1,12 +1,17 @@
 package camweb
 
 import (
+	"bufio"
 	"context"
 	"errors"
 	"fmt"
 	"io"
+	"net"
 	"net/http"
 	"net/http/httptest"
+	"os"
+	"os/exec"
+	"path/filepath"
 	"strings"
 	"sync"
 	"testing"
@@ -134,7 +139,7 @@ func (e *env) do(method, prefix, rest string, body io.Reader, hdr ...string) *ht
 	return rec
 }
 
-const wantCSP = "sandbox allow-scripts allow-forms allow-popups allow-modals; frame-ancestors 'self'"
+const wantCSP = "sandbox allow-scripts allow-forms allow-popups allow-modals"
 
 func assertHardened(t *testing.T, rec *httptest.ResponseRecorder, what string) {
 	t.Helper()
@@ -526,7 +531,7 @@ func TestJavaScriptLocationRewriting(t *testing.T) {
 	ctype = "application/javascript"
 	body = `var o=window.top.location.protocol; n=r(window.top.location.hostname); if(top.location!=self.location){desktop.location=1;$top.location=2;a.top.location=3;top.locations=4;}`
 	rec := e.get(prefix, "/chunk.js")
-	want := `var o=__camLoc.protocol; n=r(window.location.hostname); if(location!=self.location){desktop.location=1;$top.location=2;a.top.location=3;top.locations=4;}`
+	want := `var o=__camTopLoc.protocol; n=r(__camTopLoc.hostname); if(__camTopLoc!=self.location){desktop.location=1;$top.location=2;a.top.location=3;__camTopW().locations=4;}`
 	if got := rec.Body.String(); got != want {
 		t.Fatalf("chunk.js rewrite mismatch:\ngot:  %s\nwant: %s", got, want)
 	}
@@ -535,7 +540,7 @@ func TestJavaScriptLocationRewriting(t *testing.T) {
 	ctype = "application/octet-stream"
 	body = `s=window.top.location.protocol+"//"+i;window.parent.location.href="/x";parent.location="/y";`
 	rec = e.get(prefix, "/app.js")
-	want = `s=__camLoc.protocol+"//"+i;__camLoc.href="/x";__camLoc.href = "/y";`
+	want = `s=__camTopLoc.protocol+"//"+i;__camTopLoc.href="/x";__camTopLoc.href = "/y";`
 	if got := rec.Body.String(); got != want {
 		t.Fatalf("app.js rewrite mismatch:\ngot:  %s\nwant: %s", got, want)
 	}
@@ -544,7 +549,7 @@ func TestJavaScriptLocationRewriting(t *testing.T) {
 	ctype = "text/html"
 	body = `<html><head><script>var p=window.top.location.port;</script></head><body></body></html>`
 	rec = e.get(prefix, "/index.html")
-	if !strings.Contains(rec.Body.String(), `var p=window.location.port;`) {
+	if !strings.Contains(rec.Body.String(), `var p=__camTopLoc.port;`) {
 		t.Fatalf("inline script in HTML not rewritten:\n%s", rec.Body.String())
 	}
 }
@@ -848,5 +853,400 @@ func TestShimScriptInjectsCamLocAndCamProto(t *testing.T) {
 	shimFrigate := shimScriptFor("/camproxy/test1234", "http", "frigate", "secret")
 	if !strings.Contains(shimFrigate, `u==="admin"`) && strings.Contains(shimFrigate, `un.value==="admin"`) {
 		t.Fatalf("autofill must not overwrite existing admin username with a non-admin username like frigate")
+	}
+}
+
+func TestRewriteJSFallsBackToSelfForCrossFrameReads(t *testing.T) {
+	cases := []struct{ name, input, contains string }{
+		{
+			name:     "window.top shared global",
+			input:    `$LAB.script("Scripts/Third/jquery.xmlns.js?v=" + window.top.global_version)`,
+			contains: `__camTopW().global_version`,
+		},
+		{
+			name:     "window.parent property read",
+			input:    `var v = window.parent.someGlobal;`,
+			contains: `__camParentW().someGlobal`,
+		},
+		{
+			name:     "bare top read",
+			input:    `var v = top.global_version;`,
+			contains: `__camTopW().global_version`,
+		},
+		{
+			name:     "window.top.location becomes the emulated camera top",
+			input:    `if (window.top.location.href.indexOf("login.htm") > -1) { window.top.location.href = serverBase; }`,
+			contains: `if (__camTopLoc.href.indexOf("login.htm") > -1) { __camTopLoc.href = serverBase; }`,
+		},
+		{
+			name:     "top login frame retains its child document when available and otherwise uses itself",
+			input:    `$(window.top.frames[0].document).click(hideMenus);`,
+			contains: `$(__camFrame0Doc(__camTopW())).click(hideMenus);`,
+		},
+		{
+			name:     "nested parent frame falls back without dereferencing the opaque ancestor",
+			input:    `$(window.parent.frames[0].document).click(hideMenus);`,
+			contains: `$(__camFrame0Doc(window.parent)).click(hideMenus);`,
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			out := string(rewriteJS([]byte(tc.input)))
+			if !strings.Contains(out, tc.contains) {
+				t.Fatalf("expected output to contain %q, got %q", tc.contains, out)
+			}
+		})
+	}
+}
+
+func TestShimScriptDefinesEmulatedCameraTop(t *testing.T) {
+	shim := shimScriptFor("/camproxy/test1234", "http", "", "")
+	for _, want := range []string{`var __camLoc=window.__camLoc={get href(){return window.location.href}`, `window.__camTopLoc={get href(){return window.location.origin+__camRoot}`, `protocol:__camProto`} {
+		if !strings.Contains(shim, want) {
+			t.Fatalf("shim must define __camTopLoc with %q, got %s", want, shim)
+		}
+	}
+}
+
+// A camera login frame in the opaque sandbox cannot read its parent. Its "am I the top document?"
+// check (top.location.href contains "login.htm") must therefore see the camera root, never the
+// frame's own address, or the page redirects itself and aborts its initialization.
+func TestShimScriptTopLocationIsCameraRootNotFrameAddress(t *testing.T) {
+	shim := shimScriptFor("/camproxy/test1234", "http", "", "")
+	for _, want := range []string{
+		`get href(){return window.location.origin+__camRoot}`,
+		`set href(u){__camNavTop(u)}`,
+		`assign:function(u){__camNavTop(u)}`,
+		`replace:function(u){__camNavTop(u)}`,
+		`window.parent.postMessage({__camTopNav:t.href},"*")`,
+	} {
+		if !strings.Contains(shim, want) {
+			t.Fatalf("camera top-location shim missing %q", want)
+		}
+	}
+	if strings.Contains(shim, "__camProxyTop") {
+		t.Fatal("shim must not read the parent frame's location")
+	}
+}
+
+func TestCameraTopLocationRedirectStaysInsideProxy(t *testing.T) {
+	input := `window.top.location="/Pages/main.htm";top.location.href="/Pages/home.htm";`
+	want := `__camTopLoc.href = "/Pages/main.htm";__camTopLoc.href="/Pages/home.htm";`
+	if got := string(rewriteJS([]byte(input))); got != want {
+		t.Fatalf("camera login redirect must navigate within its camproxy session:\ngot:  %s\nwant: %s", got, want)
+	}
+
+	shim := shimScriptFor("/camproxy/test1234", "http", "", "")
+	for _, want := range []string{`if(t.origin!==window.location.origin||(t.pathname!==P&&t.pathname.indexOf(P+"/")!==0))return;`} {
+		if !strings.Contains(shim, want) {
+			t.Fatalf("camera top-location navigation must be confined to the proxy session, missing %q", want)
+		}
+	}
+}
+
+func TestShimPrefixesBareRootInDynamicMarkup(t *testing.T) {
+	shim := shimScriptFor("/camproxy/test1234", "http", "", "")
+	if !strings.Contains(shim, `s.replace(/(src|href|action)=["'](\/(?!\/)[^"']*)["']/gi`) {
+		t.Fatal("document.write markup rewriter must proxy a bare root URL without matching protocol-relative URLs")
+	}
+}
+
+// A nested camera frame cannot read window.top, and the libraries the camera's top page loaded
+// (md5, crypto-js) are not defined in it. The fallback must load them on demand, otherwise the
+// second step of the camera's two-step login throws and the credentials are never sent.
+func TestShimScriptFallbackLoadsTopLibrariesOnDemand(t *testing.T) {
+	shim := shimScriptFor("/camproxy/test1234", "http", "", "")
+	for _, want := range []string{`window.__camSelf=new Proxy(window,`, `\.script\(`, `(0,eval)(r.responseText)`} {
+		if !strings.Contains(shim, want) {
+			t.Fatalf("shim missing %q", want)
+		}
+	}
+	got := string(rewriteJS([]byte(`h=window.top.hex_md5(p);`)))
+	if want := `h=__camTopW().hex_md5(p);`; got != want {
+		t.Fatalf("got %s want %s", got, want)
+	}
+}
+
+// The camera UI keeps its login token in sessionStorage, which does not exist in the opaque-origin
+// iframe. The proxy stores it per session so every frame, and every later page, sees the same values.
+func TestSessionStateIsSharedWithinSessionAndNeverReachesCamera(t *testing.T) {
+	e := newEnv(t, Config{})
+	var reached bool
+	e.cam.HandleFunc("/__camstate", func(http.ResponseWriter, *http.Request) { reached = true })
+	a, b := e.open(), e.open()
+
+	if rec := e.do(http.MethodPost, a, "/__camstate", strings.NewReader(`{"op":"set","k":"s:token_ipc","v":"T1"}`)); rec.Code != http.StatusNoContent {
+		t.Fatalf("set: %d %s", rec.Code, rec.Body.String())
+	}
+	e.do(http.MethodPost, a, "/__camstate", strings.NewReader(`{"op":"set","k":"l:lang","v":"en"}`))
+	got := e.get(a, "/__camstate")
+	if got.Code != http.StatusOK || !strings.Contains(got.Body.String(), `"s:token_ipc":"T1"`) {
+		t.Fatalf("state not readable by a later frame: %d %s", got.Code, got.Body.String())
+	}
+	if other := e.get(b, "/__camstate").Body.String(); strings.Contains(other, "T1") {
+		t.Fatalf("state leaked across sessions: %s", other)
+	}
+	e.do(http.MethodPost, a, "/__camstate", strings.NewReader(`{"op":"clear","p":"s:"}`))
+	after := e.get(a, "/__camstate").Body.String()
+	if strings.Contains(after, "token_ipc") || !strings.Contains(after, "l:lang") {
+		t.Fatalf("clear must drop only the sessionStorage prefix: %s", after)
+	}
+	if rec := e.do(http.MethodPost, a, "/__camstate", strings.NewReader(`{"op":"set","k":"s:big","v":"`+strings.Repeat("x", maxStateValue+1)+`"}`)); rec.Code != http.StatusBadRequest {
+		t.Fatalf("oversized value must be refused, got %d", rec.Code)
+	}
+	if reached {
+		t.Fatal("state requests must not be forwarded to the camera")
+	}
+}
+
+func TestShimBacksStorageWithSessionState(t *testing.T) {
+	shim := shimScriptFor("/camproxy/test1234", "http", "", "")
+	for _, want := range []string{`x.open(m,P+"/__camstate",false)`, `var ss=S("s:")`, `var ls=S("l:")`} {
+		if !strings.Contains(shim, want) {
+			t.Fatalf("shim missing %q", want)
+		}
+	}
+}
+
+// tunnelAgent adds tunnels to fakeAgent: the "camera" end of each tunnel is a pipe handed to cam.
+type tunnelAgent struct {
+	*fakeAgent
+	cam    func(header http.Header, c net.Conn)
+	opened chan http.Header
+}
+
+func (a *tunnelAgent) Tunnel(_ context.Context, _ authz.Actor, _ uuid.UUID, header http.Header) (io.ReadWriteCloser, error) {
+	client, camera := net.Pipe()
+	if a.opened != nil {
+		a.opened <- header.Clone()
+	}
+	go a.cam(header, camera)
+	return client, nil
+}
+
+func wsServer(t *testing.T, cam func(header http.Header, c net.Conn)) (srv *httptest.Server, prefix string, agent *tunnelAgent) {
+	t.Helper()
+	e := newEnv(t, Config{})
+	agent = &tunnelAgent{fakeAgent: e.agent, cam: cam, opened: make(chan http.Header, 4)}
+	svc := NewService(Config{}, agent,
+		func(context.Context, authz.Actor, Camera) error { return nil },
+		func(context.Context, authz.Actor, uuid.UUID) error { return nil })
+	o, err := svc.Open(context.Background(), e.actor, Camera{ID: uuid.New(), ServerID: uuid.New(), Host: "10.0.0.5"}, "http", 80)
+	if err != nil {
+		t.Fatal(err)
+	}
+	srv = httptest.NewServer(svc)
+	t.Cleanup(srv.Close)
+	return srv, strings.TrimSuffix(o.URL, "/"), agent
+}
+
+func TestWebSocketIsTunnelledToTheCameraPortWithItsOwnHandshake(t *testing.T) {
+	reqCh := make(chan *http.Request, 1)
+	srv, prefix, agent := wsServer(t, func(_ http.Header, c net.Conn) {
+		defer c.Close()
+		br := bufio.NewReader(c)
+		req, err := http.ReadRequest(br)
+		if err != nil {
+			return
+		}
+		reqCh <- req
+		_, _ = io.WriteString(c, "HTTP/1.1 101 Switching Protocols\r\nUpgrade: websocket\r\nConnection: Upgrade\r\nSec-WebSocket-Accept: accepted\r\n\r\n")
+		line, _ := br.ReadString('\n')
+		_, _ = io.WriteString(c, "echo:"+line)
+	})
+	conn, err := net.Dial("tcp", strings.TrimPrefix(srv.URL, "http://"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer conn.Close()
+	_ = conn.SetDeadline(time.Now().Add(3 * time.Second))
+	fmt.Fprintf(conn, "GET %s/__ws/8000/live/ch1?x=1 HTTP/1.1\r\nHost: openvms.example\r\nOrigin: null\r\nCookie: openvms=secret\r\nAuthorization: Bearer api-token\r\n"+
+		"Connection: Upgrade\r\nUpgrade: websocket\r\nSec-WebSocket-Version: 13\r\nSec-WebSocket-Key: abc==\r\n\r\n", prefix)
+	br := bufio.NewReader(conn)
+	resp, err := http.ReadResponse(br, nil)
+	if err != nil || resp.StatusCode != http.StatusSwitchingProtocols || resp.Header.Get("Sec-WebSocket-Accept") != "accepted" {
+		t.Fatalf("the camera's own handshake answer must reach the browser: %v %v", err, resp)
+	}
+	defer resp.Body.Close()
+	fmt.Fprint(conn, "ping\n")
+	if got, _ := br.ReadString('\n'); got != "echo:ping\n" {
+		t.Fatalf("frames must relay both ways, got %q", got)
+	}
+
+	ctl := <-agent.opened
+	if ctl.Get(camproxy.HeaderTarget) != "http://10.0.0.5:8000" {
+		t.Fatalf("tunnel target = %q, want the camera host on the requested port", ctl.Get(camproxy.HeaderTarget))
+	}
+	cam := <-reqCh
+	if cam.URL.RequestURI() != "/live/ch1?x=1" || cam.Host != "10.0.0.5:8000" || cam.Header.Get("Sec-WebSocket-Key") != "abc==" {
+		t.Fatalf("camera saw %s Host=%s key=%q", cam.URL.RequestURI(), cam.Host, cam.Header.Get("Sec-WebSocket-Key"))
+	}
+	for _, h := range []string{"Cookie", "Authorization"} {
+		if cam.Header.Get(h) != "" {
+			t.Fatalf("%s of the OpenVMS user must never reach the camera", h)
+		}
+	}
+	if cam.Header.Get("Origin") != "http://10.0.0.5" {
+		t.Fatalf("Origin = %q, want the camera's own", cam.Header.Get("Origin"))
+	}
+}
+
+func TestWebSocketRouteRefusesWhatItCannotCarry(t *testing.T) {
+	srv, prefix, _ := wsServer(t, func(http.Header, net.Conn) {})
+	for name, tc := range map[string]struct {
+		path, upgrade string
+		want          int
+	}{
+		"plain GET":    {"/__ws/8000/x", "", http.StatusBadRequest},
+		"bad port":     {"/__ws/abc/x", "websocket", http.StatusBadRequest},
+		"port zero":    {"/__ws/0/x", "websocket", http.StatusBadRequest},
+		"port too big": {"/__ws/70000/x", "websocket", http.StatusBadRequest},
+	} {
+		req, _ := http.NewRequest(http.MethodGet, srv.URL+prefix+tc.path, nil)
+		if tc.upgrade != "" {
+			req.Header.Set("Connection", "Upgrade")
+			req.Header.Set("Upgrade", tc.upgrade)
+		}
+		resp, err := http.DefaultClient.Do(req)
+		if err != nil {
+			t.Fatalf("%s: %v", name, err)
+		}
+		resp.Body.Close()
+		if resp.StatusCode != tc.want {
+			t.Errorf("%s: status %d, want %d", name, resp.StatusCode, tc.want)
+		}
+	}
+}
+
+func TestWebSocketWithoutTunnelSupportIsNotImplementedAndNeverReachesTheCamera(t *testing.T) {
+	e := newEnv(t, Config{}) // fakeAgent has no Tunnel: the shape of an API wired with an old forwarder
+	prefix := e.open()
+	srv := httptest.NewServer(e.svc)
+	t.Cleanup(srv.Close)
+	req, _ := http.NewRequest(http.MethodGet, srv.URL+prefix+"/__ws/80/x", nil)
+	req.Header.Set("Connection", "Upgrade")
+	req.Header.Set("Upgrade", "websocket")
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	resp.Body.Close()
+	if resp.StatusCode != http.StatusNotImplemented {
+		t.Fatalf("status %d", resp.StatusCode)
+	}
+}
+
+// The shim is plain JavaScript inside a Go string, so a typo only shows up in a browser. When node is
+// available, parse the injected script (and the worker prelude it embeds) to catch that here.
+func TestShimScriptParsesAsJavaScript(t *testing.T) {
+	node, err := exec.LookPath("node")
+	if err != nil {
+		t.Skip("node is not installed")
+	}
+	shim := shimScriptFor("/camproxy/test1234", "http", "admin", "p'w\"d")
+	body := strings.TrimSuffix(strings.TrimPrefix(shim, "<script>"), "</script>")
+	if body == shim {
+		t.Fatal("shim is not a single script element")
+	}
+	file := filepath.Join(t.TempDir(), "shim.js")
+	if err := os.WriteFile(file, []byte(body), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	// #nosec G204 -- node comes from LookPath and file is a temp path
+	if out, err := exec.Command(node, "--check", file).CombinedOutput(); err != nil {
+		t.Fatalf("shim does not parse: %v\n%s", err, out)
+	}
+	for _, want := range []string{`window.WebSocket=function(u,p)`, `window.Worker=function(u,o)`, `/__ws/`, `importScripts`} {
+		if !strings.Contains(shim, want) {
+			t.Fatalf("shim missing %q", want)
+		}
+	}
+}
+
+func TestShimDefinesTopWindowHelpers(t *testing.T) {
+	shim := shimScriptFor("/camproxy/test1234", "http", "", "")
+	for _, want := range []string{
+		`function __camTopW(){`,                   // nearest same-origin ancestor, else the frame itself
+		`p.document;w=p`,                          // climbing stops at the first ancestor it cannot read
+		`(__camIsRoot()?window:window.__camSelf)`, // opaque frames still get the on-demand library fallback
+		`function __camFrame0Doc(w){`,
+		`function __camParentW(){`,
+		`window.__camTopW=__camTopW;window.__camParentW=__camParentW;window.__camFrame0Doc=__camFrame0Doc;`, // rewritten camera scripts call them as globals
+	} {
+		if !strings.Contains(shim, want) {
+			t.Fatalf("shim missing %q", want)
+		}
+	}
+}
+
+// Responses keep a real origin only on the dedicated camera listener, which asserts it with a header the
+// main listener strips; anywhere else the sandbox stays opaque.
+func TestCameraOriginMarkerDecidesSameOriginSandbox(t *testing.T) {
+	e := newEnv(t, Config{})
+	prefix := e.open()
+	opaque := e.get(prefix, "/x").Header().Get("Content-Security-Policy")
+	marked := e.get(prefix, "/x", "X-OpenVMS-Camweb", "1").Header().Get("Content-Security-Policy")
+	spoofed := e.get(prefix, "/x", "X-OpenVMS-Camweb", "yes").Header().Get("Content-Security-Policy")
+	if opaque != wantCSP || spoofed != wantCSP || strings.Contains(opaque, "allow-same-origin") {
+		t.Fatalf("without the marker the sandbox must stay opaque: %q / %q", opaque, spoofed)
+	}
+	if marked != wantCSP+" allow-same-origin" {
+		t.Fatalf("camera origin CSP = %q", marked)
+	}
+}
+
+// parent and top are different frames in a camera UI (a page inside main.htm calls parent.setMainMenu, which
+// main.htm defines, not the camera root): each must resolve to its own, readable frame.
+func TestRewriteJSKeepsParentAndTopApart(t *testing.T) {
+	for in, want := range map[string]string{
+		`window.parent.setMainMenu(id);`: `__camParentW().setMainMenu(id);`,
+		// a bare parent is a local variable in libraries (emscripten's FS.mknod does parent.node_ops.mknod)
+		`FS.mknod=function(p){var parent=lookup(p);return parent.node_ops.mknod(parent,p)};`: `FS.mknod=function(p){var parent=lookup(p);return parent.node_ops.mknod(parent,p)};`,
+		`window.top.showLoading();`:       `__camTopW().showLoading();`,
+		`top.showLoading();`:              `__camTopW().showLoading();`,
+		`x=window.parent.location.href;`:  `x=__camTopLoc.href;`,
+		`a.parent.foo(); myparent.bar();`: `a.parent.foo(); myparent.bar();`,
+	} {
+		if got := string(rewriteJS([]byte(in))); got != want {
+			t.Errorf("%s\n got  %s\n want %s", in, got, want)
+		}
+	}
+}
+
+// Embedded WebSocket servers often parse header names case-sensitively: the camera must see
+// Sec-WebSocket-Key (as every browser spells it), not Go's canonical Sec-Websocket-Key, and no extension.
+func TestWebSocketHandshakeUsesBrowserHeaderSpelling(t *testing.T) {
+	raw := make(chan string, 1)
+	srv, prefix, _ := wsServer(t, func(_ http.Header, c net.Conn) {
+		defer c.Close()
+		var got strings.Builder
+		buf := make([]byte, 1)
+		for !strings.HasSuffix(got.String(), "\r\n\r\n") {
+			if _, err := c.Read(buf); err != nil {
+				return
+			}
+			got.Write(buf)
+		}
+		raw <- got.String()
+	})
+	conn, err := net.Dial("tcp", strings.TrimPrefix(srv.URL, "http://"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer conn.Close()
+	fmt.Fprintf(conn, "GET %s/__ws/7681/ HTTP/1.1\r\nHost: x\r\nConnection: Upgrade\r\nUpgrade: websocket\r\nSec-WebSocket-Version: 13\r\n"+
+		"Sec-WebSocket-Key: abc==\r\nSec-WebSocket-Extensions: permessage-deflate; client_max_window_bits\r\nSec-WebSocket-Protocol: chat\r\n\r\n", prefix)
+	select {
+	case h := <-raw:
+		for _, want := range []string{"GET / HTTP/1.1\r\n", "Host: 10.0.0.5:7681\r\n", "Sec-WebSocket-Key: abc==\r\n", "Sec-WebSocket-Version: 13\r\n", "Sec-WebSocket-Protocol: chat\r\n", "Upgrade: websocket\r\n", "Connection: Upgrade\r\n", "Origin: http://10.0.0.5\r\n"} {
+			if !strings.Contains(h, want) {
+				t.Errorf("handshake missing %q in\n%s", want, h)
+			}
+		}
+		if strings.Contains(h, "Sec-Websocket") || strings.Contains(strings.ToLower(h), "extensions") {
+			t.Errorf("canonicalized header names or extensions leaked:\n%s", h)
+		}
+	case <-time.After(3 * time.Second):
+		t.Fatal("camera never received a handshake")
 	}
 }

@@ -138,7 +138,7 @@ func TestTLSListenerProvisionRoutesNeedATokenToo(t *testing.T) {
 	receiver := provisionlpr.NewReceiver(provisionlpr.DefaultConfig(), nil)
 	receiver.SetEventQueue(queue)
 	auth := &authenticator{secret: "legacy-secret", tokens: store}
-	mux := buildTLSMux(auth, nil, nil, nil, receiver)
+	mux := buildTLSMux(auth, nil, nil, nil, receiver, nil)
 	events, _, err := store.Create("collector", []tokens.Scope{tokens.ScopeEvents}, 0, time.Now())
 	if err != nil {
 		t.Fatal(err)

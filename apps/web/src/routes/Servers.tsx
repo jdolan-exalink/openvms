@@ -316,9 +316,14 @@ function AgentSSHControls({ server, mode }: { server: Schemas["Server"]; mode: "
     );
   }
   const agent = status.data;
+  const needsSSHRecovery = status.isError || (agent != null && (agent.binary_status === "unknown" || agent.binary_status === "unreachable"));
+  const canRecoverOverSSH = hasServerInstallPermission(me.data, "servers.manage", server) && hasServerInstallPermission(me.data, "servers.config.secrets", server);
   if (mode === "panel") {
     if (agent?.installed && agent.binary_status === "update_available" && hasServerInstallPermission(me.data, "servers.manage", server)) {
       return <AgentUpdateButton key={`update-${server.id}`} server={server} />;
+    }
+    if (!status.isPending && needsSSHRecovery && canRecoverOverSSH && !installOpen) {
+      return <Button size="sm" variant="outlined" onClick={() => setInstallOpen(true)}>{t("servers.agentLifecycleRecoverSSH")}</Button>;
     }
     // The install dialog stays mounted after the agent shows up so its result is not cut off.
     return installOpen ? (
@@ -338,7 +343,30 @@ function AgentSSHControls({ server, mode }: { server: Schemas["Server"]; mode: "
     ) : null;
   }
   if (status.isPending && !visibleDeployment) return <Button size="sm" variant="outlined" disabled>{t("servers.agentLifecycleChecking")}</Button>;
-  if ((status.isError || !agent) && !visibleDeployment) return <div className="flex flex-wrap items-center gap-2"><span role="status" className="text-xs text-muted">{t("servers.agentLifecycleUnknown")}</span><Button size="sm" variant="outlined" disabled={status.isFetching} onClick={() => void status.refetch()}>{t("servers.agentLifecycleRefresh")}</Button></div>;
+  if ((status.isError || !agent) && !visibleDeployment) return (
+    <>
+      <div className="flex flex-wrap items-center gap-2">
+        <span role="status" className="text-xs text-muted">{t("servers.agentLifecycleUnknown")}</span>
+        {canRecoverOverSSH && <Button size="sm" variant="outlined" onClick={() => setInstallOpen(true)}>{t("servers.agentLifecycleRecoverSSH")}</Button>}
+        <Button size="sm" variant="outlined" disabled={status.isFetching} onClick={() => void status.refetch()}>{t("servers.agentLifecycleRefresh")}</Button>
+      </div>
+      {installOpen && (
+        <AgentInstallDialog
+          server={server}
+          open={installOpen}
+          onClose={() => {
+            setInstallOpen(false);
+            setDeployment(null);
+          }}
+          job={null}
+          onJob={onInstallJob}
+          otherOperationActive={false}
+          onStart={onInstallStart}
+          onFailure={onInstallFailure}
+        />
+      )}
+    </>
+  );
 
   return (
     <div className="flex flex-wrap items-center gap-2">
@@ -350,6 +378,7 @@ function AgentSSHControls({ server, mode }: { server: Schemas["Server"]; mode: "
         <>
           <span role="status" className="text-xs text-muted">{t("servers.agentLifecycleUnknown")}</span>
           <Button size="sm" variant="outlined" disabled={status.isFetching} onClick={() => void status.refetch()}>{t("servers.agentLifecycleRefresh")}</Button>
+          {needsSSHRecovery && canRecoverOverSSH && <Button size="sm" variant="outlined" onClick={() => setInstallOpen(true)}>{t("servers.agentLifecycleRecoverSSH")}</Button>}
         </>
       )}
       <AgentUninstallControl

@@ -355,7 +355,7 @@ func (c *PlainAgentHTTPClient) Do(ctx context.Context, method, path string, head
 	if req.Header == nil {
 		req.Header = make(http.Header)
 	}
-	return c.client.Do(req)
+	return clientFor(c.client, req.Header).Do(req)
 }
 
 func probeAgent(ctx context.Context, transport http.RoundTripper, host string, port int32, caPEM []byte, useSystemRoots bool, token string, request OnvifProbeRequest) (OnvifProbeResult, error) {

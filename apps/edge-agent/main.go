@@ -165,8 +165,10 @@ func main() {
 	// The original Frigate config.yml, kept on the host so it travels with it (see internal/agent/backup).
 	mountBackup(mux, auth, backup.New(stateDir))
 	addr := env("OPENVMS_AGENT_LISTEN", "0.0.0.0:7419")
-	// Camera web view: the control plane reaches a camera's own web interface through this route.
-	mountCameraWeb(mux, auth, camproxy.New(camproxy.Config{BlockedPorts: ownListenPorts(addr, os.Getenv("OPENVMS_AGENT_ONVIF_TLS_LISTEN"))}))
+	// Camera web view: the control plane reaches a camera's own web interface through this route,
+	// on the plain listener and on the ONVIF TLS one (OpenVMS reaches installed agents over TLS).
+	cameraWeb := camproxy.New(camproxy.Config{BlockedPorts: ownListenPorts(addr, os.Getenv("OPENVMS_AGENT_ONVIF_TLS_LISTEN"))})
+	mountCameraWeb(mux, auth, cameraWeb)
 	if lprReceiver != nil {
 		if capture == captureEverything {
 			log.Warn("Provision-ISR capture-all is on: POSTs on any path are accepted and kept; turn it off once the camera protocol is known")
@@ -244,7 +246,7 @@ func main() {
 	}()
 
 	if tlsEnabled {
-		tlsServer := newAgentTLSServer(tlsConfig, auth, healthHandler, discoveryHandler, probeHandler, lprReceiver)
+		tlsServer := newAgentTLSServer(tlsConfig, auth, healthHandler, discoveryHandler, probeHandler, lprReceiver, cameraWeb)
 		log.Info("ONVIF TLS listener enabled", "addr", tlsServer.Addr)
 		if err := serveAgentServers(log, srv, tlsServer); err != nil && !errors.Is(err, http.ErrServerClosed) {
 			log.Error("agent listener stopped", "error", err)

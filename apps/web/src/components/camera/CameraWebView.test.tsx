@@ -1,7 +1,7 @@
 import { fireEvent, screen, waitFor } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { json, renderPage, stubApi } from "@/test-utils";
-import { CameraWebView } from "./CameraWebView";
+import { CAMERA_WEB_SANDBOX, CAMERA_WEB_SANDBOX_OWN_ORIGIN, CameraWebView, cameraWebOrigin } from "./CameraWebView";
 
 afterEach(() => vi.unstubAllGlobals());
 
@@ -29,7 +29,11 @@ describe("CameraWebView", () => {
 
   it("shows a creating state while the session is being made", async () => {
     let release: (r: Response) => void = () => undefined;
-    vi.stubGlobal("fetch", vi.fn(() => new Promise<Response>((resolve) => { release = resolve; })));
+    vi.stubGlobal("fetch", vi.fn((req: Request) => (
+      new URL(req.url).pathname.startsWith("/.well-known/")
+        ? Promise.resolve(new Response("", { status: 404 }))
+        : new Promise<Response>((resolve) => { release = resolve; })
+    )));
     renderPage(() => <CameraWebView cameraId="cam1" />);
     fireEvent.click(await screen.findByRole("button", { name: "Abrir" }));
     expect(await screen.findByRole("button", { name: "Abriendo…" })).toBeDisabled();
@@ -113,5 +117,37 @@ describe("CameraWebView", () => {
     const copyBtn = screen.getByRole("button", { name: "Copiar contraseña" });
     fireEvent.click(copyBtn);
     expect(writeText).toHaveBeenCalledWith("Daytona1309$");
+  });
+});
+
+describe("camera web origin", () => {
+  const app = { protocol: "https:", hostname: "10.1.1.24", port: "8443" };
+
+  it("is this very host on the announced port, never a fixed name", () => {
+    expect(cameraWebOrigin(8444, app)).toBe("https://10.1.1.24:8444");
+    expect(cameraWebOrigin(8444, { ...app, hostname: "vms.example.org", port: "" })).toBe("https://vms.example.org:8444");
+    expect(cameraWebOrigin(8444, { ...app, hostname: "fd00::1" })).toBe("https://[fd00::1]:8444");
+  });
+
+  it("stays on the app origin when there is no announced port, no HTTPS, or the port is the app's own", () => {
+    expect(cameraWebOrigin(null, app)).toBeNull();
+    expect(cameraWebOrigin(8444, { ...app, protocol: "http:" })).toBeNull();
+    expect(cameraWebOrigin(8443, app)).toBeNull();
+    expect(cameraWebOrigin(443, { ...app, port: "" })).toBeNull();
+  });
+
+  it("only adds allow-same-origin for the camera's own origin", () => {
+    expect(CAMERA_WEB_SANDBOX).not.toContain("allow-same-origin");
+    expect(CAMERA_WEB_SANDBOX_OWN_ORIGIN).toBe(`${CAMERA_WEB_SANDBOX} allow-same-origin`);
+  });
+
+  it("keeps the relative URL and opaque sandbox when the page is not served over HTTPS", async () => {
+    const fetchMock = vi.fn(stubApi({ [`POST ${URL_PATH}`]: () => json(session), "/.well-known/openvms-camweb-port": () => new Response("8444") }));
+    vi.stubGlobal("fetch", fetchMock);
+    renderPage(() => <CameraWebView cameraId="cam1" />);
+    fireEvent.click(await screen.findByRole("button", { name: "Abrir" }));
+    const frame = await screen.findByTitle("Web de la cámara");
+    expect(frame).toHaveAttribute("src", session.url);
+    expect(frame.getAttribute("sandbox")).toBe(CAMERA_WEB_SANDBOX);
   });
 });

@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/base64"
+	"encoding/json"
 	"errors"
 	"io"
 	"mime"
@@ -16,9 +17,21 @@ import (
 )
 
 const (
-	cspValue    = "sandbox allow-scripts allow-forms allow-popups allow-modals; frame-ancestors 'self'"
-	routePrefix = "/camproxy/"
-	maxURILen   = 8 << 10
+	cspValue = "sandbox allow-scripts allow-forms allow-popups allow-modals"
+	// cspCameraOrigin is for responses served on the camera web origin (see headerCameraOrigin): there
+	// the camera's frames keep that origin so they can reach one another, as in a normal browser tab.
+	cspCameraOrigin = cspValue + " allow-same-origin"
+	// headerCameraOrigin is set by the dedicated camera listener of the web proxy, which serves only
+	// /camproxy/* on its own port, and stripped from every other request by the main listener. It is the
+	// only thing that lets a response keep a real origin; without it the opaque-origin sandbox applies.
+	headerCameraOrigin = "X-Openvms-Camweb"
+	routePrefix        = "/camproxy/"
+	maxURILen          = 8 << 10
+
+	statePath     = "/__camstate"
+	maxStateKeys  = 64
+	maxStateKey   = 128
+	maxStateValue = 8 << 10
 )
 
 var allowedMethods = map[string]bool{
@@ -40,9 +53,13 @@ var dropRequestHeaders = map[string]bool{
 // weaken the hardening below nor set state on the OpenVMS origin.
 var passResponseHeaders = []string{"Content-Type", "Content-Disposition", "Content-Language", "Content-Range", "Accept-Ranges", "Etag", "Last-Modified", "Allow"}
 
-func harden(w http.ResponseWriter) {
+func harden(w http.ResponseWriter, r *http.Request) {
 	h := w.Header()
-	h.Set("Content-Security-Policy", cspValue)
+	csp := cspValue
+	if r.Header.Get(headerCameraOrigin) == "1" {
+		csp = cspCameraOrigin
+	}
+	h.Set("Content-Security-Policy", csp)
 	h.Del("X-Frame-Options") // the outer middleware sets DENY; the iframe is same-origin and frame-ancestors covers it
 	h.Del("Strict-Transport-Security")
 	h.Set("Referrer-Policy", "no-referrer")
@@ -106,7 +123,7 @@ func docDir(p string) string {
 // ServeHTTP serves /camproxy/{session}/... . It has no cookie authentication: the session id is the
 // credential, and an unknown or expired one gets a bare 404.
 func (s *Service) ServeHTTP(w http.ResponseWriter, r *http.Request) {
-	harden(w)
+	harden(w, r)
 	rest, ok := strings.CutPrefix(r.URL.EscapedPath(), routePrefix)
 	if !ok {
 		plain(w, http.StatusNotFound, "")
@@ -152,6 +169,14 @@ func (s *Service) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	cleaned, ok := cleanPath(rawPath)
 	if !ok {
 		plain(w, http.StatusBadRequest, "invalid path")
+		return
+	}
+	if wsRest, ok := strings.CutPrefix(cleaned, wsPath); ok {
+		s.serveWebSocket(w, r, sess, wsRest)
+		return
+	}
+	if cleaned == statePath {
+		serveState(w, r, sess)
 		return
 	}
 	uri := cleaned
@@ -400,5 +425,55 @@ func (s *Service) stream(w http.ResponseWriter, src io.Reader, head []byte) {
 			}
 			return
 		}
+	}
+}
+
+// serveState implements the per-session key/value store behind the camera UI's emulated
+// sessionStorage and localStorage. It never reaches the camera and only holds what the camera's own
+// scripts wrote, under the same session-id-in-path credential as every other camproxy route.
+func serveState(w http.ResponseWriter, r *http.Request, sess *session) {
+	sess.stateMu.Lock()
+	defer sess.stateMu.Unlock()
+	if sess.state == nil {
+		sess.state = map[string]string{}
+	}
+	switch r.Method {
+	case http.MethodGet:
+		w.Header().Set("Content-Type", "application/json; charset=utf-8")
+		_ = json.NewEncoder(w).Encode(sess.state)
+	case http.MethodPost:
+		var op struct {
+			Op string `json:"op"`
+			K  string `json:"k"`
+			V  string `json:"v"`
+			P  string `json:"p"`
+		}
+		if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, maxStateKey+maxStateValue+256)).Decode(&op); err != nil {
+			plain(w, http.StatusBadRequest, "invalid state operation")
+			return
+		}
+		switch op.Op {
+		case "set":
+			if _, exists := sess.state[op.K]; op.K == "" || len(op.K) > maxStateKey || len(op.V) > maxStateValue || (!exists && len(sess.state) >= maxStateKeys) {
+				plain(w, http.StatusBadRequest, "state limit exceeded")
+				return
+			}
+			sess.state[op.K] = op.V
+		case "del":
+			delete(sess.state, op.K)
+		case "clear":
+			for k := range sess.state {
+				if strings.HasPrefix(k, op.P) {
+					delete(sess.state, k)
+				}
+			}
+		default:
+			plain(w, http.StatusBadRequest, "invalid state operation")
+			return
+		}
+		w.WriteHeader(http.StatusNoContent)
+	default:
+		w.Header().Set("Allow", "GET, POST, OPTIONS")
+		plain(w, http.StatusMethodNotAllowed, "method not allowed")
 	}
 }

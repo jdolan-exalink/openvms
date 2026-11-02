@@ -823,32 +823,38 @@ describe("Servers", () => {
       expect(screen.queryByRole("button", { name: /Actualizar agente/i })).not.toBeInTheDocument();
     });
 
-    it("keeps unknown or offline registration state explicit and offers status refresh, not install or update", async () => {
+    it("offers SSH recovery for an unknown registered agent without starting installation automatically", async () => {
       const { calls } = setup(undefined, undefined, grants, undefined, { installed: true, binary_status: "unknown", binary_upgrade_available: false });
       renderPage(Servers);
       expect((await screen.findAllByText(/No se pudo verificar el estado del agente/i)).length).toBeGreaterThan(0);
       expect(screen.getByRole("button", { name: /Consultar estado del agente/i })).toBeEnabled();
-      expect(screen.queryByRole("button", { name: /Instalar agente vía SSH/i })).not.toBeInTheDocument();
+      const recover = screen.getByRole("button", { name: /reparar.*SSH/i });
       expect(screen.queryByRole("button", { name: /Actualizar agente/i })).not.toBeInTheDocument();
       expect(calls.filter((request) => request.method === "POST" && /agent\/(install|update-ssh)$/.test(new URL(request.url).pathname))).toHaveLength(0);
+      fireEvent.click(recover);
+      expect(await screen.findByRole("dialog", { name: /Instalar agente OpenVMS/i })).toBeInTheDocument();
+      expect(calls.filter((request) => request.method === "POST" && /agent\/install$/.test(new URL(request.url).pathname))).toHaveLength(0);
     });
 
-    it("labels an unverified registered agent and offers no update, only a status refresh", async () => {
+    it("offers SSH recovery for an unreachable registered agent but not an unverified in-agent update", async () => {
       setup(undefined, undefined, grants, undefined, { installed: true, binary_status: "unreachable", binary_upgrade_available: true });
       renderPage(Servers);
       expect((await screen.findAllByText(/No se pudo verificar el estado del agente/i)).length).toBeGreaterThan(0);
       expect(screen.getByRole("button", { name: /Consultar estado del agente/i })).toBeEnabled();
       expect(screen.queryByRole("button", { name: /Actualizar agente/i })).not.toBeInTheDocument();
-      expect(screen.queryByRole("button", { name: /Instalar agente vía SSH/i })).not.toBeInTheDocument();
+      expect(screen.getByRole("button", { name: /reparar.*SSH/i })).toBeEnabled();
     });
 
-    it("does not treat an offline agent status as missing, outdated, or current", async () => {
+    it("offers SSH status discovery after the agent status API fails without treating it as missing", async () => {
       const { calls } = setup(undefined, undefined, grants, undefined, {}, true);
       renderPage(Servers);
       expect((await screen.findAllByText(/No se pudo verificar el estado del agente/i)).length).toBeGreaterThan(0);
-      expect(screen.queryByRole("button", { name: /Instalar agente vía SSH/i })).not.toBeInTheDocument();
+      expect(screen.getByRole("button", { name: /reparar.*SSH/i })).toBeEnabled();
       expect(screen.queryByRole("button", { name: /Actualizar agente/i })).not.toBeInTheDocument();
       const before = calls.filter((request) => request.method === "GET" && new URL(request.url).pathname === "/api/v1/servers/a/agent").length;
+      fireEvent.click(screen.getByRole("button", { name: /reparar.*SSH/i }));
+      expect(await screen.findByRole("dialog", { name: /Instalar agente OpenVMS/i })).toBeInTheDocument();
+      expect(calls.filter((request) => request.method === "POST" && /agent\/install$/.test(new URL(request.url).pathname))).toHaveLength(0);
       fireEvent.click(screen.getByRole("button", { name: /Consultar estado del agente/i }));
       await waitFor(() => expect(calls.filter((request) => request.method === "GET" && new URL(request.url).pathname === "/api/v1/servers/a/agent").length).toBeGreaterThan(before));
     });
