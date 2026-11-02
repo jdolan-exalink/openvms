@@ -11,6 +11,7 @@ import maps from "./locales/es/maps";
 import nav from "./locales/es/nav";
 import plates from "./locales/es/plates";
 import protectedImages from "./locales/es/protected";
+import retention from "./locales/es/retention";
 import search from "./locales/es/search";
 import settings from "./locales/es/settings";
 import status from "./locales/es/status";
@@ -31,6 +32,7 @@ export const sourceModules = {
   nav,
   plates,
   protected: protectedImages,
+  retention,
   search,
   settings,
   status,

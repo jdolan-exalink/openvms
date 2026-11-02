@@ -12,6 +12,7 @@ const Account = lazyRouteComponent(() => import("./routes/Account"), "Account");
 const ClientStation = lazyRouteComponent(() => import("./routes/ClientStation"), "ClientStation");
 const Alarms = lazyRouteComponent(() => import("./routes/Alarms"), "Alarms");
 const Audit = lazyRouteComponent(() => import("./routes/Audit"), "Audit");
+const Retention = lazyRouteComponent(() => import("./routes/Retention"), "Retention");
 const Branding = lazyRouteComponent(() => import("./routes/Branding"), "Branding");
 const CameraGroups = lazyRouteComponent(() => import("./routes/CameraGroups"), "CameraGroups");
 const CameraProfiles = lazyRouteComponent(() => import("./routes/CameraProfiles"), "CameraProfiles");
@@ -216,6 +217,7 @@ export const routeTree = rootRoute.addChildren([
       permissionsRoute,
       settingsChild("/audit", Audit),
       settingsChild("/branding", Branding),
+      settingsChild("/retention", Retention),
       settingsChild("/account", Account),
       settingsChild("/client-station", ClientStation),
     ]),

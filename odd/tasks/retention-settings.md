@@ -29,7 +29,7 @@ Visual reference: the published mockup "Retención de datos OpenVMS", local copy
 ## Tasks
 - U1 (S1, S2, S6) Storage and purge: migration `retention_settings`, queries, `internal/retention` (settings, purge, preview), the purge job in the worker, notifications reading their days from the setting. Route: inline. Status: done (migration 00090, internal/retention, ExpireFaceSightings, notify.Worker.RetentionSource, worker wiring; integration tests green against Postgres: faces, notify). Risk: item 1 (migration, deletes stored data).
 - U2 (S2, S3, S4, S5) API: `GET/PUT /api/v1/system/retention` and `GET /api/v1/system/retention/preview` (platform-level tenant.manage, audit `RETENTION_UPDATED`, volume usage, unnamed faces stored). Route: inline. Status: done (internal/retention/service.go, handlers, OpenAPI; integration tests incl. a tenant admin being refused). Per-server (Frigate) retention is not in the response: it lives in each server's Frigate YAML and stays a follow-up. Risk: item 2 (guard) and item 3 (new public API).
-- U3 (S2, S4, S5, S6) Web: Settings > Retention page. Route: inline. Status: pending.
+- U3 (S2, S4, S5, S6) Web: Settings > Retention page (`/retention`, nav item for tenant.manage; faces and notification periods, preview + confirmation when shortening, volume bar with the pressure limit). Route: inline. Status: done (apps/web/src/routes/Retention.tsx, 6 tests; full suite 2399 green). Risk: none.
 
 ## Log
 - L1 (2026-11-02, user): "dale, armá la retención con 30 días, la retención de openvms tenemos que poder configurarla en configuración así que hay que pensar eso y ahí poder variar las retenciones y obviamente tener en cuenta retenciones de los servidores y espacio en el volumen de guardado"
