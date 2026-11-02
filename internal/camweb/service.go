@@ -143,6 +143,14 @@ type session struct {
 	expires   time.Time
 	lastUsed  time.Time
 	lastAuthz time.Time
+
+	// state backs the camera UI's sessionStorage/localStorage: its frames run in opaque origins
+	// where browser storage is unavailable, yet the login token must survive navigations and be
+	// shared by every frame, as one tab's sessionStorage is.
+	tunnels int // open camera streams, guarded by Service.mu
+
+	stateMu sync.Mutex
+	state   map[string]string
 }
 
 // Service owns the sessions and serves /camproxy/.

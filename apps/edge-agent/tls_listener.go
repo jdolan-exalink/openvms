@@ -10,6 +10,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/jdolan-exalink/openvms/internal/agent/camproxy"
 	"github.com/jdolan-exalink/openvms/internal/agent/tokens"
 )
 
@@ -41,7 +42,7 @@ func loadAgentTLSConfig(listen, certFile, keyFile string) (*agentTLSConfig, bool
 	return &agentTLSConfig{Addr: listen, Certificates: []tls.Certificate{cert}}, true, nil
 }
 
-func buildTLSMux(auth *authenticator, healthHandler, discoveryHandler, probeHandler, lprHandler http.Handler) *http.ServeMux {
+func buildTLSMux(auth *authenticator, healthHandler, discoveryHandler, probeHandler, lprHandler http.Handler, cameraWeb *camproxy.Handler) *http.ServeMux {
 	mux := http.NewServeMux()
 	if healthHandler != nil {
 		mux.Handle("GET /v1/health", auth.scoped(tokens.ScopeRead, healthHandler))
@@ -55,13 +56,18 @@ func buildTLSMux(auth *authenticator, healthHandler, discoveryHandler, probeHand
 	if lprHandler != nil {
 		mountProvisionLPR(mux, auth, lprHandler)
 	}
+	if cameraWeb != nil {
+		// The control plane reaches installed agents over this TLS listener; camera web goes
+		// through it exactly as it does over the plain listener.
+		mountCameraWeb(mux, auth, cameraWeb)
+	}
 	return mux
 }
 
-func newAgentTLSServer(cfg *agentTLSConfig, auth *authenticator, healthHandler, discoveryHandler, probeHandler, lprHandler http.Handler) *http.Server {
+func newAgentTLSServer(cfg *agentTLSConfig, auth *authenticator, healthHandler, discoveryHandler, probeHandler, lprHandler http.Handler, cameraWeb *camproxy.Handler) *http.Server {
 	return &http.Server{
 		Addr:              cfg.Addr,
-		Handler:           buildTLSMux(auth, healthHandler, discoveryHandler, probeHandler, lprHandler),
+		Handler:           buildTLSMux(auth, healthHandler, discoveryHandler, probeHandler, lprHandler, cameraWeb),
 		ReadHeaderTimeout: 5 * time.Second,
 		TLSConfig:         &tls.Config{MinVersion: tls.VersionTLS12, Certificates: cfg.Certificates},
 	}

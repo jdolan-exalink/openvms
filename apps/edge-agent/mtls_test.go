@@ -91,13 +91,21 @@ func TestLoadMTLSIsOffWithoutTheAgentAddress(t *testing.T) {
 	}
 }
 
+func TestLoadMTLSAllowsStandaloneStateDirectory(t *testing.T) {
+	got, err := loadMTLS(context.Background(), getenvFrom(map[string]string{
+		"OPENVMS_AGENT_STATE_DIR": "/var/lib/openvms-agent",
+	}), quiet, time.Now)
+	if err != nil || got != nil {
+		t.Fatalf("loadMTLS = %v, %v; want nil, nil when mTLS is disabled", got, err)
+	}
+}
+
 func TestLoadMTLSRejectsSettingsThatWouldBeSilentlyIgnored(t *testing.T) {
 	for _, env := range []map[string]string{
 		{"OPENVMS_ENROLL_TOKEN": "x"},
 		{"OPENVMS_ENROLL_TOKEN_FILE": "/x"},
 		{"OPENVMS_API_URL": "https://api.example"},
 		{"OPENVMS_API_CA_FILE": "/ca.pem"},
-		{"OPENVMS_AGENT_STATE_DIR": "/var/lib/x"},
 	} {
 		if _, err := loadMTLS(context.Background(), getenvFrom(env), quiet, time.Now); err == nil {
 			t.Errorf("%v accepted without OPENVMS_AGENT_GRPC_ADDR", env)

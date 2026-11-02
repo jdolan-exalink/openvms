@@ -76,7 +76,7 @@ type Service struct {
 	agentInstallCredentials        func(string) (string, []byte, []byte, error)
 	agentInstallRun                func(context.Context, AgentInstallRequest, func(string)) error
 	agentDiscoveryDial             AgentInstallDialer
-	agentInstallRegister           func(context.Context, authz.Actor, uuid.UUID, string, uint16, string, []byte) error
+	agentInstallRegister           func(context.Context, authz.Actor, uuid.UUID, string, uint16, string, []byte, bool) error
 	agentInstallHealthCheck        func(context.Context, string, uint16, string, []byte) error
 	agentInstallEnrollmentCheck    func(context.Context, authz.Actor, uuid.UUID, time.Time) error
 	agentSSHHostKeyPersist         func(context.Context, authz.Actor, uuid.UUID, string, uint16, string) error

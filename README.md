@@ -32,7 +32,7 @@ Implementado no equivale a validado en producción: el estado y la evidencia de 
 - **Docker Engine con Compose v2.** El comando es `docker compose` (con espacio). El paquete `docker-compose` (con guion, Compose v1) no sirve: falla con `Invalid interpolation format` o con errores como `'name' does not match any of the regexes`. En Ubuntu 24.04: `apt-get install -y docker.io docker-compose-v2 docker-buildx git`; en Debian use el repositorio de Docker (pasos en [`Readme.txt`](Readme.txt)).
 - En un LXC de Proxmox active `nesting` y `keyctl`; si no, Docker no arranca.
 - Red desde el VMS a cada Frigate: puerto 8971 (con login) o 5000 (sin login, solo redes de confianza). El VMS usa `/api`, `/live/mse`, `/vod` y `/exports`.
-- Puertos de entrada para los usuarios: 8000 (HTTP) y 8443 (HTTPS), configurables.
+- Puertos de entrada para los usuarios: 8000 (HTTP) y 8443 (HTTPS), configurables. La web de las cámaras (Configuración → Cámaras → Avanzado → Web de la cámara) se sirve desde un origen propio, el mismo host en el puerto 8444 (`CAMWEB_HTTPS_PORT`), con el mismo certificado: ese puerto debe ser alcanzable desde el navegador.
 
 ## Instalación rápida
 
@@ -145,7 +145,7 @@ Todas las variables que lee `docker-compose.yml` están documentadas en `.env.ex
 | Secretos (obligatorios) | `OPENVMS_MASTER_KEY`, `POSTGRES_PASSWORD` | La clave maestra son 32 bytes aleatorios en base64 (`openssl rand -base64 32`); no la cambie en una instalación existente. `POSTGRES_PASSWORD` solo se aplica al crear el volumen de la base. |
 | Primer administrador | `OPENVMS_ADMIN_USERNAME`, `OPENVMS_ADMIN_PASSWORD` | Ver [Primer acceso](#primer-acceso). |
 | Organización y sitio iniciales | `OPENVMS_DEFAULT_TENANT`, `OPENVMS_DEFAULT_SITE`, `OPENVMS_DEFAULT_SITE_TZ` | Solo se usan si no existe ninguna organización. Zona horaria predeterminada: `America/Argentina/Cordoba`. |
-| Web y HTTPS | `WEB_PORT` (8000), `WEB_HTTPS_PORT` (8443), `SITE_ADDRESS`, `OPENVMS_HTTPS_SITE_IPV4`, `OPENVMS_HTTPS_SANS`, `OPENVMS_HTTPS_DEFAULT_SNI`, `HTTPS_INGRESS_PROXY_CIDRS`, `CREDENTIAL_TRUSTED_PROXY_CIDRS` | Certificado autofirmado local; puede reemplazar el par en `deploy/docker/local-tls/web/`. |
+| Web y HTTPS | `WEB_PORT` (8000), `WEB_HTTPS_PORT` (8443), `CAMWEB_HTTPS_PORT` (8444), `SITE_ADDRESS`, `OPENVMS_HTTPS_SITE_IPV4`, `OPENVMS_HTTPS_SANS`, `OPENVMS_HTTPS_DEFAULT_SNI`, `HTTPS_INGRESS_PROXY_CIDRS`, `CREDENTIAL_TRUSTED_PROXY_CIDRS` | Certificado autofirmado local; puede reemplazar el par en `deploy/docker/local-tls/web/`. |
 | MQTT | `OPENVMS_MQTT_HOST_PORT` (2883), `OPENVMS_MQTT_PUBLISH_ADDR` (127.0.0.1) | Broker sin TLS, iniciado por defecto y local-only; permite clientes anónimos. |
 | Sesiones y registro | `SESSION_TTL` (12h), `SESSION_IDLE` (2h), `LOG_LEVEL`, `OPENVMS_FEATURES` | `OPENVMS_FEATURES` es una lista separada por comas de feature flags ([`docs/live-view-architecture.md`](docs/live-view-architecture.md)). |
 | Notificaciones | `WAHA_API_KEY` | Clave del gateway interno de WhatsApp; cámbiela en producción. |

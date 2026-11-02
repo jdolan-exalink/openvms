@@ -274,10 +274,12 @@ services:
       OPENVMS_WEB_TLS_CERT_FILE: /etc/caddy/tls/tls.crt
       OPENVMS_WEB_TLS_KEY_FILE: /etc/caddy/tls/tls.key
       OPENVMS_WEB_HTTPS_PORT: ${WEB_HTTPS_PORT:-8443}
+      CAMWEB_SITE_ADDRESS: ":444"
+      OPENVMS_CAMWEB_HTTPS_PORT: ${CAMWEB_HTTPS_PORT:-8444}
       API_UPSTREAM: ${OPENVMS_AGENT_API_IPV4:-172.29.240.2}:8080
       # An empty static proxy list denies all forwarded-header trust by default.
       HTTPS_INGRESS_PROXY_CIDRS: ${HTTPS_INGRESS_PROXY_CIDRS:-}
-    ports: ["${WEB_PORT:-8000}:80", "${WEB_HTTPS_PORT:-8443}:443"]
+    ports: ["${WEB_PORT:-8000}:80", "${WEB_HTTPS_PORT:-8443}:443", "${CAMWEB_HTTPS_PORT:-8444}:444"]
     depends_on: [api]
     volumes:
       - ${OPENVMS_DATA_DIR:-/mnt/cctv/openvms}/caddy:/data

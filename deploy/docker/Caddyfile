@@ -28,7 +28,7 @@
 		# /docs loads the API reference renderer from jsdelivr; vector tiles, sprites and
 		# glyphs come from OpenFreeMap (one host; a CSP wildcard does not match the bare
 		# host, so OSM raster fallback keeps both spellings).
-		Content-Security-Policy "default-src 'self'; script-src 'self' https://cdn.jsdelivr.net; style-src 'self' 'unsafe-inline' https://cdn.jsdelivr.net; font-src 'self' data: https://cdn.jsdelivr.net; img-src 'self' data: blob: https://tile.openstreetmap.org https://*.tile.openstreetmap.org https://tiles.openfreemap.org; connect-src 'self' ws: wss: https://tile.openstreetmap.org https://*.tile.openstreetmap.org https://tiles.openfreemap.org; media-src 'self' blob:; frame-src 'self' blob:; manifest-src 'self'; worker-src 'self'; frame-ancestors 'self'"
+		Content-Security-Policy "default-src 'self'; script-src 'self' https://cdn.jsdelivr.net; style-src 'self' 'unsafe-inline' https://cdn.jsdelivr.net; font-src 'self' data: https://cdn.jsdelivr.net; img-src 'self' data: blob: https://tile.openstreetmap.org https://*.tile.openstreetmap.org https://tiles.openfreemap.org; connect-src 'self' ws: wss: https://tile.openstreetmap.org https://*.tile.openstreetmap.org https://tiles.openfreemap.org; media-src 'self' blob:; frame-src 'self' blob: https://{http.request.host}:{$OPENVMS_CAMWEB_HTTPS_PORT:8444}; manifest-src 'self'; worker-src 'self'; frame-ancestors 'self'"
 		-Server
 	}
 
@@ -42,9 +42,28 @@
 		respond "invalid forwarded protocol" 400
 	}
 
+	# The camera web interface runs on its own origin (another port of this host, see the camweb site
+	# below) so it can behave like a normal tab without ever sharing an origin with this application.
+	# A page on that origin must not be able to act as a client of this one: refuse its cross-origin
+	# requests outright (CORS and the CSRF header already stop them; this also covers WebSockets).
+	@camweb_origin header_regexp camweb_origin Origin ^https?://[^/]+:{$OPENVMS_CAMWEB_HTTPS_PORT:8444}$
+	handle @camweb_origin {
+		respond "forbidden" 403
+	}
+
 	@api path /api/* /media/* /ws /ws/* /health/* /openapi.json /docs /camproxy/*
 	handle @api {
-		reverse_proxy {$API_UPSTREAM:api:8080}
+		reverse_proxy {$API_UPSTREAM:api:8080} {
+			# Only the camera listener may assert the camera origin.
+			header_up -X-OpenVMS-Camweb
+		}
+	}
+
+	@camweb_port_hint path /.well-known/openvms-camweb-port
+	handle @camweb_port_hint {
+		header Cache-Control no-store
+		header Content-Type text/plain
+		respond {$OPENVMS_CAMWEB_HTTPS_PORT:8444} 200
 	}
 
 	@https_port_hint path /.well-known/openvms-https-port
@@ -87,4 +106,25 @@
 		protocols tls1.2 tls1.3
 	}
 	import openvms_site_routes
+}
+
+# The camera web origin: same host and certificate as the HTTPS listener, different port, so a camera's
+# own web interface gets an origin of its own (all its frames share it) that is not the application's.
+# Only /camproxy/* is served; inbound cookies are dropped, and the marker tells the API to let camera
+# pages keep that origin (allow-same-origin in the response sandbox).
+{$CAMWEB_SITE_ADDRESS::444} {
+	tls {$CADDY_TLS_CERT_FILE:/var/lib/openvms/tls/current/tls.crt} {$CADDY_TLS_KEY_FILE:/var/lib/openvms/tls/current/tls.key} {
+		protocols tls1.2 tls1.3
+	}
+	encode zstd gzip
+	@camproxy path /camproxy/*
+	handle @camproxy {
+		reverse_proxy {$API_UPSTREAM:api:8080} {
+			header_up -Cookie
+			header_up X-OpenVMS-Camweb 1
+		}
+	}
+	handle {
+		respond "not found" 404
+	}
 }
