@@ -50,8 +50,9 @@ describe("agentInfo", () => {
     const down = server("a", { agent_version: "1.0.0", agent_last_seen_at: "2026-11-02T11:59:50Z", agent_status: "offline" });
     expect(agentInfo(down, "1.0.0", NOW).offline).toBe(true);
   });
-  it("does not apply to recorders", () => {
-    expect(agentInfo(server("n", { kind: "provision_nvr" }), "1.0.0", NOW).state).toBe("na");
+  it("reports the agent of a recorder like any other server", () => {
+    expect(agentInfo(server("n", { kind: "provision_nvr" }), "1.0.0", NOW).state).toBe("none");
+    expect(agentInfo(server("n", { kind: "provision_nvr", agent_version: "1.0.0", agent_last_seen_at: new Date(NOW).toISOString() }), "1.0.0", NOW).state).toBe("current");
   });
 });
 

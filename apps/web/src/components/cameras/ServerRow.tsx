@@ -6,14 +6,13 @@ import { cn } from "@/lib/cn";
 
 /** Dot and pill colors for the agent states, shared by the server row and the filter rail. */
 export function agentTone(agent: AgentInfo) {
-  if (agent.state === "none" || agent.state === "na") return { dot: "bg-outline", pill: "bg-surface-2 text-muted" };
+  if (agent.state === "none") return { dot: "bg-outline", pill: "bg-surface-2 text-muted" };
   if (agent.offline) return { dot: "bg-bad", pill: "bg-bad/12 text-bad" };
   if (agent.state === "outdated") return { dot: "bg-warn", pill: "bg-warn/15 text-warn" };
   return { dot: "bg-ok", pill: "bg-ok/15 text-ok" };
 }
 
 export function AgentPill({ agent }: { agent: AgentInfo }) {
-  if (agent.state === "na") return null;
   const tone = agentTone(agent);
   return (
     <span className={cn("inline-flex h-6 items-center gap-1.5 rounded-full px-2.5 text-xs font-medium whitespace-nowrap", tone.pill)}>

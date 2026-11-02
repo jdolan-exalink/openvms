@@ -33,8 +33,7 @@ export type TreeOptions = {
 };
 
 export type AgentInfo = {
-  /** "na" for recorders, which do not run an agent. */
-  state: "na" | "none" | "current" | "outdated";
+  state: "none" | "current" | "outdated";
   version: string;
   offline: boolean;
   label: string;
@@ -74,7 +73,6 @@ export function latestAgentVersion(servers: readonly TreeServer[]): string {
 
 /** What the server row says about its agent. "Outdated" is relative to the newest agent among the loaded servers. */
 export function agentInfo(server: TreeServer, latest: string, now: number = Date.now()): AgentInfo {
-  if (server.kind === "provision_nvr") return { state: "na", version: "", offline: false, label: "" };
   const version = server.agent_version ?? "";
   const seen = server.agent_last_seen_at ? Date.parse(server.agent_last_seen_at) : Number.NaN;
   if (!version && Number.isNaN(seen)) return { state: "none", version: "", offline: false, label: "Sin agente" };
