@@ -150,4 +150,65 @@ printf '[{"tag_name": "v0.9.0"}, {"tag_name": "agent-v%s"}, {"tag_name": "agent-
 OPENVMS_AGENT_API_URL="http://127.0.0.1:$port/releases.json" run "$p10" >/dev/null 2>&1 || fail "installing the newest release failed"
 [[ "$("$p10/usr/local/bin/openvms-agent" --version)" == "$version" ]] || fail "installed another release than the newest agent release"
 
+# 13. Firewall: with ufw active the agent ports are opened for the private ranges, plus the Tailscale
+# range only when this host has such an address; --no-firewall and an inactive ufw change nothing.
+fw="$tmp/fw"; mkdir -p "$fw"
+cat >"$fw/ufw" <<'STUB'
+#!/usr/bin/env bash
+if [[ "$1" == status ]]; then echo "Status: ${FAKE_UFW_STATE:-active}"; exit 0; fi
+echo "$*" >>"$FAKE_UFW_LOG"
+STUB
+cat >"$fw/ip" <<'STUB'
+#!/usr/bin/env bash
+echo "${FAKE_IP_OUT:-2: eth0    inet 192.168.1.5/24 brd 192.168.1.255 scope global eth0}"
+STUB
+chmod +x "$fw/ufw" "$fw/ip"
+fwrun() { # fwrun <prefix> [args...]  (env FAKE_* set by the caller)
+  local prefix=$1; shift
+  PATH="$fw:$PATH" OPENVMS_AGENT_FIREWALL=auto FAKE_UFW_LOG="$tmp/ufw.log" run "$prefix" "$@"
+}
+: >"$tmp/ufw.log"
+fwrun "$tmp/f1" --version "$version" >/dev/null 2>&1 || fail "install with ufw failed"
+for net in 10.0.0.0/8 192.168.0.0/16; do
+  for p in 7419 7443; do
+    grep -q "allow from $net to any port $p proto tcp" "$tmp/ufw.log" || fail "missing ufw rule $net -> $p: $(cat "$tmp/ufw.log")"
+  done
+done
+if grep -q '100.64.0.0/10' "$tmp/ufw.log"; then fail "the Tailscale range was opened without a Tailscale address"; fi
+: >"$tmp/ufw.log"
+FAKE_IP_OUT='5: tailscale0    inet 100.95.141.39/32 scope global tailscale0' fwrun "$tmp/f2" --version "$version" >/dev/null 2>&1 || fail "install with tailscale failed"
+for p in 7419 7443; do
+  grep -q "allow from 100\.64\.0\.0/10 to any port $p proto tcp" "$tmp/ufw.log" || fail "the Tailscale range was not opened on $p: $(cat "$tmp/ufw.log")"
+done
+# Running it again adds the same rules (ufw itself skips duplicates), never different ones.
+sort -u "$tmp/ufw.log" >"$tmp/ufw.once"
+FAKE_IP_OUT='5: tailscale0    inet 100.95.141.39/32 scope global tailscale0' fwrun "$tmp/f2" --version "$version" >/dev/null 2>&1 || fail "re-running with tailscale failed"
+[[ "$(sort -u "$tmp/ufw.log")" == "$(cat "$tmp/ufw.once")" ]] || fail "re-running changed the rule set"
+: >"$tmp/ufw.log"
+fwrun "$tmp/f3" --version "$version" --no-firewall >/dev/null 2>&1 || fail "install with --no-firewall failed"
+[[ ! -s "$tmp/ufw.log" ]] || fail "--no-firewall still changed ufw: $(cat "$tmp/ufw.log")"
+FAKE_UFW_STATE=inactive fwrun "$tmp/f4" --version "$version" >/dev/null 2>&1 || fail "install with ufw inactive failed"
+[[ ! -s "$tmp/ufw.log" ]] || fail "an inactive ufw was changed: $(cat "$tmp/ufw.log")"
+# A failing rule does not stop the others and is reported as a warning, without failing the install.
+: >"$tmp/ufw.log"
+cat >"$fw/ufw" <<'STUB'
+#!/usr/bin/env bash
+if [[ "$1" == status ]]; then echo "Status: active"; exit 0; fi
+echo "$*" >>"$FAKE_UFW_LOG"
+[[ "$*" == *"from 10.0.0.0/8"* ]] && exit 1
+exit 0
+STUB
+out_f=$(FAKE_IP_OUT='5: tailscale0    inet 100.95.141.39/32 scope global tailscale0' fwrun "$tmp/f6" --version "$version" 2>&1) || fail "a failing ufw rule failed the install: $out_f"
+grep -q 'WARNING: could not add the ufw rule 10.0.0.0/8' <<<"$out_f" || fail "no warning for the failed rule: $out_f"
+grep -q 'from 192.168.0.0/16 to any port 7443' "$tmp/ufw.log" || fail "a failed rule stopped the later ones"
+grep -q 'from 100.64.0.0/10 to any port 7443' "$tmp/ufw.log" || fail "a failed rule skipped the Tailscale range"
+# A mistyped mode is refused instead of silently skipping the firewall.
+if out_m=$(OPENVMS_AGENT_FIREWALL=on run "$tmp/f7" --version "$version" 2>&1); then fail "OPENVMS_AGENT_FIREWALL=on was accepted"; fi
+grep -q 'must be auto or off' <<<"$out_m" || fail "the refusal does not name the valid modes: $out_m"
+[[ ! -e "$tmp/f7/usr/local/bin/openvms-agent" ]] || fail "a refused mode still installed the agent"
+# Without the override the harness never touches the firewall.
+: >"$tmp/ufw.log"
+run "$tmp/f5" --version "$version" >/dev/null 2>&1 || fail "plain install failed"
+[[ ! -s "$tmp/ufw.log" ]] || fail "the default test run changed ufw"
+
 echo "install_agent_test: ok"
