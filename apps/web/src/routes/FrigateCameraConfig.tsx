@@ -27,6 +27,8 @@ import { CameraPreview } from "@/components/camera/CameraPreview";
 import { CameraSummaryCards } from "@/components/camera/CameraSummaryCards";
 import { AnalyticsTab } from "@/components/camera/analytics/AnalyticsTab";
 import { CameraTabs } from "@/components/camera/CameraTabs";
+import { AdvancedAccordion } from "@/components/camera/config/AdvancedAccordion";
+import { HealthTiles } from "@/components/camera/config/HealthTiles";
 import { VideoTab } from "@/components/camera/video/VideoTab";
 import { CameraWebView } from "@/components/camera/CameraWebView";
 import { DELETE_CAMERA_LABEL, DeleteCameraDialog, MoreActions, RESTART_CAMERA_LABEL, RestartCameraDialog } from "@/components/camera/MoreActions";
@@ -66,7 +68,7 @@ import { loadRestart, saveRestart } from "@/lib/frigateRestart";
 import { can, canCamera } from "@/lib/perm";
 import { plainErrorOf } from "@/lib/plainError";
 import {
-  ADVANCED_PANELS, ANALYTICS_MODULES, analyticsTabVisible, buildCameraTabs, CAMERA_WEB, type CameraTabId, FISHEYE, GENERAL, HISTORY, INTEGRATIONS_STATUS, isFisheyeTagged, ONVIF_INFO, PROVISION, PTZ_CONTROL, tabOfSection,
+  ADVANCED_PANELS, ANALYTICS_MODULES, analyticsTabVisible, buildCameraTabs, CAMERA_WEB, type CameraTabId, FISHEYE, GENERAL, HISTORY, INTEGRATIONS_STATUS, isFisheyeTagged, ONVIF_INFO, PROVISION, PTZ_CONTROL, tabById, tabOfSection,
 } from "@/lib/cameraTabs";
 import { persistedToEditorValue, planManagedZoneChanges, splitFrigateZones, zoneSyncStates, type ZoneChangePlan } from "@/lib/cameraZones";
 
@@ -79,7 +81,7 @@ const SECTION_TITLES: Record<string, string> = {
   snapshots: "Capturas",
   zones: "Zonas",
   review: "Revisión y Alertas",
-  [GENERAL]: "General",
+  [GENERAL]: "Resumen",
   [ANALYTICS_MODULES]: "Módulos",
   // The raw engine panels stay reachable behind the modules, as the tab's advanced part.
   [PROVISION]: "Avanzado · Provision LPR",
@@ -92,6 +94,11 @@ const SECTION_TITLES: Record<string, string> = {
   [FISHEYE]: "Fisheye / 360°",
   [HISTORY]: "Historial",
   [ADVANCED_PANELS]: "Paneles por motor",
+  // Avanzado accordions.
+  mqtt: "Integraciones · MQTT",
+  notifications: "Integraciones · Notificaciones",
+  ffmpeg_cmds: "Comandos ffmpeg",
+  profiles: "Perfiles",
 };
 const sectionTitle = (s: string) => SECTION_TITLES[s] ?? sectionLabel(s);
 
@@ -130,6 +137,9 @@ function FrigateCameraConfigScreen({ cameraId }: { cameraId: string }) {
   const schema = useQuery({ ...frigateSchemaQuery(serverId), enabled: !!serverId });
   const serverCameras = useQuery({ ...camerasQuery({ server_id: serverId }), enabled: !!serverId && !!doc.data?.editable });
   const [active, setActive] = useState<string>();
+  // Avanzado accordions the user opened (all closed by default); jumping to a section there opens it.
+  const [openAcc, setOpenAcc] = useState<Record<string, boolean>>({});
+  const goTo = (s: string) => { setActive(s); setOpenAcc((o) => ({ ...o, [s]: true })); };
   const servers = useQuery(serversQuery);
   const [edits, setEdits] = useState<Record<string, unknown>>({});
   const [reviewing, setReviewing] = useState(false);
@@ -394,10 +404,11 @@ function FrigateCameraConfigScreen({ cameraId }: { cameraId: string }) {
     provision,
     cameraWeb: canOpenCameraWeb,
   });
-  const owner = tabOfSection(tabs, activeSection);
-  const tab = owner ?? tabs[0]!;
-  const section = owner ? activeSection : (tab.sections[0] ?? GENERAL);
-  const dirtyTabs = new Set<CameraTabId>(dirty.flatMap((s) => [...tabs.filter((t) => t.sections.includes(s)).map((t) => t.id), ...(GENERAL_SECTIONS.includes(s) ? (["general"] as const) : [])]));
+  // An old tab id ("general", "zones", "fisheye"...) resolves to the group that absorbed it.
+  const sectionOwner = tabOfSection(tabs, activeSection);
+  const tab = sectionOwner ?? tabById(tabs, activeSection) ?? tabs[0]!;
+  const section = sectionOwner ? activeSection : (tab.sections[0] ?? GENERAL);
+  const dirtyTabs = new Set<CameraTabId>(dirty.flatMap((s) => [...tabs.filter((t) => t.sections.includes(s)).map((t) => t.id), ...(GENERAL_SECTIONS.includes(s) ? (["summary"] as const) : [])]));
   const isPseudo = section.startsWith("__");
   const server = servers.data?.find((s) => s.id === serverId);
   const subNav =
@@ -421,28 +432,87 @@ function FrigateCameraConfigScreen({ cameraId }: { cameraId: string }) {
         ))}
       </nav>
     ) : null;
-  const sectionPanel = (
+  const sectionPanelOf = (s: string) => (
     <SectionPanel
-      section={section}
-      schema={camProps[section]}
-      value={valueOf(section)}
-      onChange={(v) => setEdits((e) => ({ ...e, [section]: v }))}
+      section={s}
+      schema={camProps[s]}
+      value={valueOf(s)}
+      onChange={(v) => setEdits((e) => ({ ...e, [s]: v }))}
       ctx={ctx}
       camera={effectiveDoc}
       config={config}
       onEditZones={() => setZoneEditor(true)}
     />
   );
+  const sectionPanel = sectionPanelOf(section);
 
   const onApplyToFrigate = (patch: Record<string, unknown>) => {
     setEdits((e) => ({ ...e, onvif: patch }));
-    setActive("onvif");
+    goTo("onvif");
+  };
+
+  const renderSection = (s: string): React.ReactNode => {
+    if (s === GENERAL) return <CameraGeneral cameraId={cameraId} canManage={canManageCamera} frigate={general} />;
+    if (s === FISHEYE) return <FisheyeTab cameraId={cameraId} cameraName={effectiveDoc.camera_name} canManage={!readOnly} />;
+    if (s === ANALYTICS_MODULES || s === INTEGRATIONS_STATUS) {
+      return (
+        <AnalyticsTab
+          cameraId={cameraId}
+          integrations={change.config.data?.integrations}
+          modules={change.config.data?.analytics?.modules}
+          patch={change.patch}
+          setPatch={change.setPatch}
+          readOnly={readOnly || !canCamera(me.data, "cameras.config.analytics")}
+        />
+      );
+    }
+    if (s === PROVISION) {
+      return (
+        cam && (
+          <ProvisionLprSection
+            camera={cam}
+            onCameraUpdate={() => {
+              void qc.invalidateQueries({ queryKey: ["cameras", cameraId] });
+              void qc.invalidateQueries({ queryKey: ["cameras"] });
+            }}
+          />
+        )
+      );
+    }
+    if (s === CAMERA_WEB) return <CameraWebView cameraId={cameraId} autoOpen />;
+    if (s === PTZ_CONTROL) return <PtzTab cameraId={cameraId} canManage={canPtz} />;
+    if (s === ONVIF_INFO) return <CameraOnvifPanel cameraId={cameraId} camera={cam} canManage={canManageCamera} onApplyToFrigate={onApplyToFrigate} />;
+    if (s === ADVANCED_PANELS) {
+      return (
+        <AdvancedTab
+          cameraId={cameraId}
+          engine={provision ? "provision" : "frigate"}
+          yamlRequest={yamlRequest}
+          canAdvanced={canCamera(me.data, "cameras.config.advanced")}
+          canYaml={canYaml}
+          canRollback={canCamera(me.data, "cameras.config.edit")}
+        />
+      );
+    }
+    if (s === HISTORY) {
+      return (
+        <FrigateHistory
+          serverId={effectiveDoc.server_id}
+          cameraId={cameraId}
+          secretsVisible={secretsVisible}
+          canRollback={!readOnly && secretsVisible && !frigateUnavailable}
+          onRestored={() => setNeedsRestart(true)}
+        />
+      );
+    }
+    if (frigateUnavailable) return <p className="text-sm text-muted">Esta sección requiere conexión con el servidor de Frigate.</p>;
+    return sectionPanelOf(s);
   };
   const openBulk = () => { setBulkTargets([cameraId]); setBulkResults([]); bulkApply.reset(); setBulkReviewing(true); };
   const discard = () => { setEdits({}); apply.reset(); change.discard(); };
   const canSave = !readOnly && dirty.length > 0 && errorCount === 0;
   // Contextual entry points ("Editar YAML de detección") land in Avanzado with the section preselected.
-  const openYaml = (sec: string) => { setYamlRequest({ section: sec }); setActive(ADVANCED_PANELS); };
+  const openYaml = (sec: string) => { setYamlRequest({ section: sec }); goTo(ADVANCED_PANELS); };
 
   return (
     <YamlEntryProvider openYaml={canYaml ? openYaml : undefined}>
@@ -478,12 +548,12 @@ function FrigateCameraConfigScreen({ cameraId }: { cameraId: string }) {
           <>
             <Button variant="primary" disabled={!canSave} onClick={() => setReviewing(true)}>Guardar</Button>
             <Button variant="text" disabled={!dirty.length} onClick={discard}>Descartar cambios</Button>
-            {canOpenCameraWeb && <Button variant="tonal" onClick={() => setActive(CAMERA_WEB)}>Abrir interfaz web</Button>}
+            {canOpenCameraWeb && <Button variant="tonal" onClick={() => goTo(CAMERA_WEB)}>Abrir interfaz web</Button>}
             <MoreActions
               actions={[
                 { id: "bulk", label: "Aplicar a varias cámaras", disabled: readOnly || !dirty.length || errorCount > 0 || !serverId, onSelect: openBulk },
-                { id: "onvif", label: "Capacidades ONVIF", onSelect: () => setActive(ONVIF_INFO) },
-                { id: "history", label: "Historial de cambios", onSelect: () => setActive(HISTORY) },
+                { id: "onvif", label: "Capacidades ONVIF", onSelect: () => goTo(ONVIF_INFO) },
+                { id: "history", label: "Historial de cambios", onSelect: () => goTo(HISTORY) },
                 ...(canRestartCamera ? [{ id: "restart", label: RESTART_CAMERA_LABEL, onSelect: () => setRestartingCamera(true) }] : []),
                 ...(canDeleteCamera ? [{ id: "delete", label: DELETE_CAMERA_LABEL, onSelect: () => setDeletingCamera(true) }] : []),
               ]}
@@ -500,20 +570,7 @@ function FrigateCameraConfigScreen({ cameraId }: { cameraId: string }) {
         <SyncStatusPanel state={change.config.data.state} busy={change.apply.isPending} applyError={change.apply.error?.message} plainError={plainErrorOf(change.apply.data)} offer={canCamera(me.data, "cameras.config.edit") ? <RollbackOffer cameraId={cameraId} /> : undefined} onUseDesired={(patch) => change.apply.mutate(patch)} />
       )}
 
-      <div className="flex flex-col gap-3 lg:flex-row lg:items-stretch">
-        <CameraPreview cameraId={cameraId} name={effectiveDoc.camera_name} serverId={serverId} initialQuality={cam?.default_live_quality} overlay={tab.id === "ptz" && section === PTZ_CONTROL && canPtz ? <PtzOverlay cameraId={cameraId} /> : undefined} />
-        <CameraSummaryCards
-          origin={[
-            { label: "Servidor", value: server?.name || NONE },
-            { label: "Motor", value: version ? `Frigate ${version}` : "Frigate" },
-            { label: "Cámara", value: cam?.remote_name || NONE },
-          ]}
-          video={videoRows(cam, config, change.config.data)}
-          device={deviceRows(cam, config)}
-          capabilities={capabilityList(cam, config)}
-        />
-      </div>
-
+      <div className="flex flex-col gap-4 min-[900px]:flex-row min-[900px]:items-start">
       <CameraTabs
         tabs={tabs}
         active={tab.id}
@@ -521,10 +578,28 @@ function FrigateCameraConfigScreen({ cameraId }: { cameraId: string }) {
         onSelect={(t) => setActive(t.sections[0] ?? GENERAL)}
       />
 
-      {tab.id !== "detect" && tab.id !== "video" && subNav}
+      <div className="flex min-w-0 flex-1 flex-col gap-4">
+      {(tab.id === "summary" || tab.id === "ptz") && (
+        <div className="flex flex-col gap-3 lg:flex-row lg:items-stretch">
+          <CameraPreview cameraId={cameraId} name={effectiveDoc.camera_name} serverId={serverId} initialQuality={cam?.default_live_quality} overlay={tab.id === "ptz" && section === PTZ_CONTROL && canPtz ? <PtzOverlay cameraId={cameraId} /> : undefined} />
+          <CameraSummaryCards
+            origin={[
+              { label: "Servidor", value: server?.name || NONE },
+              { label: "Motor", value: version ? `Frigate ${version}` : "Frigate" },
+              { label: "Cámara", value: cam?.remote_name || NONE },
+            ]}
+            video={videoRows(cam, config, change.config.data)}
+            device={deviceRows(cam, config)}
+            capabilities={capabilityList(cam, config)}
+          />
+        </div>
+      )}
+      {tab.id === "summary" && <HealthTiles camera={cam} />}
+
+      {tab.id !== "detect" && tab.id !== "video" && tab.id !== "advanced" && subNav}
 
       <section
-        aria-label={section === CAMERA_WEB ? "Acceso web a la cámara" : sectionTitle(section)}
+        aria-label={tab.id === "advanced" ? "Avanzado" : section === CAMERA_WEB ? "Acceso web a la cámara" : sectionTitle(section)}
         className="flex min-w-0 flex-1 flex-col gap-5 rounded-m3-2xl bg-surface-1 p-5 border border-outline-variant/60 shadow-sm"
       >
         {tab.id === "record" && <EditYamlLink section="record" label="Editar YAML de grabación" />}
@@ -579,64 +654,27 @@ function FrigateCameraConfigScreen({ cameraId }: { cameraId: string }) {
               </>
             }
           />
-        ) : section === GENERAL ? (
-          <CameraGeneral cameraId={cameraId} canManage={canManageCamera} frigate={general} onApplyToFrigate={onApplyToFrigate} />
-        ) : section === FISHEYE ? (
-          <FisheyeTab cameraId={cameraId} cameraName={effectiveDoc.camera_name} canManage={!readOnly} />
-        ) : section === ANALYTICS_MODULES || section === INTEGRATIONS_STATUS ? (
-          <AnalyticsTab
-            cameraId={cameraId}
-            integrations={change.config.data?.integrations}
-            modules={change.config.data?.analytics?.modules}
-            patch={change.patch}
-            setPatch={change.setPatch}
-            readOnly={readOnly || !canCamera(me.data, "cameras.config.analytics")}
-          />
-        ) : section === PROVISION ? (
-          cam && (
-            <ProvisionLprSection
-              camera={cam}
-              onCameraUpdate={() => {
-                void qc.invalidateQueries({ queryKey: ["cameras", cameraId] });
-                void qc.invalidateQueries({ queryKey: ["cameras"] });
-              }}
-            />
-          )
-        ) : section === CAMERA_WEB ? (
-          <CameraWebView cameraId={cameraId} autoOpen />
-        ) : section === PTZ_CONTROL && tab.id === "ptz" ? (
-          <PtzTab cameraId={cameraId} canManage={canPtz} />
-        ) : section === ONVIF_INFO || section === PTZ_CONTROL ? (
-          <CameraOnvifPanel cameraId={cameraId} camera={cam} canManage={canManageCamera} onApplyToFrigate={onApplyToFrigate} />
-        ) : section === ADVANCED_PANELS ? (
-          <AdvancedTab
-            cameraId={cameraId}
-            engine={provision ? "provision" : "frigate"}
-            yamlRequest={yamlRequest}
-            canAdvanced={canCamera(me.data, "cameras.config.advanced")}
-            canYaml={canYaml}
-            canRollback={canCamera(me.data, "cameras.config.edit")}
-          />
-        ) : section === HISTORY ? (
-          <FrigateHistory
-            serverId={effectiveDoc.server_id}
-            cameraId={cameraId}
-            secretsVisible={secretsVisible}
-            canRollback={!readOnly && secretsVisible && !frigateUnavailable}
-            onRestored={() => setNeedsRestart(true)}
-          />
-        ) : frigateUnavailable ? (
-          <p className="text-sm text-muted">Esta sección requiere conexión con el servidor de Frigate.</p>
+        ) : tab.id === "advanced" ? (
+          <div className="flex flex-col gap-3">
+            {tab.sections.map((s) => (
+              <AdvancedAccordion key={s} id={s} title={sectionTitle(s)} open={!!openAcc[s]} dirty={dirty.includes(s)} badge={!s.startsWith("__") && <LiveBadge live={isLiveSection(s)} />} onToggle={() => setOpenAcc((o) => ({ ...o, [s]: !o[s] }))}>
+                {renderSection(s)}
+                {!s.startsWith("__") && Object.keys(errors).some((p) => p.split(".")[0] === s) && <p role="alert" className="text-xs text-bad">Hay valores no válidos en esta sección.</p>}
+              </AdvancedAccordion>
+            ))}
+          </div>
         ) : (
-          sectionPanel
+          renderSection(section)
         )}
 
-        {!isPseudo && Object.keys(errors).some((p) => (tab.id === "video" ? tab.sections.includes(p.split(".")[0]!) : p.split(".")[0] === section)) && (
+        {!isPseudo && tab.id !== "advanced" && Object.keys(errors).some((p) => (tab.id === "video" ? tab.sections.includes(p.split(".")[0]!) : p.split(".")[0] === section)) && (
           <p role="alert" className="text-xs text-bad">
             Hay valores no válidos en esta sección.
           </p>
         )}
       </section>
+      </div>
+      </div>
 
       {!readOnly && (
         <PendingChangesBar
@@ -744,15 +782,12 @@ function CameraGeneral({
   cameraId,
   canManage,
   frigate,
-  onApplyToFrigate,
 }: {
   cameraId: string;
   canManage: boolean;
   frigate: GeneralFrigate;
-  onApplyToFrigate: (patch: Record<string, unknown>) => void;
 }) {
   const camera = useQuery(cameraQuery(cameraId));
-  const [onvifOpen, setOnvifOpen] = useState(false);
   if (camera.isLoading) return <p className="text-sm text-muted">Cargando ajustes…</p>;
   if (camera.error || !camera.data) return <ErrorNote error={camera.error ?? new Error("No se pudo leer la cámara.")} />;
 
@@ -771,9 +806,6 @@ function CameraGeneral({
           <Icon icon={SlidersHorizontal} size="sm" className="text-primary" />
           <span>Ajustes generales</span>
         </h2>
-        <Button type="button" variant="secondary" onClick={() => setOnvifOpen(true)}>
-          <Icon icon={ShieldCheck} size="xs" /> Capacidades ONVIF
-        </Button>
       </div>
 
       <CameraEnabledSwitch
@@ -798,12 +830,6 @@ function CameraGeneral({
       <div className="border-t border-outline-variant/60 pt-6">
         <CameraGeneralForm camera={camera.data} canManage={canManage} />
       </div>
-
-      {onvifOpen && (
-        <Modal title="Capacidades ONVIF" onClose={() => setOnvifOpen(false)} className="max-w-5xl">
-          <CameraOnvifPanel cameraId={cameraId} camera={camera.data} canManage={canManage} onApplyToFrigate={onApplyToFrigate} />
-        </Modal>
-      )}
     </div>
   );
 }

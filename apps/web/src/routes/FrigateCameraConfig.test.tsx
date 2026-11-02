@@ -79,6 +79,8 @@ function mount(doc: object, extra: Record<string, () => Response> = {}) {
 }
 
 const goTo = async (name: string) => fireEvent.click(await screen.findByRole("tab", { name: new RegExp(`^${name}`) }));
+// Zones live in Detección y zonas: its settings carry the "Editar zonas" entry point.
+const goToZones = () => goTo("Detección");
 const openMoreActions = async (item: string) => {
   fireEvent.click(await screen.findByRole("button", { name: "Más acciones" }));
   fireEvent.click(await screen.findByRole("menuitem", { name: item }));
@@ -130,10 +132,10 @@ describe("FrigateCameraConfig", () => {
       "/api/v1/cameras/c1/frigate-config": () => json({ camera_id: "c1", camera_name: "acceso", server_id: "s1", frigate_version: "0.17.1", editable: true, secrets_visible: false, config: { detect: { enabled: true, fps: 5 }, onvif: { host: "h", password: "****" } }, sections: [] }),
     });
     const nav = await screen.findByRole("navigation", { name: "Secciones de configuración" });
-    expect(within(nav).getByRole("tab", { name: "Detección" })).toBeInTheDocument();
+    expect(within(nav).getByRole("tab", { name: "Detección y zonas" })).toBeInTheDocument();
 
     await goTo("Avanzado");
-    expect(within(await screen.findByRole("navigation", { name: "Subsecciones de Avanzado" })).getAllByText("Requiere reinicio").length).toBeGreaterThan(0);
+    expect(within(await screen.findByRole("region", { name: "Avanzado" })).getAllByText("Requiere reinicio").length).toBeGreaterThan(0);
     await goTo("Detección");
     fireEvent.change(await screen.findByLabelText("Fps"), { target: { value: "12" } });
     fireEvent.click(screen.getByRole("button", { name: "Revisar cambios" }));
@@ -224,7 +226,7 @@ describe("FrigateCameraConfig", () => {
     fireEvent.change(await screen.findByLabelText("Fps"), { target: { value: "99" } });
     expect(await screen.findByText("Debe ser como máximo 30.")).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Revisar cambios" })).toBeDisabled();
-    await goTo("Avanzado");
+    await goTo("Conexión");
     fireEvent.click(await screen.findByRole("button", { name: /ONVIF \/ PTZ/ }));
     expect(await screen.findByLabelText("Host")).toHaveValue("10.0.0.2");
     expect(screen.getAllByText("Protegido: requiere permiso de credenciales").length).toBe(1);
@@ -281,7 +283,8 @@ describe("FrigateCameraConfig", () => {
     const fetchMock = mount({ config: { [section]: initial } });
     await goTo("Avanzado");
     fireEvent.click(await screen.findByRole("button", { name: new RegExp(navLabel, "i") }));
-    const heading = await screen.findByRole("heading", { name: panelTitle });
+    // The accordion title and the panel's own heading carry the same name; the panel is the last one.
+    const heading = (await screen.findAllByRole("heading", { name: panelTitle })).at(-1)!;
     expect(heading).toBeInTheDocument();
     expect(await screen.findByText("Opciones avanzadas")).toBeInTheDocument();
     await edit(heading.parentElement!);
@@ -317,9 +320,9 @@ describe("FrigateCameraConfig", () => {
 
   it("opens the zone editor, drafts its result and patches removed zones as null", async () => {
     const fetchMock = mount({ config: { zones: { puerta: { coordinates: "0,0,1,0,1,1" } }, detect: { enabled: true, fps: 5 } } });
-    await goTo("Zonas");
+    await goToZones();
     fireEvent.click(await screen.findByRole("button", { name: "Editar zonas" }));
-    expect(await screen.findByText("puerta")).toBeInTheDocument();
+    expect(within(await screen.findByRole("dialog", { name: "Editor de zonas" })).getByText("puerta")).toBeInTheDocument();
     fireEvent.click(screen.getByRole("button", { name: "guardar zonas" }));
     fireEvent.click(await screen.findByRole("button", { name: "Revisar cambios" }));
     const dialog = await screen.findByRole("dialog", { name: "Revisar cambios" });
@@ -335,7 +338,7 @@ describe("FrigateCameraConfig", () => {
       "/api/v1/cameras/c1": () => json({ id: "c1", display_name: "acceso", enabled: true, default_live_quality: "sub", description: "", location: "", tags: [] }),
     });
     fireEvent.change(await screen.findByLabelText("Ubicación"), { target: { value: "Boca norte" } });
-    fireEvent.click(within(screen.getByRole("region", { name: "General" })).getByRole("button", { name: "Guardar" }));
+    fireEvent.click(within(screen.getByRole("region", { name: "Resumen" })).getByRole("button", { name: "Guardar" }));
     await waitFor(() => {
       const patch = fetchMock.mock.calls.map(([r]) => r as Request).find((r) => r.method === "PATCH" && new URL(r.url).pathname === "/api/v1/cameras/c1");
       expect(patch).toBeDefined();
@@ -373,8 +376,8 @@ describe("FrigateCameraConfig", () => {
         }),
     });
 
-    fireEvent.click(await screen.findByRole("button", { name: "Capacidades ONVIF" }));
-    const dialog = await screen.findByRole("dialog", { name: "Capacidades ONVIF" });
+    await goTo("Conexión");
+    const dialog = await screen.findByRole("region", { name: "Capacidades ONVIF" });
     expect(within(dialog).getByText("Soporte y Capacidades ONVIF")).toBeInTheDocument();
     expect(within(dialog).getByText("Hikvision DS-2CD2043G2-I")).toBeInTheDocument();
     expect(within(dialog).getByText("Soportado (Profile M)")).toBeInTheDocument();
@@ -383,13 +386,13 @@ describe("FrigateCameraConfig", () => {
 
     fireEvent.click(within(dialog).getByRole("button", { name: "Cargar en Frigate" }));
     expect(await screen.findByLabelText("Host")).toHaveValue("10.1.1.220");
-    expect(screen.queryByRole("dialog", { name: "Capacidades ONVIF" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("region", { name: "Capacidades ONVIF" })).not.toBeInTheDocument();
     expect(screen.getByText(/1 cambio sin guardar/)).toBeInTheDocument();
   });
 
-  it("opens on General and keeps ONVIF facts out of the sidebar", async () => {
+  it("opens on Resumen and keeps ONVIF facts out of the sidebar", async () => {
     mountFull({}, { "/api/v1/cameras/c1": () => cam({ onvif_profile: "ONVIF-T", onvif_capabilities: { manufacturer: "Hikvision", has_analytics: true } }) });
-    const general = await screen.findByRole("tab", { name: "General" });
+    const general = await screen.findByRole("tab", { name: "Resumen" });
     expect(general).toHaveAttribute("aria-selected", "true");
     expect(screen.queryByLabelText("Fps")).not.toBeInTheDocument();
     const nav = screen.getByRole("navigation", { name: "Secciones de configuración" });
@@ -399,9 +402,9 @@ describe("FrigateCameraConfig", () => {
   });
 
   describe("integration of the LPR test and the camera web view", () => {
-    it("lists the camera web view in Avanzado and shows the viewer when selected", async () => {
+    it("lists the camera web view in Conexión and shows the viewer when selected", async () => {
       mountFull({}, { "/api/v1/me": () => json({ id: "u", tenant_id: "t", grants: [{ permission: "cameras.manage", effect: "allow" }, { permission: "servers.manage", effect: "allow" }, { permission: "servers.config.secrets", effect: "allow" }] }) });
-      await goTo("Avanzado");
+      await goTo("Conexión");
       fireEvent.click(await screen.findByRole("button", { name: /^Web de la cámara/ }));
       expect(await screen.findByRole("region", { name: "Web de la cámara" })).toBeInTheDocument();
       expect(screen.getByRole("button", { name: "Abrir" })).toBeInTheDocument();
@@ -427,7 +430,7 @@ describe("FrigateCameraConfig", () => {
 
     it("hides the camera web view entry when the user cannot manage the camera", async () => {
       mountFull({}, { "/api/v1/me": () => json({ id: "u", tenant_id: "t", grants: [{ permission: "cameras.view", effect: "allow" }] }) });
-      await goTo("Avanzado");
+      await goTo("Conexión");
       expect(await screen.findByRole("button", { name: /^Capacidades ONVIF/ })).toBeInTheDocument();
       expect(screen.queryByRole("region", { name: "Acceso web a la cámara" })).not.toBeInTheDocument();
       expect(screen.queryByRole("button", { name: /^Web de la cámara/ })).not.toBeInTheDocument();
@@ -666,7 +669,7 @@ describe("FrigateCameraConfig", () => {
         "PUT /api/v1/cameras/c1/zones/z1": () => json(zone("z1", "entrada", "pending")),
         "DELETE /api/v1/cameras/c1/zones/z2": () => new Response(null, { status: 204 }),
       });
-      await goTo("Zonas");
+      await goToZones();
       fireEvent.click(await screen.findByRole("button", { name: "Editar zonas" }));
       expect(await screen.findByText("patio,entrada,borrar")).toBeInTheDocument();
       expect(screen.getByTestId("managed")).toHaveTextContent("entrada,borrar");
@@ -687,11 +690,11 @@ describe("FrigateCameraConfig", () => {
         "/api/v1/cameras/c1/zones": zonesList,
         "DELETE /api/v1/cameras/c1/zones/z2": () => json({ code: "forbidden", message: "sin permiso" }, 403),
       });
-      await goTo("Zonas");
+      await goToZones();
       fireEvent.click(await screen.findByRole("button", { name: "Editar zonas" }));
       fireEvent.click(await screen.findByRole("button", { name: "guardar gestionadas" }));
-      expect(await screen.findByRole("alert")).toHaveTextContent(/No se pudieron guardar las zonas/);
-      expect(screen.getByRole("dialog", { name: "Editor de zonas" })).toBeInTheDocument();
+      const dialog = await screen.findByRole("dialog", { name: "Editor de zonas" });
+      expect(within(dialog).getByRole("alert")).toHaveTextContent(/No se pudieron guardar las zonas/);
     });
 
     it("retries a failed zone synchronization only for users who can manage cameras", async () => {
@@ -700,7 +703,7 @@ describe("FrigateCameraConfig", () => {
         "/api/v1/cameras/c1/zones": zonesList,
         "POST /api/v1/cameras/c1/zones/z1/sync": () => new Response(null, { status: 202 }),
       });
-      await goTo("Zonas");
+      await goToZones();
       fireEvent.click(await screen.findByRole("button", { name: "Editar zonas" }));
       fireEvent.click(await screen.findByRole("button", { name: "reintentar z1" }));
       await waitFor(() => expect(methods(fetchMock)).toContain("POST /api/v1/cameras/c1/zones/z1/sync"));
@@ -708,7 +711,7 @@ describe("FrigateCameraConfig", () => {
 
     it("falls back to the plain Frigate zones without the manage permission", async () => {
       mount({ config: frigateConfig }, { "/api/v1/cameras/c1/zones": zonesList });
-      await goTo("Zonas");
+      await goToZones();
       fireEvent.click(await screen.findByRole("button", { name: "Editar zonas" }));
       expect(await screen.findByText("patio,ovms_entrada,ovms_borrar")).toBeInTheDocument();
       expect(screen.queryByTestId("managed")).not.toBeInTheDocument();
@@ -745,24 +748,77 @@ describe("FrigateCameraConfig", () => {
 
     it("lists only the tabs the camera needs", async () => {
       mountFull({}, { "/api/v1/cameras/c1": () => cam({ tags: [], lpr: false }) });
-      await screen.findByRole("tab", { name: "General" });
-      expect(screen.getAllByRole("tab").map((t) => t.textContent)).toEqual(expect.arrayContaining(["General", "Video", "Grabación", "Detección", "Zonas", "Avanzado"]));
-      expect(screen.queryByRole("tab", { name: "PTZ" })).not.toBeInTheDocument();
-      expect(screen.queryByRole("tab", { name: "Fisheye" })).not.toBeInTheDocument();
+      await screen.findByRole("tab", { name: "Resumen" });
+      expect(screen.getAllByRole("tab").map((t) => t.textContent)).toEqual(["Resumen", "Video", "Grabación", "Detección y zonas", "Conexión", "Avanzado"]);
+      expect(screen.queryByRole("tab", { name: /^PTZ/ })).not.toBeInTheDocument();
+      expect(screen.queryByRole("tab", { name: /^Fisheye/ })).not.toBeInTheDocument();
     });
 
-    it("adds PTZ and Fisheye tabs when the camera has them", async () => {
+    it("adds one PTZ y fisheye entry, with Fisheye inside it, when the camera has both", async () => {
       mountFull({}, { "/api/v1/cameras/c1": () => cam({ tags: ["fisheye"], onvif_capabilities: { has_ptz: true } }) });
-      expect(await screen.findByRole("tab", { name: "PTZ" })).toBeInTheDocument();
-      expect(await screen.findByRole("tab", { name: "Fisheye" })).toBeInTheDocument();
+      expect(await screen.findByRole("tab", { name: "PTZ y fisheye" })).toBeInTheDocument();
+      expect(screen.getAllByRole("tab", { name: /Fisheye/i })).toHaveLength(1);
+      await goTo("PTZ");
+      expect(within(await screen.findByRole("navigation", { name: "Subsecciones de PTZ y fisheye" })).getByRole("button", { name: /Fisheye/ })).toBeInTheDocument();
     });
 
-    it("keeps Fisheye reachable from Avanzado for other cameras, with the history", async () => {
+    it("groups the navigation under Cámara, Inteligencia and Sistema (Control only with PTZ or fisheye)", async () => {
+      mountFull();
+      const nav = await screen.findByRole("navigation", { name: "Secciones de configuración" });
+      expect(within(nav).getAllByRole("group").map((g) => g.getAttribute("aria-label"))).toEqual(["Cámara", "Inteligencia", "Sistema"]);
+      expect(within(within(nav).getByRole("group", { name: "Sistema" })).getAllByRole("tab").map((t) => t.textContent)).toEqual(["Conexión", "Avanzado"]);
+    });
+
+    it("switches the content with the navigation", async () => {
+      mountFull({}, { "/api/v1/cameras/c1": () => cam() });
+      expect(await screen.findByRole("region", { name: "Resumen" })).toBeInTheDocument();
+      await goTo("Grabación");
+      expect(await screen.findByRole("region", { name: "Grabación" })).toBeInTheDocument();
+      expect(screen.queryByRole("region", { name: "Resumen" })).not.toBeInTheDocument();
+      expect(screen.getByRole("tab", { name: "Grabación" })).toHaveAttribute("aria-selected", "true");
+    });
+
+    it("keeps Avanzado as accordions closed by default that open on click, with the history and the engine panels", async () => {
       mountFull();
       await goTo("Avanzado");
-      const subnav = within(await screen.findByRole("navigation", { name: "Subsecciones de Avanzado" }));
-      expect(subnav.getByRole("button", { name: /Fisheye/ })).toBeInTheDocument();
-      expect(subnav.getByRole("button", { name: /Historial/ })).toBeInTheDocument();
+      for (const name of ["Historial", "Paneles por motor", "Fisheye / 360°"]) {
+        const header = await screen.findByRole("button", { name: new RegExp(`^${name}`) });
+        expect(header).toHaveAttribute("aria-expanded", "false");
+      }
+      expect(screen.queryByRole("region", { name: "Historial" })).not.toBeInTheDocument();
+      fireEvent.click(screen.getByRole("button", { name: /^Historial/ }));
+      expect(screen.getByRole("button", { name: /^Historial/ })).toHaveAttribute("aria-expanded", "true");
+      expect(screen.getByRole("region", { name: "Historial" })).toBeInTheDocument();
+      fireEvent.click(screen.getByRole("button", { name: /^Historial/ }));
+      expect(screen.queryByRole("region", { name: "Historial" })).not.toBeInTheDocument();
+      // Connection settings are not duplicated in Avanzado.
+      expect(screen.queryByRole("button", { name: /ONVIF \/ PTZ/ })).not.toBeInTheDocument();
+    });
+
+    it("opens the Historial accordion from Más acciones", async () => {
+      mountFull();
+      await openMoreActions("Historial de cambios");
+      expect(await screen.findByRole("button", { name: /^Historial/ })).toHaveAttribute("aria-expanded", "true");
+      expect(screen.getByRole("tab", { name: "Avanzado" })).toHaveAttribute("aria-selected", "true");
+    });
+
+    it("shows the health tiles in Resumen only", async () => {
+      mountFull({}, { "/api/v1/cameras/c1": () => cam({ status: "online", fps: 10 }) });
+      expect(await screen.findByRole("list", { name: "Salud de la cámara" })).toBeInTheDocument();
+      await goTo("Grabación");
+      expect(screen.queryByRole("list", { name: "Salud de la cámara" })).not.toBeInTheDocument();
+    });
+
+    it("names the analytics entry Analíticas OpenVMS", async () => {
+      mountFull({}, { "/api/v1/cameras/c1": () => cam({ tags: ["provision"] }) });
+      expect(await screen.findByRole("tab", { name: "Analíticas OpenVMS" })).toBeInTheDocument();
+    });
+
+    it("keeps the ONVIF / PTZ settings and the capabilities in Conexión", async () => {
+      mountFull();
+      await goTo("Conexión");
+      const subnav = within(await screen.findByRole("navigation", { name: "Subsecciones de Conexión" }));
+      expect(subnav.getByRole("button", { name: /Capacidades ONVIF/ })).toBeInTheDocument();
       expect(subnav.getByRole("button", { name: /ONVIF \/ PTZ/ })).toBeInTheDocument();
     });
 
@@ -770,12 +826,14 @@ describe("FrigateCameraConfig", () => {
       mountFull();
       const reach = async (tab: string, entry: RegExp) => {
         await goTo(tab);
-        expect(await within(await screen.findByRole("navigation", { name: `Subsecciones de ${tab}` })).findByRole("button", { name: entry })).toBeInTheDocument();
+        const label = tab === "Detección" ? "Detección y zonas" : tab;
+        expect(await within(await screen.findByRole("navigation", { name: `Subsecciones de ${label}` })).findByRole("button", { name: entry })).toBeInTheDocument();
       };
       await reach("Grabación", /^Capturas/);
       await reach("Detección", /^Objetos/);
       await reach("Detección", /^Movimiento/);
-      await reach("Zonas", /^Revisión y Alertas/);
+      await reach("Detección", /^Zonas/);
+      await reach("Detección", /^Revisión y Alertas/);
     });
 
     it("shows pending changes in a bar that discards them", async () => {
@@ -814,7 +872,7 @@ describe("FrigateCameraConfig", () => {
       });
       expect(await screen.findByRole("heading", { name: "Quincho" })).toBeInTheDocument();
       expect(screen.getByText(/El servidor de Frigate no responde/)).toBeInTheDocument();
-      expect(screen.getByRole("tab", { name: "General" })).toBeInTheDocument();
+      expect(screen.getByRole("tab", { name: "Resumen" })).toBeInTheDocument();
       expect(screen.getByRole("button", { name: "Abrir interfaz web" })).toBeInTheDocument();
     });
 
@@ -825,13 +883,13 @@ describe("FrigateCameraConfig", () => {
 
     it("hides Abrir interfaz web for a servers.config holder without web access", async () => {
       mountFull({}, { "/api/v1/me": () => json({ id: "u", tenant_id: "t", grants: [{ permission: "servers.config", effect: "allow" }, { permission: "cameras.manage", effect: "allow" }] }) });
-      await screen.findByRole("tab", { name: "General" });
+      await screen.findByRole("tab", { name: "Resumen" });
       expect(screen.queryByRole("button", { name: "Abrir interfaz web" })).not.toBeInTheDocument();
     });
 
     it("hides Abrir interfaz web without the permissions", async () => {
       mountFull();
-      await screen.findByRole("tab", { name: "General" });
+      await screen.findByRole("tab", { name: "Resumen" });
       expect(screen.queryByRole("button", { name: "Abrir interfaz web" })).not.toBeInTheDocument();
     });
 
@@ -843,32 +901,32 @@ describe("FrigateCameraConfig", () => {
 
     it("hides the sync badge when the normalized config is unavailable", async () => {
       mountFull();
-      await screen.findByRole("tab", { name: "General" });
+      await screen.findByRole("tab", { name: "Resumen" });
       expect(screen.queryByTestId("sync-badge")).not.toBeInTheDocument();
     });
   });
   describe("PTZ and Fisheye tabs", () => {
     it("hides both tabs for a fixed camera", async () => {
       mountFull({}, { "/api/v1/cameras/c1": () => cam({ onvif_capabilities: { has_ptz: false } }) });
-      await screen.findByRole("tab", { name: "General" });
+      await screen.findByRole("tab", { name: "Resumen" });
       expect(screen.queryByRole("tab", { name: /^PTZ/ })).not.toBeInTheDocument();
       expect(screen.queryByRole("tab", { name: /^Fisheye/ })).not.toBeInTheDocument();
     });
 
     it("shows PTZ for a PTZ camera, with the pad and contextual preview controls only inside it", async () => {
       mountFull({}, { "/api/v1/cameras/c1": () => cam({ onvif_capabilities: { has_ptz: true } }), "/api/v1/cameras/c1/onvif/ptz": () => json({ success: true, presets: [] }), "/api/v1/cameras/c1/ptz/tours": () => json({ tours: [] }) });
-      await screen.findByRole("tab", { name: "General" });
+      await screen.findByRole("tab", { name: "Resumen" });
       expect(screen.queryByRole("group", { name: "Controles PTZ de la vista previa" })).not.toBeInTheDocument();
       await goTo("PTZ");
       expect(await screen.findByRole("region", { name: "Movimiento" })).toBeInTheDocument();
       expect(screen.getByRole("group", { name: "Controles PTZ de la vista previa" })).toBeInTheDocument();
-      await goTo("General");
+      await goTo("Resumen");
       expect(screen.queryByRole("group", { name: "Controles PTZ de la vista previa" })).not.toBeInTheDocument();
     });
 
     it("shows Fisheye only for a fisheye camera", async () => {
       mountFull({}, { "/api/v1/cameras/c1": () => cam({ tags: ["fisheye"] }) });
-      await goTo("Fisheye");
+      await goTo("PTZ y fisheye");
       expect(await screen.findByRole("region", { name: "Original y vista" })).toBeInTheDocument();
     });
   });
