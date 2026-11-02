@@ -1067,6 +1067,7 @@ func TestWebSocketIsTunnelledToTheCameraPortWithItsOwnHandshake(t *testing.T) {
 	if err != nil || resp.StatusCode != http.StatusSwitchingProtocols || resp.Header.Get("Sec-WebSocket-Accept") != "accepted" {
 		t.Fatalf("the camera's own handshake answer must reach the browser: %v %v", err, resp)
 	}
+	defer resp.Body.Close()
 	fmt.Fprint(conn, "ping\n")
 	if got, _ := br.ReadString('\n'); got != "echo:ping\n" {
 		t.Fatalf("frames must relay both ways, got %q", got)
@@ -1151,6 +1152,7 @@ func TestShimScriptParsesAsJavaScript(t *testing.T) {
 	if err := os.WriteFile(file, []byte(body), 0o600); err != nil {
 		t.Fatal(err)
 	}
+	// #nosec G204 -- node comes from LookPath and file is a temp path
 	if out, err := exec.Command(node, "--check", file).CombinedOutput(); err != nil {
 		t.Fatalf("shim does not parse: %v\n%s", err, out)
 	}

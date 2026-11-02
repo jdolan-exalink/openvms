@@ -98,7 +98,7 @@ func TestCameraWebTunnelReturnsAWritableConnectionAndSendsUpgradeHeaders(t *test
 
 func TestCameraWebTunnelRefusedWhenTheAgentDoesNotSwitchProtocols(t *testing.T) {
 	svc := endpointService("10.0.15.2", 7419, AgentTLSConfig{TrustMode: AgentTLSTrustPlaintext}, "", nil)
-	svc.probeRoundTripper = roundTripFunc(agentReply(405, "method not allowed")) // an agent that predates tunnels
+	svc.probeRoundTripper = agentReply(405, "method not allowed") // an agent that predates tunnels
 	in := http.Header{}
 	in.Set(camproxy.HeaderTarget, "http://10.0.0.5:81")
 	if _, err := svc.CameraWebTunnel(context.Background(), authz.Actor{}, uuid.New(), in); !errors.Is(err, ErrCameraTunnelRefused) {

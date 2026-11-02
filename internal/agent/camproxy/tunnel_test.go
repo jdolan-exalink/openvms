@@ -39,7 +39,8 @@ func echoCamera(t *testing.T) (addr string, accepted <-chan struct{}) {
 	return ln.Addr().String(), got
 }
 
-func openTunnel(t *testing.T, agent *httptest.Server, target string) (net.Conn, *bufio.Reader, *http.Response) {
+// openTunnel sends one tunnel request and returns the connection, its reader and the response head.
+func openTunnel(t *testing.T, agent *httptest.Server, target string) (net.Conn, *bufio.Reader, tunnelHead) {
 	t.Helper()
 	c, err := net.Dial("tcp", strings.TrimPrefix(agent.URL, "http://"))
 	if err != nil {
@@ -57,7 +58,13 @@ func openTunnel(t *testing.T, agent *httptest.Server, target string) (net.Conn, 
 	if err != nil {
 		t.Fatalf("read response: %v", err)
 	}
-	return c, br, resp
+	_ = resp.Body.Close() // the head is all that is needed; for a 101 the connection stays with c
+	return c, br, tunnelHead{status: resp.StatusCode, header: resp.Header}
+}
+
+type tunnelHead struct {
+	status int
+	header http.Header
 }
 
 func TestTunnelRelaysRawBytesBothWays(t *testing.T) {
@@ -66,8 +73,8 @@ func TestTunnelRelaysRawBytesBothWays(t *testing.T) {
 	t.Cleanup(agent.Close)
 
 	c, br, resp := openTunnel(t, agent, "http://"+cam)
-	if resp.StatusCode != http.StatusSwitchingProtocols || resp.Header.Get(HeaderProxy) != "1" {
-		t.Fatalf("status %d headers %v", resp.StatusCode, resp.Header)
+	if resp.status != http.StatusSwitchingProtocols || resp.header.Get(HeaderProxy) != "1" {
+		t.Fatalf("status %d headers %v", resp.status, resp.header)
 	}
 	select {
 	case <-accepted:
@@ -99,8 +106,8 @@ func TestTunnelRefusesWhatTheHTTPPathRefuses(t *testing.T) {
 		"with a path": "http://10.0.0.5:80/x",
 	} {
 		_, _, resp := openTunnel(t, agent, target)
-		if resp.StatusCode == http.StatusSwitchingProtocols || resp.Header.Get(HeaderProxyError) == "" {
-			t.Errorf("%s: tunnel to %q must be refused, got %d", name, target, resp.StatusCode)
+		if resp.status == http.StatusSwitchingProtocols || resp.header.Get(HeaderProxyError) == "" {
+			t.Errorf("%s: tunnel to %q must be refused, got %d", name, target, resp.status)
 		}
 	}
 }
@@ -112,7 +119,7 @@ func TestTunnelUnreachableCameraIsBadGateway(t *testing.T) {
 	agent := httptest.NewServer(newTestHandler(t, Config{}))
 	t.Cleanup(agent.Close)
 	_, _, resp := openTunnel(t, agent, "http://"+addr)
-	if resp.StatusCode != http.StatusBadGateway || resp.Header.Get(HeaderProxyError) != "camera_unreachable" {
-		t.Fatalf("got %d %q", resp.StatusCode, resp.Header.Get(HeaderProxyError))
+	if resp.status != http.StatusBadGateway || resp.header.Get(HeaderProxyError) != "camera_unreachable" {
+		t.Fatalf("got %d %q", resp.status, resp.header.Get(HeaderProxyError))
 	}
 }

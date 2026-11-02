@@ -82,7 +82,7 @@ func rewriteJS(body []byte) []byte {
 	var topFrameOwners []string
 	body = jsTopFrameDocumentRe.ReplaceAllFunc(body, func(match []byte) []byte {
 		groups := jsTopFrameDocumentRe.FindSubmatch(match)
-		if groups == nil || len(groups) < 3 {
+		if len(groups) < 3 {
 			return match
 		}
 		frameWindow := "window." + string(groups[2])
@@ -121,7 +121,7 @@ func rewriteJS(body []byte) []byte {
 func rewriteTopProps(re *regexp.Regexp, body []byte) []byte {
 	return re.ReplaceAllFunc(body, func(match []byte) []byte {
 		groups := re.FindSubmatch(match)
-		if groups == nil || len(groups) < 4 {
+		if len(groups) < 4 {
 			return match
 		}
 		if string(groups[3]) == "location" {
