@@ -120,6 +120,18 @@ describe("Faces configuration tab", () => {
     expect(screen.queryByRole("button", { name: "Reiniciar Frigate" })).not.toBeInTheDocument();
   });
 
+  it("stages recognition on every camera with one button and saves only what changes", async () => {
+    const calls = install(all, [server()]);
+    await openConfig();
+    fireEvent.click(await screen.findByRole("button", { name: "Configurar h01" }));
+    fireEvent.click(screen.getByRole("button", { name: "Activar en todas las cámaras" }));
+    expect(screen.getByRole("switch", { name: "Reconocimiento en acceso" })).toBeChecked();
+    expect(screen.getByRole("switch", { name: "Reconocimiento facial activado" })).toBeChecked();
+    expect(calls.some((c) => c.method === "PATCH")).toBe(false);
+    fireEvent.click(screen.getByRole("button", { name: "Guardar configuración" }));
+    await waitFor(() => expect(calls.find((c) => c.method === "PATCH")?.body).toEqual({ enabled: true, cameras: [{ camera_id: "c1", enabled: true }] }));
+  });
+
   it("refuses out-of-range values before calling the API", async () => {
     const calls = install(all, [server()]);
     await openConfig();

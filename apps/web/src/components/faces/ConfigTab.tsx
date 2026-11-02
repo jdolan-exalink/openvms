@@ -148,6 +148,12 @@ function Editor({ server, onSaved }: { server: ServerConfig; onSaved: () => void
     },
   });
 
+  /** Stages recognition on for the server and every camera; nothing is sent until the form is saved. */
+  function enableAll() {
+    setEnabled(true);
+    setCamEnabled(Object.fromEntries(server.cameras.map((c) => [c.camera_id, true])));
+  }
+
   function submit() {
     const problems: string[] = [];
     const body: Patch = {};
@@ -209,6 +215,9 @@ function Editor({ server, onSaved }: { server: ServerConfig; onSaved: () => void
       {server.cameras.length > 0 && (
         <fieldset className="flex flex-col gap-2">
           <legend className="mb-1 text-sm font-medium">{t("faces.cfgCameras")}</legend>
+          <div>
+            <Button type="button" variant="tonal" size="sm" onClick={enableAll}>{t("faces.cfgEnableAll")}</Button>
+          </div>
           {server.cameras.map((cam) => (
             <div key={cam.camera_id} className="flex flex-wrap items-center justify-between gap-3">
               <Switch
