@@ -28,7 +28,7 @@ Visual reference: the published mockup "Retención de datos OpenVMS", local copy
 
 ## Tasks
 - U1 (S1, S2, S6) Storage and purge: migration `retention_settings`, queries, `internal/retention` (settings, purge, preview), the purge job in the worker, notifications reading their days from the setting. Route: inline. Status: done (migration 00090, internal/retention, ExpireFaceSightings, notify.Worker.RetentionSource, worker wiring; integration tests green against Postgres: faces, notify). Risk: item 1 (migration, deletes stored data).
-- U2 (S2, S3, S4, S5) API: `GET/PUT /api/v1/system/retention`, preview, volume and server data. Route: inline. Status: pending. Risk: item 2 (guard) and item 3 (new public API).
+- U2 (S2, S3, S4, S5) API: `GET/PUT /api/v1/system/retention` and `GET /api/v1/system/retention/preview` (platform-level tenant.manage, audit `RETENTION_UPDATED`, volume usage, unnamed faces stored). Route: inline. Status: done (internal/retention/service.go, handlers, OpenAPI; integration tests incl. a tenant admin being refused). Per-server (Frigate) retention is not in the response: it lives in each server's Frigate YAML and stays a follow-up. Risk: item 2 (guard) and item 3 (new public API).
 - U3 (S2, S4, S5, S6) Web: Settings > Retention page. Route: inline. Status: pending.
 
 ## Log
@@ -36,3 +36,4 @@ Visual reference: the published mockup "Retención de datos OpenVMS", local copy
 - L2 (2026-11-02, user): "Para toda la plataforma, dale"
 - L3 (2026-11-02, mapping): there is no generic settings table (`alarm_settings` is the platform singleton pattern, no RLS); notifications are pruned by `notify.Worker.Prune` with env defaults 30/90 days; `RejectFaceSighting` clears the crop and queues `face_blob_purge` but keeps the embedding vector, so the retention purge must also null the vector; the platform gate is `Require(authz.TenantManage, Resource{Kind: ScopePlatform})`; host disk comes from `hoststat.Read` (`GET /system/capacity`) and server disk from agent metrics.
 - L4 (2026-11-02, finding): the manual reject kept the embedding vector; the retention query clears the vector, its profile, model and embedded_at together because `face_sightings_embedding_complete` requires all four to be null or all set. The volume measured is the one holding `OPENVMS_DATA_DIR` (worker path `/mnt/openvms/exports`, env `RETENTION_VOLUME_PATH`), not the host root.
+- L5 (2026-11-02, review of U1, approved, two non-blocking warnings): a failing batch skipped the audit of the batches already committed (fixed: `record` audits partial sweeps); pressure mode only shortens the faces class, not notifications (left as designed; the cleanable class today is faces).

@@ -137,19 +137,24 @@ func Save(ctx context.Context, s *store.Store, in Settings, by uuid.UUID) (Setti
 	}
 	var out Settings
 	err := s.Tx(ctx, store.AllTenants, func(q *db.Queries) error {
-		row, err := q.UpdateRetentionSettings(ctx, db.UpdateRetentionSettingsParams{
-			FaceUnknownDays:          int32(in.FaceUnknownDays), //nolint:gosec // validated
-			NotificationDeliveryDays: int32Ptr(in.NotificationDeliveryDays),
-			NotificationReadDays:     int32Ptr(in.NotificationReadDays),
-			PressureCleanup:          in.PressureCleanup,
-			PressurePercent:          int32(in.PressurePercent), //nolint:gosec // validated
-			UpdatedBy:                &by,
-		})
-		if err != nil {
-			return store.Classify(err)
-		}
-		out = fromRow(row)
-		return nil
+		var err error
+		out, err = save(ctx, q, in, by)
+		return err
 	})
 	return out, err
+}
+
+func save(ctx context.Context, q *db.Queries, in Settings, by uuid.UUID) (Settings, error) {
+	row, err := q.UpdateRetentionSettings(ctx, db.UpdateRetentionSettingsParams{
+		FaceUnknownDays:          int32(in.FaceUnknownDays), //nolint:gosec // validated
+		NotificationDeliveryDays: int32Ptr(in.NotificationDeliveryDays),
+		NotificationReadDays:     int32Ptr(in.NotificationReadDays),
+		PressureCleanup:          in.PressureCleanup,
+		PressurePercent:          int32(in.PressurePercent), //nolint:gosec // validated
+		UpdatedBy:                &by,
+	})
+	if err != nil {
+		return Settings{}, store.Classify(err)
+	}
+	return fromRow(row), nil
 }

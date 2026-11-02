@@ -103,6 +103,7 @@ func (p *Purger) Sweep(ctx context.Context) (Result, error) {
 			n, err = q.ExpireFaceSightings(ctx, db.ExpireFaceSightingsParams{Cutoff: cutoff, MaxRows: batch})
 			return err
 		}); err != nil {
+			p.record(ctx, res)
 			return res, err
 		}
 		res.Faces += n
@@ -110,13 +111,19 @@ func (p *Purger) Sweep(ctx context.Context) (Result, error) {
 			break
 		}
 	}
-	if res.Faces > 0 {
-		p.log().InfoContext(ctx, "retention erased unnamed faces", "faces", res.Faces, "days", res.Days, "pressure", res.Pressure)
-		if err := p.audit(ctx, res); err != nil {
-			p.log().WarnContext(ctx, "retention audit entry not written", "error", err)
-		}
-	}
+	p.record(ctx, res)
 	return res, ctx.Err()
+}
+
+// record logs and audits what a sweep erased, including the batches that committed before a later one failed.
+func (p *Purger) record(ctx context.Context, res Result) {
+	if res.Faces == 0 {
+		return
+	}
+	p.log().InfoContext(ctx, "retention erased unnamed faces", "faces", res.Faces, "days", res.Days, "pressure", res.Pressure)
+	if err := p.audit(context.WithoutCancel(ctx), res); err != nil {
+		p.log().WarnContext(ctx, "retention audit entry not written", "error", err)
+	}
 }
 
 func (p *Purger) audit(ctx context.Context, res Result) error {
