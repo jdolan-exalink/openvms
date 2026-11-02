@@ -126,6 +126,7 @@ const messages = {
   cfgSaveAttempts: "Attempts to keep",
   cfgBlur: "Blur filter",
   cfgCameras: "Cameras",
+  cfgEnableAll: "Enable on all cameras",
   cfgCameraEnabled: "Recognition on {name}",
   cfgCameraMinArea: "Minimum area of {name}",
   cfgRange: "{field} must be between {min} and {max}.",
