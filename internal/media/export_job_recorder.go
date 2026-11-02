@@ -24,6 +24,9 @@ import (
 const maxRecorderCaptures = 2
 
 // offerLatest puts v in a one-slot channel without ever waiting, replacing a value nobody took yet.
+// noRecordedFootageMessage is shown to the operator as is, so it keeps its Spanish capitalization.
+const noRecordedFootageMessage = "Sin datos grabados en esta franja horaria (grabación por movimiento o sin actividad)"
+
 func offerLatest(ch chan float32, v float32) {
 	for {
 		select {
@@ -91,17 +94,17 @@ func (m *ExportJobManager) captureRecorderItem(ctx context.Context, j activeJobR
 	footage, err := m.NVR.RecordedWithin(ctx, cam, j.start, j.end)
 	if err != nil {
 		if strings.Contains(strings.ToLower(err.Error()), "degraded") || errors.Is(err, ErrNoRecording) {
-			return errors.New("Sin datos grabados en esta franja horaria (grabación por movimiento o sin actividad)")
+			return errors.New(noRecordedFootageMessage) //nolint:staticcheck // shown to the operator as is
 		}
 		return fmt.Errorf("the recorder could not be read: %w", err)
 	}
 	if footage <= 0 {
-		return errors.New("Sin datos grabados en esta franja horaria (grabación por movimiento o sin actividad)")
+		return errors.New(noRecordedFootageMessage) //nolint:staticcheck // shown to the operator as is
 	}
 	rtsp, err := m.NVR.ReplayURL(ctx, cam, j.start, j.end, "main")
 	if err != nil {
 		if strings.Contains(strings.ToLower(err.Error()), "degraded") || errors.Is(err, ErrNoRecording) {
-			return errors.New("Sin datos grabados en esta franja horaria (grabación por movimiento o sin actividad)")
+			return errors.New(noRecordedFootageMessage) //nolint:staticcheck // shown to the operator as is
 		}
 		return err
 	}
@@ -112,10 +115,10 @@ func (m *ExportJobManager) captureRecorderItem(ctx context.Context, j activeJobR
 		}
 	}
 	jobDir := filepath.Join(m.StorageDir, j.id.String())
-	if err := os.MkdirAll(jobDir, 0o755); err != nil {
+	if err := os.MkdirAll(jobDir, 0o755); err != nil { // #nosec G301 -- group-writable on purpose, widened right below.
 		return err
 	}
-	_ = os.Chmod(jobDir, 0o775)
+	_ = os.Chmod(jobDir, 0o775) // #nosec G302 -- group-writable on purpose, like the job files.
 	partPath := filepath.Join(jobDir, it.id.String()+".mp4.part")
 	finalPath := filepath.Join(jobDir, it.id.String()+".mp4")
 	defer func() {
@@ -179,7 +182,7 @@ func sealFile(partPath, finalPath string) (hash string, size int64, err error) {
 	if err := os.Rename(partPath, finalPath); err != nil {
 		return "", 0, err
 	}
-	_ = os.Chmod(finalPath, 0o664)
+	_ = os.Chmod(finalPath, 0o664) // #nosec G302 -- group-writable on purpose, like the job directory.
 	return hex.EncodeToString(h.Sum(nil)), size, nil
 }
 

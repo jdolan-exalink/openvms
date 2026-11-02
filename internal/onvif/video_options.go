@@ -67,12 +67,6 @@ func (c Conn) useMedia2() bool { return c.Media2.value != "" }
 
 func (c Conn) media1() *MediaClient  { return NewMediaClient(c.Client, c.Media) }
 func (c Conn) media2() *Media2Client { return NewMedia2Client(c.Client, c.Media2) }
-func (c Conn) service() string {
-	if c.useMedia2() {
-		return "media2"
-	}
-	return "media1"
-}
 
 // CodecOptions is what the device declares for one codec. A zero range or an empty list means the
 // device did not report that item; nothing is ever invented.

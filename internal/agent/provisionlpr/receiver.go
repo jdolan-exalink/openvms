@@ -448,7 +448,6 @@ type nullResponseWriter struct {
 	code   int
 }
 
-func (w *nullResponseWriter) Header() http.Header { return w.header }
+func (w *nullResponseWriter) Header() http.Header         { return w.header }
 func (w *nullResponseWriter) Write(b []byte) (int, error) { return len(b), nil }
-func (w *nullResponseWriter) WriteHeader(statusCode int) { w.code = statusCode }
-
+func (w *nullResponseWriter) WriteHeader(statusCode int)  { w.code = statusCode }

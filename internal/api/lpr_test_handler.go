@@ -226,8 +226,8 @@ func (h *Handlers) TestCameraAnalytics(ctx context.Context, r gen.TestCameraAnal
 		}
 	case "analytics_frigate":
 		res = provision.CheckFrigateAnalytics(ctx, provision.FrigateAnalyticsProbe{
-			DetectionEnabled: func(ctx context.Context) (bool, error) { return true, nil },
-			ObjectsTracked:   func(ctx context.Context) ([]string, error) { return []string{"person", "car"}, nil },
+			DetectionEnabled: func(_ context.Context) (bool, error) { return true, nil },
+			ObjectsTracked:   func(_ context.Context) ([]string, error) { return []string{"person", "car"}, nil },
 			Events24h: func(ctx context.Context) (int, error) {
 				s, err := src.Reads24h(ctx, a, cam.ID, time.Now().Add(-24*time.Hour))
 				if err != nil {

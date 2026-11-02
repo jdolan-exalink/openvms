@@ -3,13 +3,13 @@ package camconfig
 // Integration ids and statuses. The Integraciones tab is status and association only: every
 // value comes from evidence OpenVMS already has, and nothing here talks to a device.
 const (
-	IntegrationFrigate             = "frigate"
-	IntegrationONVIF               = "onvif"
-	IntegrationProvision           = "provision_isr"
-	IntegrationLPRProvision        = "lpr_provision"
-	IntegrationAnalyticsProvision  = "analytics_provision"
-	IntegrationAnalyticsFrigate    = "analytics_frigate"
-	IntegrationLPRFrigate          = "lpr_frigate"
+	IntegrationFrigate            = "frigate"
+	IntegrationONVIF              = "onvif"
+	IntegrationProvision          = "provision_isr"
+	IntegrationLPRProvision       = "lpr_provision"
+	IntegrationAnalyticsProvision = "analytics_provision"
+	IntegrationAnalyticsFrigate   = "analytics_frigate"
+	IntegrationLPRFrigate         = "lpr_frigate"
 
 	IntegrationConnected     = "connected"
 	IntegrationNotConfigured = "not_configured"
@@ -118,7 +118,7 @@ func lprProvisionIntegration(in Inventory, link *ProvisionLink, mk integrationFn
 	}
 }
 
-func analyticsProvisionIntegration(cam Camera, in Inventory, link *ProvisionLink, mk integrationFn) Integration {
+func analyticsProvisionIntegration(_ Camera, in Inventory, link *ProvisionLink, mk integrationFn) Integration {
 	const id, label = IntegrationAnalyticsProvision, "Analíticas Provision"
 	caps, haveCaps := readONVIFCaps(in.ONVIFCapabilities)
 	hasProvEvidence := ProvisionEvidence(in)
@@ -137,7 +137,7 @@ func analyticsProvisionIntegration(cam Camera, in Inventory, link *ProvisionLink
 	}
 }
 
-func analyticsFrigateIntegration(cam Camera, in Inventory, mk integrationFn) Integration {
+func analyticsFrigateIntegration(cam Camera, _ Inventory, mk integrationFn) Integration {
 	const id, label = IntegrationAnalyticsFrigate, "Analíticas Frigate"
 	s, ok := sourceOf(cam, "frigate")
 	switch {

@@ -110,7 +110,7 @@ func (h *Handlers) ListEvents(ctx context.Context, r gen.ListEventsRequestObject
 		SiteIDs: uuids(p.SiteId), ServerIDs: uuids(p.ServerId), CameraIDs: uuids(p.CameraId),
 		CameraGroupIDs: uuids(p.CameraGroupId),
 		VehicleBrand:   deref(p.VehicleBrand), VehicleModel: deref(p.VehicleModel),
-		Plate:          deref(p.Plate), From: p.From, To: p.To, Overlap: deref(p.Overlap), Reviewed: p.Reviewed,
+		Plate: deref(p.Plate), From: p.From, To: p.To, Overlap: deref(p.Overlap), Reviewed: p.Reviewed,
 		HasSnapshot: p.HasSnapshot, HasPreview: p.HasPreview,
 		Cursor: deref(p.Cursor), Limit: deref(p.Limit),
 	}
@@ -236,7 +236,7 @@ func (h *Handlers) ListPlateReads(ctx context.Context, r gen.ListPlateReadsReque
 		Plate: deref(p.Plate), Exact: deref(p.Exact), SiteIDs: uuids(p.SiteId), CameraIDs: uuids(p.CameraId),
 		CameraGroupIDs: uuids(p.CameraGroupId),
 		VehicleTypes:   deref(p.VehicleType), VehicleColors: deref(p.VehicleColor),
-		VehicleBrand:   deref(p.VehicleBrand), VehicleModel: deref(p.VehicleModel),
+		VehicleBrand: deref(p.VehicleBrand), VehicleModel: deref(p.VehicleModel),
 		From: p.From, To: p.To, Cursor: deref(p.Cursor), Limit: deref(p.Limit),
 	})
 	if err != nil {

@@ -87,7 +87,6 @@ func TestReceiverSendKeepaliveWithPlatePayloadIsProcessedAsEvent(t *testing.T) {
 	}
 }
 
-
 func TestReceiverEventDeduplicationAndSubscription(t *testing.T) {
 	cfg := DefaultConfig()
 	cfg.DeduplicationWindow = 10 * time.Second
