@@ -139,3 +139,11 @@ func TestTLSMuxWithoutACoreDoesNotRegisterIt(t *testing.T) {
 		}
 	}
 }
+
+func TestStoragePruningIsOptIn(t *testing.T) {
+	for in, want := range map[string]bool{"": false, "0": false, "false": false, "no": false, "garbage": false, "1": true, "true": true, " TRUE ": true, "yes": true, "on": true} {
+		if got := storagePruneEnabled(in); got != want {
+			t.Errorf("storagePruneEnabled(%q) = %v, want %v", in, got, want)
+		}
+	}
+}

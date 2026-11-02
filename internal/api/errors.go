@@ -84,7 +84,12 @@ func statusFor(err error) (int, string, string) {
 	case errors.Is(err, provision.ErrAgentUnprovisioned):
 		return http.StatusNotFound, "agent_unprovisioned", "server has no registered agent"
 	case errors.Is(err, provision.ErrAgentConnectUnreachable):
-		return http.StatusBadGateway, "agent_unreachable", "OpenVMS could not reach the agent at that address"
+		msg := "OpenVMS could not reach the agent at that address"
+		var unreachable *provision.AgentUnreachableError
+		if errors.As(err, &unreachable) && unreachable.Detail != "" {
+			msg += ": " + unreachable.Detail
+		}
+		return http.StatusBadGateway, "agent_unreachable", msg
 	case errors.Is(err, provision.ErrAgentConnectUnauthorized):
 		return http.StatusUnprocessableEntity, "agent_token_rejected", "the agent refused the token"
 	case errors.Is(err, provision.ErrAgentConnectForbidden):

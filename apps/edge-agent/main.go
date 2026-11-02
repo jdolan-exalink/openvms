@@ -185,6 +185,13 @@ func main() {
 	ctx, cancel := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer cancel()
 
+	// Deleting the oldest recordings when the disk passes the safety buffer is opt-in: it is the
+	// operator's decision, and it runs here, off the API, because it walks the whole tree.
+	if storagePruneEnabled(os.Getenv("OPENVMS_AGENT_STORAGE_PRUNE")) {
+		log.Info("storage pruning enabled", "path", env("OPENVMS_CCTV_PATH", "/mnt/cctv"))
+		go agent.RunStoragePruner(ctx, agent.Paths{CCTV: env("OPENVMS_CCTV_PATH", "/mnt/cctv")}, log)
+	}
+
 	// Mutual TLS is opt-in (OPENVMS_AGENT_GRPC_ADDR). When on, the worker dials the agent
 	// listener with the enrolled certificate instead of the control address below.
 	// The first attempt is short: the API is served only after this point, and an agent that cannot
@@ -488,4 +495,13 @@ func startMTLSWorker(ctx context.Context, cfg *mtlsSettings, sampler *agent.Samp
 			log.Warn("heartbeat worker stopped", "error", err)
 		}
 	}()
+}
+
+// storagePruneEnabled reads the opt-in flag for the background storage pruner.
+func storagePruneEnabled(v string) bool {
+	switch strings.ToLower(strings.TrimSpace(v)) {
+	case "1", "true", "yes", "on":
+		return true
+	}
+	return false
 }

@@ -135,7 +135,7 @@ func Read(opts Paths, variant string) Snapshot {
 		opts.Proc = "/proc"
 	}
 	host := hoststat.Read(hoststat.Roots{Proc: opts.Proc, DRM: opts.DRM, Disk: opts.DB})
-	cctvTotal, cctvFree := diskUsage(opts.CCTV)
+	cctvTotal, cctvFree := diskUsageFn(opts.CCTV)
 	dbTotal, dbFree := host.DiskTotal, host.DiskFree
 	if opts.DB != "" && opts.DB != host.DiskPath {
 		dbTotal, dbFree = diskUsage(opts.DB)
@@ -166,7 +166,9 @@ func Read(opts Paths, variant string) Snapshot {
 		RecordingsPath:      opts.CCTV,
 		DBPath:              opts.DB,
 	}
-	watchdogStatus, _ := EnforceStorageSafety(watchdogCfg, cctvTotal, cctvFree, dbTotal, dbFree)
+	// Status only. Pruning walks the whole recordings tree (millions of files on a recorder), so it
+	// must never run inside a metrics request; RunStoragePruner does it, when an operator asks.
+	watchdogStatus := StorageSafetyStatus(watchdogCfg, cctvTotal, cctvFree, dbTotal, dbFree)
 	out.StorageBufferPercent = watchdogStatus.SafetyBufferPercent
 	out.StorageWatchdog = watchdogStatus.Enabled
 	out.StorageOver85Percent = watchdogStatus.OverSafetyThreshold
@@ -345,6 +347,9 @@ func hexPort(port int) string {
 	const digits = "0123456789ABCDEF"
 	return string([]byte{digits[(port>>12)&0xF], digits[(port>>8)&0xF], digits[(port>>4)&0xF], digits[port&0xF]})
 }
+
+// diskUsageFn is diskUsage; tests replace it to simulate a nearly full disk.
+var diskUsageFn = diskUsage
 
 func diskUsage(path string) (total, free uint64) {
 	var st syscall.Statfs_t

@@ -60,6 +60,7 @@ The version of OpenVMS lives in `VERSION` and the version of the edge agent in
 
 ### Changed
 
+- Agent 0.4.11: the storage watchdog no longer walks or deletes recordings inside a metrics request (it hung the API and grew the agent's memory on a recorder with millions of segments); pruning is opt-in with OPENVMS_AGENT_STORAGE_PRUNE and runs in the background
 - Agent 0.4.10: the TLS listener also serves /v1/metrics, /v1/update and /v1/backup/original, so an installed agent's status, self-update and configuration backup no longer answer 404
 - Agent 0.4.9: the TLS listener serves the ONVIF camera operations and provision-lpr/configure, so installed agents no longer read as outdated when configuring video
 - Agent 0.4.6: Enrich LPR vehicle attributes and preserve crops/snapshots
