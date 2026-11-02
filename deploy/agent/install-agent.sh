@@ -244,24 +244,34 @@ has_tailnet() {
 }
 
 open_firewall() {
-  local nets=(10.0.0.0/8 192.168.0.0/16) net p
+  local nets=(10.0.0.0/8 192.168.0.0/16) net p failed=0
   has_tailnet && nets+=(100.64.0.0/10)
   for net in "${nets[@]}"; do
     for p in "$PORT" "$TLS_PORT"; do
-      ufw allow from "$net" to any port "$p" proto tcp comment 'openvms-agent' >/dev/null ||
-        { say "Could not add the ufw rule for $net -> $p/tcp; add it by hand (see docs/agent-connectivity.md)."; return 0; }
+      if ! ufw allow from "$net" to any port "$p" proto tcp comment 'openvms-agent' >/dev/null; then
+        printf 'install-agent: WARNING: could not add the ufw rule %s -> %s/tcp\n' "$net" "$p" >&2
+        failed=1
+      fi
     done
   done
-  say "Opened ports $PORT and $TLS_PORT/tcp in ufw for: ${nets[*]}."
+  if ((failed)); then
+    printf 'install-agent: WARNING: some ufw rules are missing; add them by hand (see docs/agent-connectivity.md)\n' >&2
+  else
+    say "Opened ports $PORT and $TLS_PORT/tcp in ufw for: ${nets[*]}."
+  fi
 }
 
-if [[ "$FIREWALL" == auto ]]; then
-  if command -v ufw >/dev/null 2>&1 && ufw status 2>/dev/null | grep -q '^Status: active'; then
-    open_firewall
-  else
-    say "ufw is not active: no firewall rule added. If another firewall blocks ports $PORT and $TLS_PORT/tcp, see docs/agent-connectivity.md."
-  fi
-fi
+case "$FIREWALL" in
+  auto)
+    if command -v ufw >/dev/null 2>&1 && ufw status 2>/dev/null | grep -q '^Status: active'; then
+      open_firewall
+    else
+      say "ufw is not active: no firewall rule added. If another firewall blocks ports $PORT and $TLS_PORT/tcp, see docs/agent-connectivity.md."
+    fi
+    ;;
+  off) ;;
+  *) die "OPENVMS_AGENT_FIREWALL must be auto or off, not '$FIREWALL'" ;;
+esac
 
 # --- what to enter in OpenVMS -----------------------------------------------------------------
 if conn=$("$BIN" connection --port "$PORT" --file "$CONF_DIR/agent.tokens.json" 2>&1); then
