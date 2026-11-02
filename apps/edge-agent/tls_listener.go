@@ -43,7 +43,7 @@ func loadAgentTLSConfig(listen, certFile, keyFile string) (*agentTLSConfig, bool
 	return &agentTLSConfig{Addr: listen, Certificates: []tls.Certificate{cert}}, true, nil
 }
 
-func buildTLSMux(auth *authenticator, healthHandler, discoveryHandler, probeHandler, lprHandler http.Handler, cameraWeb *camproxy.Handler, ops *onvifdiscover.OpsHandler) *http.ServeMux {
+func buildTLSMux(auth *authenticator, healthHandler, discoveryHandler, probeHandler, lprHandler http.Handler, cameraWeb *camproxy.Handler, ops *onvifdiscover.OpsHandler, core *agentCore) *http.ServeMux {
 	mux := http.NewServeMux()
 	if healthHandler != nil {
 		mux.Handle("GET /v1/health", auth.scoped(tokens.ScopeRead, healthHandler))
@@ -55,6 +55,7 @@ func buildTLSMux(auth *authenticator, healthHandler, discoveryHandler, probeHand
 		mux.Handle("POST /v1/onvif/probe", auth.scoped(tokens.ScopeControl, probeHandler))
 	}
 	mountOnvifOps(mux, auth, ops)
+	mountAgentCore(mux, auth, core)
 	mountProvisionLPRConfigure(mux, auth)
 	if lprHandler != nil {
 		mountProvisionLPR(mux, auth, lprHandler)
@@ -67,10 +68,10 @@ func buildTLSMux(auth *authenticator, healthHandler, discoveryHandler, probeHand
 	return mux
 }
 
-func newAgentTLSServer(cfg *agentTLSConfig, auth *authenticator, healthHandler, discoveryHandler, probeHandler, lprHandler http.Handler, cameraWeb *camproxy.Handler, ops *onvifdiscover.OpsHandler) *http.Server {
+func newAgentTLSServer(cfg *agentTLSConfig, auth *authenticator, healthHandler, discoveryHandler, probeHandler, lprHandler http.Handler, cameraWeb *camproxy.Handler, ops *onvifdiscover.OpsHandler, core *agentCore) *http.Server {
 	return &http.Server{
 		Addr:              cfg.Addr,
-		Handler:           buildTLSMux(auth, healthHandler, discoveryHandler, probeHandler, lprHandler, cameraWeb, ops),
+		Handler:           buildTLSMux(auth, healthHandler, discoveryHandler, probeHandler, lprHandler, cameraWeb, ops, core),
 		ReadHeaderTimeout: 5 * time.Second,
 		TLSConfig:         &tls.Config{MinVersion: tls.VersionTLS12, Certificates: cfg.Certificates},
 	}

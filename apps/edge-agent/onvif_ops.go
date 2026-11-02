@@ -4,6 +4,8 @@ import (
 	"encoding/json"
 	"net/http"
 
+	"github.com/jdolan-exalink/openvms/internal/agent"
+	"github.com/jdolan-exalink/openvms/internal/agent/backup"
 	"github.com/jdolan-exalink/openvms/internal/agent/onvifdiscover"
 	"github.com/jdolan-exalink/openvms/internal/agent/provisionlpr"
 	"github.com/jdolan-exalink/openvms/internal/agent/tokens"
@@ -43,4 +45,40 @@ func mountProvisionLPRConfigure(mux *http.ServeMux, auth *authenticator) {
 		w.Header().Set("Content-Type", "application/json")
 		_ = json.NewEncoder(w).Encode(res)
 	})))
+}
+
+// agentCore is what an installed agent offers besides the camera operations: its status, replacing
+// its own binary and the original Frigate configuration backup. The control plane reaches an installed
+// agent over the TLS listener, so both listeners mount it; a route missing there answers 404 and the
+// control plane reads that as an unreachable or outdated agent.
+type agentCore struct {
+	variant string
+	sampler *agent.Sampler
+	replace func(*http.Request) error
+	restart func()
+	backup  *backup.Store
+}
+
+func mountAgentCore(mux *http.ServeMux, auth *authenticator, core *agentCore) {
+	if core == nil {
+		return
+	}
+	if core.sampler != nil {
+		mux.Handle("GET /v1/metrics", auth.scoped(tokens.ScopeRead, http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+			writeJSON(w, core.sampler.Current(core.variant))
+		})))
+	}
+	if core.replace != nil && core.restart != nil {
+		mux.Handle("POST /v1/update", auth.scoped(tokens.ScopeUpdate, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			if err := core.replace(r); err != nil {
+				http.Error(w, err.Error(), updateStatus(err))
+				return
+			}
+			w.WriteHeader(http.StatusAccepted)
+			core.restart()
+		})))
+	}
+	if core.backup != nil {
+		mountBackup(mux, auth, core.backup)
+	}
 }

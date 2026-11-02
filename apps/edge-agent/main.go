@@ -163,7 +163,8 @@ func main() {
 	}
 	mux := buildMuxWithAuth(auth, variant, sampler, discoveryHandler, probeHandler, opsHandler, lprReceiver, replace, func() { go restart() })
 	// The original Frigate config.yml, kept on the host so it travels with it (see internal/agent/backup).
-	mountBackup(mux, auth, backup.New(stateDir))
+	backupStore := backup.New(stateDir)
+	mountBackup(mux, auth, backupStore)
 	addr := env("OPENVMS_AGENT_LISTEN", "0.0.0.0:7419")
 	// Camera web view: the control plane reaches a camera's own web interface through this route,
 	// on the plain listener and on the ONVIF TLS one (OpenVMS reaches installed agents over TLS).
@@ -246,7 +247,8 @@ func main() {
 	}()
 
 	if tlsEnabled {
-		tlsServer := newAgentTLSServer(tlsConfig, auth, healthHandler, discoveryHandler, probeHandler, lprReceiver, cameraWeb, opsHandler)
+		tlsServer := newAgentTLSServer(tlsConfig, auth, healthHandler, discoveryHandler, probeHandler, lprReceiver, cameraWeb, opsHandler,
+			&agentCore{variant: variant, sampler: sampler, replace: replace, restart: func() { go restart() }, backup: backupStore})
 		log.Info("ONVIF TLS listener enabled", "addr", tlsServer.Addr)
 		if err := serveAgentServers(log, srv, tlsServer); err != nil && !errors.Is(err, http.ErrServerClosed) {
 			log.Error("agent listener stopped", "error", err)
@@ -373,17 +375,7 @@ func buildMux(secret, variant string, sampler *agent.Sampler, discoveryHandler, 
 // configuration) and update (replacing the binary). The legacy token has every scope.
 func buildMuxWithAuth(auth *authenticator, variant string, sampler *agent.Sampler, discoveryHandler, probeHandler http.Handler, opsHandler *onvifdiscover.OpsHandler, lprHandler http.Handler, replace func(*http.Request) error, restartUpdate func()) *http.ServeMux {
 	mux := http.NewServeMux()
-	mux.Handle("GET /v1/metrics", auth.scoped(tokens.ScopeRead, http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
-		writeJSON(w, sampler.Current(variant))
-	})))
-	mux.Handle("POST /v1/update", auth.scoped(tokens.ScopeUpdate, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if err := replace(r); err != nil {
-			http.Error(w, err.Error(), updateStatus(err))
-			return
-		}
-		w.WriteHeader(http.StatusAccepted)
-		restartUpdate()
-	})))
+	mountAgentCore(mux, auth, &agentCore{variant: variant, sampler: sampler, replace: replace, restart: restartUpdate})
 	if discoveryHandler != nil {
 		mux.Handle("POST /v1/onvif/discover", auth.scoped(tokens.ScopeControl, discoveryHandler))
 	}
