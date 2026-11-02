@@ -541,6 +541,24 @@ describe("FrigateCameraConfig", () => {
       expect(await screen.findByRole("button", { name: /Provision LPR/ })).toBeInTheDocument();
     });
 
+    it("gives the audio role to the only stream when audio detection is switched on", async () => {
+      const fetchMock = mountFull({ config: { audio: { enabled: false }, ffmpeg: { inputs: [{ path: "rtsp://cam/main", roles: ["detect", "record"] }] } } });
+      fireEvent.click(await screen.findByRole("switch", { name: "Audio" }));
+      await applyReview();
+      await waitFor(() => expect(frigatePatch(fetchMock)).toBeDefined());
+      const sections = ((await frigatePatch(fetchMock)!.clone().json()) as { sections: Record<string, unknown> }).sections;
+      expect(sections.audio).toEqual({ enabled: true });
+      expect(JSON.stringify(sections.ffmpeg)).toContain("audio");
+    });
+
+    it("blocks saving audio detection while no stream carries the audio role", async () => {
+      const fetchMock = mountFull({ config: { audio: { enabled: false }, ffmpeg: { inputs: [{ path: "rtsp://a", roles: ["detect"] }, { path: "rtsp://b", roles: ["record"] }] } } });
+      fireEvent.click(await screen.findByRole("switch", { name: "Audio" }));
+      expect(await screen.findByText(/ningún stream de entrada tiene el rol Audio/)).toBeInTheDocument();
+      expect(screen.getByRole("button", { name: "Revisar cambios" })).toBeDisabled();
+      expect(frigatePatch(fetchMock)).toBeUndefined();
+    });
+
     it("keeps the audio transcription switch disabled while audio is off", async () => {
       mountFull({ config: { audio: { enabled: false }, audio_transcription: { enabled: false } } });
       const transcription = await screen.findByRole("switch", { name: "Transcripción de audio" });

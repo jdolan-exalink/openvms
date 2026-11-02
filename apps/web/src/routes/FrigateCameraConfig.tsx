@@ -60,9 +60,10 @@ import { Button, ErrorNote, Field, LinkButton, PageHeader, Select, TextInput } f
 import { cn } from "@/lib/cn";
 import { cameraTypeOf, TYPE_TAGS } from "@/lib/cameraType";
 import {
-  buildPatch, deepEqual, diffValues, formatValue, isLiveSection, type JSchema, kindOf, orderSections, pathLabel, resolve, schemaAt,
+  buildPatch, deepEqual, diffValues, formatValue, getIn, isLiveSection, type JSchema, kindOf, orderSections, pathLabel, resolve, schemaAt,
   sectionLabel, setIn, validateTree,
 } from "@/lib/frigateSchema";
+import { AUDIO_ROLE_MESSAGE, audioNeedsInput, withAudioRole } from "@/lib/frigateAudio";
 import { pickerLabels } from "@/lib/labelEmoji";
 import { loadRestart, saveRestart } from "@/lib/frigateRestart";
 import { can, canCamera } from "@/lib/perm";
@@ -194,8 +195,13 @@ function FrigateCameraConfigScreen({ cameraId }: { cameraId: string }) {
     if (!root) return {} as Record<string, string>;
     const out: Record<string, string> = {};
     for (const s of dirty) validateTree(root, camProps[s] ?? {}, edits[s], [s], out);
+    // Frigate refuses to save audio detection without an audio stream; catch it before the round trip.
+    if (dirty.some((s) => s === "audio" || s === "ffmpeg")) {
+      const pick = (s: string) => (s in edits ? edits[s] : config[s]);
+      if (audioNeedsInput(pick("audio"), pick("ffmpeg"))) out["audio.enabled"] = AUDIO_ROLE_MESSAGE;
+    }
     return out;
-  }, [root, camProps, edits, dirty]);
+  }, [root, camProps, edits, dirty, config]);
   const errorCount = Object.keys(errors).length;
 
   const buildSections = () => {
@@ -343,7 +349,19 @@ function FrigateCameraConfigScreen({ cameraId }: { cameraId: string }) {
   const objectsDraft = valueOf("objects") as Record<string, unknown> | undefined;
   const zoneLabels = pickerLabels(Object.keys(isRec(objectsDraft?.filters) ? objectsDraft.filters : {}), Array.isArray(objectsDraft?.track) ? (objectsDraft.track as string[]) : []);
   const ctx: FormCtx = { root: root ?? {}, secretsVisible, readOnly };
-  const setSection = (section: string, value: unknown) => setEdits((e) => ({ ...e, [section]: value }));
+  // Turning audio detection on also gives the audio role to a camera's only stream; with several
+  // streams the operator picks which one carries sound.
+  const setSection = (section: string, value: unknown) =>
+    setEdits((e) => {
+      const next = { ...e, [section]: value };
+      const wasOn = (getIn(section in e ? e[section] : config[section], ["enabled"]) as unknown) === true;
+      if (section === "audio" && !wasOn && getIn(value, ["enabled"]) === true) {
+        const ffmpeg = "ffmpeg" in e ? e.ffmpeg : config.ffmpeg;
+        const given = withAudioRole(ffmpeg);
+        if (given !== ffmpeg) next.ffmpeg = given;
+      }
+      return next;
+    });
 
   const header = (
     <PageHeader
@@ -437,7 +455,7 @@ function FrigateCameraConfigScreen({ cameraId }: { cameraId: string }) {
       section={s}
       schema={camProps[s]}
       value={valueOf(s)}
-      onChange={(v) => setEdits((e) => ({ ...e, [s]: v }))}
+      onChange={(v) => setSection(s, v)}
       ctx={ctx}
       camera={effectiveDoc}
       config={config}
@@ -626,7 +644,7 @@ function FrigateCameraConfigScreen({ cameraId }: { cameraId: string }) {
                     section={s}
                     schema={camProps[s]}
                     value={valueOf(s)}
-                    onChange={(v) => setEdits((e) => ({ ...e, [s]: v }))}
+                    onChange={(v) => setSection(s, v)}
                     ctx={ctx}
                     camera={effectiveDoc}
                     config={config}
@@ -672,6 +690,7 @@ function FrigateCameraConfigScreen({ cameraId }: { cameraId: string }) {
             Hay valores no válidos en esta sección.
           </p>
         )}
+        {errors["audio.enabled"] && <p role="alert" className="text-xs text-bad">{errors["audio.enabled"]}</p>}
       </section>
       </div>
       </div>
