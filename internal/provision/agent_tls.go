@@ -158,5 +158,5 @@ func (c *VerifiedAgentHTTPClient) Do(ctx context.Context, method, path string, h
 	if req.Header == nil {
 		req.Header = make(http.Header)
 	}
-	return c.client.Do(req)
+	return clientFor(c.client, req.Header).Do(req)
 }

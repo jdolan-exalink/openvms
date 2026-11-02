@@ -56,3 +56,52 @@ func TestCameraWebAgentReadyReportsAMissingAgent(t *testing.T) {
 		t.Fatalf("err = %v", err)
 	}
 }
+
+type pipeBody struct {
+	io.Reader
+	io.Writer
+	closed bool
+}
+
+func (p *pipeBody) Close() error { p.closed = true; return nil }
+
+func TestCameraWebTunnelReturnsAWritableConnectionAndSendsUpgradeHeaders(t *testing.T) {
+	svc := endpointService("10.0.15.2", 7419, AgentTLSConfig{TrustMode: AgentTLSTrustPlaintext}, "", nil)
+	var got *http.Request
+	var written strings.Builder
+	svc.probeRoundTripper = roundTripFunc(func(r *http.Request) (*http.Response, error) {
+		got = r
+		h := http.Header{}
+		h.Set(camproxy.HeaderProxy, "1")
+		return &http.Response{StatusCode: http.StatusSwitchingProtocols, Header: h, Request: r, Body: &pipeBody{Reader: strings.NewReader("from-camera"), Writer: &written}}, nil
+	})
+	in := http.Header{}
+	in.Set(camproxy.HeaderTarget, "http://10.0.0.5:81")
+	conn, err := svc.CameraWebTunnel(context.Background(), authz.Actor{}, uuid.New(), in)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer conn.Close()
+	if _, err := conn.Write([]byte("to-camera")); err != nil || written.String() != "to-camera" {
+		t.Fatalf("tunnel not writable: %v %q", err, written.String())
+	}
+	if b, _ := io.ReadAll(conn); string(b) != "from-camera" {
+		t.Fatalf("read %q", b)
+	}
+	if got.URL.Path != camproxy.Path || got.Header.Get("Upgrade") != camproxy.TunnelProtocol || got.Header.Get("Connection") != "Upgrade" || got.Header.Get("Authorization") != "Bearer agent-token" {
+		t.Fatalf("request = %s %v", got.URL, got.Header)
+	}
+	if in.Get("Authorization") != "" || in.Get("Upgrade") != "" {
+		t.Fatal("the caller's header map was modified")
+	}
+}
+
+func TestCameraWebTunnelRefusedWhenTheAgentDoesNotSwitchProtocols(t *testing.T) {
+	svc := endpointService("10.0.15.2", 7419, AgentTLSConfig{TrustMode: AgentTLSTrustPlaintext}, "", nil)
+	svc.probeRoundTripper = roundTripFunc(agentReply(405, "method not allowed")) // an agent that predates tunnels
+	in := http.Header{}
+	in.Set(camproxy.HeaderTarget, "http://10.0.0.5:81")
+	if _, err := svc.CameraWebTunnel(context.Background(), authz.Actor{}, uuid.New(), in); !errors.Is(err, ErrCameraTunnelRefused) {
+		t.Fatalf("err = %v", err)
+	}
+}

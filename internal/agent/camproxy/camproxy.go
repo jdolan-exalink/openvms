@@ -277,6 +277,10 @@ func validURI(uri string) bool {
 
 // ServeHTTP forwards one request. The caller has already authenticated the agent token.
 func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
+	if isTunnelRequest(r) {
+		h.serveTunnel(w, r)
+		return
+	}
 	if !allowedMethods[r.Method] {
 		w.Header().Set("Allow", "GET, HEAD, POST, PUT, DELETE, OPTIONS")
 		fail(w, http.StatusMethodNotAllowed, "method_not_allowed")

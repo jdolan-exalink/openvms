@@ -147,6 +147,29 @@ func TestForwardsAndMapsHeaders(t *testing.T) {
 	}
 }
 
+// A camera that serves a self-signed HTTPS certificate must be proxied without error: the agent
+// skips certificate verification because targets are literal LAN IPs with no name to verify. If
+// InsecureSkipVerify were dropped, the TLS handshake would fail and this would not reach 200.
+func TestProxiesSelfSignedHTTPSCamera(t *testing.T) {
+	cam := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write([]byte("self-signed ok"))
+	}))
+	defer cam.Close()
+
+	h := newTestHandler(t, Config{})
+	rec := do(h, http.MethodGet, cam.URL, "/", nil, nil)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("self-signed https target: status=%d body=%q", rec.Code, rec.Body.String())
+	}
+	if got := rec.Header().Get(HeaderProxy); got != "1" {
+		t.Fatalf("%s = %q, want 1", HeaderProxy, got)
+	}
+	if rec.Body.String() != "self-signed ok" {
+		t.Fatalf("body = %q", rec.Body.String())
+	}
+}
+
 func TestNoAgentTokenWhenNoForwardAuthorization(t *testing.T) {
 	var auth string
 	cam := httptest.NewServer(http.HandlerFunc(func(_ http.ResponseWriter, r *http.Request) { auth = r.Header.Get("Authorization") }))
