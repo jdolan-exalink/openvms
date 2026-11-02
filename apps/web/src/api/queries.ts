@@ -607,6 +607,15 @@ export const faceReviewInboxQuery = (filter: FaceTrainFilter = {}) =>
     refetchInterval: 10_000,
   });
 
+export type FaceUnknownClusterFilter = FaceTrainFilter & { min_appearances?: number; window_days?: number };
+
+export const faceUnknownClustersQuery = (filter: FaceUnknownClusterFilter = {}) =>
+  queryOptions({
+    queryKey: ["faces", "review-inbox", "clusters", filter],
+    queryFn: async () => unwrap(await api.GET("/api/v1/faces/review-inbox/clusters", { params: { query: filter } })),
+    refetchInterval: 15_000,
+  });
+
 export type FaceRecognitionFilter = {
   person_id?: string[];
   site_id?: string[];

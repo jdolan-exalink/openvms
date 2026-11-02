@@ -7,6 +7,7 @@ import { type FilterChip, SearchSummary } from "@/components/SearchSummary";
 import { Button, Empty, ErrorNote, Field, Select, TextInput } from "@/components/ui";
 import { useT } from "@/i18n";
 import { rangeEnd, todayEventsRange } from "@/lib/eventsSearch";
+import { downloadRecognitionsCsv } from "@/lib/faceExport";
 import { fromLocalInput } from "@/lib/format";
 
 type Form = { person: string; site: string; cameraGroup: string; camera: string; from: string; to: string };
@@ -105,8 +106,11 @@ export function RecognitionsTab() {
         <Field label={t("common.to")}>
           <TextInput type="datetime-local" className="font-mono" value={form.to} onChange={(e) => setForm({ ...form, to: e.target.value })} />
         </Field>
-        <div className="flex items-end sm:col-span-2">
+        <div className="flex items-end gap-2 sm:col-span-2">
           <Button type="submit" variant="filled">{t("common.search")}</Button>
+          <Button type="button" variant="outlined" disabled={items.length === 0} onClick={() => downloadRecognitionsCsv(items)}>
+            {t("faces.exportCsv")}
+          </Button>
         </div>
       </form>
       <SearchSummary

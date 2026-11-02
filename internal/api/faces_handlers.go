@@ -433,6 +433,36 @@ func (h *Handlers) ListFaceReviewInbox(ctx context.Context, r gen.ListFaceReview
 	return out, nil
 }
 
+func (h *Handlers) ListFaceUnknownClusters(ctx context.Context, r gen.ListFaceUnknownClustersRequestObject) (gen.ListFaceUnknownClustersResponseObject, error) {
+	a, err := actor(ctx)
+	if err != nil {
+		return nil, err
+	}
+	rule := faces.DefaultClusterRule
+	if r.Params.MinAppearances != nil {
+		rule.MinAppearances = *r.Params.MinAppearances
+	}
+	if r.Params.WindowDays != nil {
+		rule.WindowDays = *r.Params.WindowDays
+	}
+	clusters, err := h.Faces.ListUnknownClusters(ctx, a, faces.TrainFilter{
+		TenantID: r.Params.TenantId, SiteIDs: uuids(r.Params.SiteId), ServerIDs: uuids(r.Params.ServerId),
+	}, rule)
+	if err != nil {
+		return nil, err
+	}
+	out := gen.ListFaceUnknownClusters200JSONResponse{Items: make([]gen.FaceUnknownCluster, 0, len(clusters))}
+	for _, c := range clusters {
+		out.Items = append(out.Items, gen.FaceUnknownCluster{
+			Id: c.ID, SightingIds: c.SightingIDs, IdentityIds: c.IdentityIDs, SightingCount: c.SightingCount,
+			DistinctDays: c.DistinctDays, FirstSeenAt: c.FirstSeenAt, LastSeenAt: c.LastSeenAt,
+			ServerIds: c.ServerIDs, ServerNames: c.ServerNames, BestSightingId: c.BestSightingID,
+			BestScore: c.BestScore, Recurrent: c.Recurrent,
+		})
+	}
+	return out, nil
+}
+
 func (h *Handlers) GroupFaceReviewSightings(ctx context.Context, r gen.GroupFaceReviewSightingsRequestObject) (gen.GroupFaceReviewSightingsResponseObject, error) {
 	if r.Body == nil {
 		return nil, &faces.ValidationError{Msg: "a request body is required"}

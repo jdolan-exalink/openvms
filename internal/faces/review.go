@@ -57,59 +57,66 @@ type ReviewAssignInput struct {
 	NewPersonName string
 }
 
-// ListReviewSightings returns every pending sighting in the tenant/site/server scope, including
-// rows whose image is still being retried. An empty result is still audited by tenant.
-func (s *Service) ListReviewSightings(ctx context.Context, actor authz.Actor, f TrainFilter) (ReviewSightingsPage, error) {
-	var tenants []uuid.UUID
-	var rows []db.ListFaceReviewSightingsRow
-	var embeddings []db.ListFaceSightingEmbeddingsRow
-	var ruledOut pairSet
+// reviewData is what both the inbox and the cluster view read: the pending sightings in scope, their
+// embeddings, and the identity pairs the operator already ruled out.
+type reviewData struct {
+	tenants    []uuid.UUID
+	rows       []db.ListFaceReviewSightingsRow
+	embeddings []db.ListFaceSightingEmbeddingsRow
+	ruledOut   pairSet
+}
+
+func (s *Service) loadReviewData(ctx context.Context, actor authz.Actor, f TrainFilter) (reviewData, error) {
+	var d reviewData
 	if err := s.Store.TxRaw(ctx, store.ScopeFor(actor), func(tx pgx.Tx) error {
 		q := db.New(tx)
 		c, err := access.Load(ctx, q, actor)
 		if err != nil {
 			return err
 		}
-		if tenants, err = readableTenants(ctx, tx, c, actor, f.TenantID); err != nil {
+		if d.tenants, err = readableTenants(ctx, tx, c, actor, f.TenantID); err != nil {
 			return err
 		}
-		rows, err = q.ListFaceReviewSightings(ctx, db.ListFaceReviewSightingsParams{
-			TenantIds: nonNil(tenants), SiteIds: nonNil(f.SiteIDs), ServerIds: nonNil(f.ServerIDs),
+		d.rows, err = q.ListFaceReviewSightings(ctx, db.ListFaceReviewSightingsParams{
+			TenantIds: nonNil(d.tenants), SiteIds: nonNil(f.SiteIDs), ServerIds: nonNil(f.ServerIDs),
 		})
 		if err != nil {
 			return err
 		}
-		ids := make([]uuid.UUID, 0, len(rows))
-		for _, row := range rows {
+		ids := make([]uuid.UUID, 0, len(d.rows))
+		for _, row := range d.rows {
 			ids = append(ids, row.ID)
 		}
-		embeddings, err = q.ListFaceSightingEmbeddings(ctx, ids)
+		d.embeddings, err = q.ListFaceSightingEmbeddings(ctx, ids)
 		if err != nil {
 			return err
 		}
-		pairs, err := q.ListFaceDifferentSightingPairs(ctx, db.ListFaceDifferentSightingPairsParams{TenantIds: nonNil(tenants), SightingIds: ids})
+		pairs, err := q.ListFaceDifferentSightingPairs(ctx, db.ListFaceDifferentSightingPairsParams{TenantIds: nonNil(d.tenants), SightingIds: ids})
 		if err != nil {
 			return err
 		}
 		// A verdict names one sighting on each side; it rules out the two identities those sightings
 		// belong to now, however the groups have been merged since.
-		identityOf := make(map[uuid.UUID]uuid.UUID, len(rows))
-		for _, row := range rows {
+		identityOf := make(map[uuid.UUID]uuid.UUID, len(d.rows))
+		for _, row := range d.rows {
 			identityOf[row.ID] = row.IdentityID
 		}
-		ruledOut = make(pairSet, len(pairs))
+		d.ruledOut = make(pairSet, len(pairs))
 		for _, p := range pairs {
 			lo, okLo := identityOf[p.SightingLo]
 			hi, okHi := identityOf[p.SightingHi]
 			if okLo && okHi && lo != hi {
-				ruledOut[orderedUUIDPair(lo, hi)] = struct{}{}
+				d.ruledOut[orderedUUIDPair(lo, hi)] = struct{}{}
 			}
 		}
 		return nil
 	}); err != nil {
-		return ReviewSightingsPage{}, err
+		return reviewData{}, err
 	}
-	// Suggestions only compare sightings already visible to this actor, never other scopes.
+	return d, nil
+}
+
+func embeddedCandidates(embeddings []db.ListFaceSightingEmbeddingsRow) []embeddedSighting {
 	candidates := make([]embeddedSighting, 0, len(embeddings))
 	for _, e := range embeddings {
 		if e.EmbeddingProfile == nil || e.EmbeddingModel == nil {
@@ -119,6 +126,19 @@ func (s *Service) ListReviewSightings(ctx context.Context, actor authz.Actor, f 
 			ID: e.ID, IdentityID: e.IdentityID, Profile: *e.EmbeddingProfile, Model: *e.EmbeddingModel, Vector: e.Embedding,
 		})
 	}
+	return candidates
+}
+
+// ListReviewSightings returns every pending sighting in the tenant/site/server scope, including
+// rows whose image is still being retried. An empty result is still audited by tenant.
+func (s *Service) ListReviewSightings(ctx context.Context, actor authz.Actor, f TrainFilter) (ReviewSightingsPage, error) {
+	d, err := s.loadReviewData(ctx, actor, f)
+	if err != nil {
+		return ReviewSightingsPage{}, err
+	}
+	tenants, rows, embeddings, ruledOut := d.tenants, d.rows, d.embeddings, d.ruledOut
+	// Suggestions only compare sightings already visible to this actor, never other scopes.
+	candidates := embeddedCandidates(embeddings)
 	suggestions := suggestIdentities(candidates, DefaultSuggestionThreshold, maxSuggestionPerIdentity, ruledOut)
 	out := ReviewSightingsPage{Items: make([]ReviewSighting, 0, len(rows))}
 	counts := make(map[uuid.UUID]int, len(tenants))
@@ -135,7 +155,7 @@ func (s *Service) ListReviewSightings(ctx context.Context, actor authz.Actor, f 
 		})
 		counts[row.TenantID]++
 	}
-	err := s.Store.Tx(ctx, store.ScopeFor(actor), func(q *db.Queries) error {
+	err = s.Store.Tx(ctx, store.ScopeFor(actor), func(q *db.Queries) error {
 		for _, tenantID := range tenants {
 			if err := s.audit(ctx, q, actor, tenantID, ActionSightingRead, "face_sighting", uuid.Nil,
 				map[string]any{"scope": "list", "sightings": counts[tenantID]}); err != nil {

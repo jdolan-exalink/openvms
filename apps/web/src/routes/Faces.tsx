@@ -2,17 +2,21 @@ import { useQuery } from "@tanstack/react-query";
 import { useState } from "react";
 import { meQuery } from "@/api/queries";
 import { ConfigTab } from "@/components/faces/ConfigTab";
+import { LiveTab } from "@/components/faces/LiveTab";
 import { PersonsTab } from "@/components/faces/PersonsTab";
 import { RecognitionsTab } from "@/components/faces/RecognitionsTab";
 import { TrainTab } from "@/components/faces/TrainTab";
+import { UnknownsTab } from "@/components/faces/UnknownsTab";
 import { WatchlistsTab } from "@/components/faces/WatchlistsTab";
 import { Empty, PageHeader } from "@/components/ui";
 import { useT, type MessageKey } from "@/i18n";
 import { cn } from "@/lib/cn";
 import { can } from "@/lib/perm";
 
-type Tab = "people" | "train" | "recognitions" | "lists" | "config";
+type Tab = "live" | "unknown" | "people" | "train" | "recognitions" | "lists" | "config";
 const tabs: { id: Tab; label: MessageKey }[] = [
+  { id: "live", label: "faces.tabLive" },
+  { id: "unknown", label: "faces.tabUnknown" },
   { id: "people", label: "faces.tabPeople" },
   { id: "train", label: "faces.tabTrain" },
   { id: "recognitions", label: "faces.tabRecognitions" },
@@ -28,7 +32,7 @@ const tabs: { id: Tab; label: MessageKey }[] = [
 export function Faces() {
   const t = useT();
   const me = useQuery(meQuery);
-  const [tab, setTab] = useState<Tab>("people");
+  const [tab, setTab] = useState<Tab>("live");
   const canView = can(me.data, "faces.view");
   const canManage = can(me.data, "faces.manage");
   // The settings live on the servers, so they also need servers.view (the API checks it per server).
@@ -69,6 +73,8 @@ export function Faces() {
             ))}
           </div>
           <div role="tabpanel" id={`faces-panel-${tab}`} aria-labelledby={`faces-tab-${tab}`}>
+            {tab === "live" && <LiveTab />}
+            {tab === "unknown" && <UnknownsTab canManage={canManage} />}
             {tab === "people" && <PersonsTab canManage={canManage} />}
             {tab === "train" && <TrainTab canManage={canManage} />}
             {tab === "recognitions" && <RecognitionsTab />}

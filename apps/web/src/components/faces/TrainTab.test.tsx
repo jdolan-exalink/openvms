@@ -42,6 +42,7 @@ describe("Faces review inbox", () => {
     const image = screen.getByRole("img", { name: /intento de reconocimiento/i });
     expect(image).toHaveAttribute("src", `/api/v1/faces/review-inbox/${sightingID}/image`);
 
+    await screen.findByRole("option", { name: "Ana" });
     fireEvent.change(screen.getByLabelText("Asignar a"), { target: { value: "p1" } });
     fireEvent.click(screen.getByRole("button", { name: "Asignar" }));
     await waitFor(() => expect(calls).toContainEqual({
