@@ -1,6 +1,8 @@
 package agent
 
 import (
+	"context"
+	"log/slog"
 	"os"
 	"path/filepath"
 	"testing"
@@ -132,5 +134,110 @@ func TestEnforceStorageSafetyDetectsDBCritical(t *testing.T) {
 	}
 	if !status.DBCritical {
 		t.Errorf("expected DB to be marked critical when free space < 15%%")
+	}
+}
+
+func writeAged(t *testing.T, dir, name string, age time.Duration, size int) string {
+	t.Helper()
+	p := filepath.Join(dir, name)
+	if err := os.WriteFile(p, make([]byte, size), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	when := time.Now().Add(-age)
+	if err := os.Chtimes(p, when, when); err != nil {
+		t.Fatal(err)
+	}
+	return p
+}
+
+func exists(p string) bool { _, err := os.Stat(p); return err == nil }
+
+// A metrics request must never walk or delete the recordings, however full the disk is: that walk
+// took minutes on a recorder with millions of segments, hung the agent's API and grew its memory.
+func TestReadNeverPrunesEvenWhenTheDiskIsOverTheThreshold(t *testing.T) {
+	dir := t.TempDir()
+	old := writeAged(t, dir, "old.mp4", 48*time.Hour, 100)
+	prev := diskUsageFn
+	diskUsageFn = func(string) (uint64, uint64) { return 1000, 100 } // 10% free, below the 15% buffer
+	t.Cleanup(func() { diskUsageFn = prev })
+
+	snap := Read(Paths{CCTV: dir, DB: t.TempDir()}, "test")
+
+	if !snap.StorageOver85Percent {
+		t.Fatalf("the snapshot must still report the disk as over the threshold: %+v", snap)
+	}
+	if snap.PrunedSegmentsCount != 0 || !exists(old) {
+		t.Fatalf("Read deleted recordings: pruned=%d exists=%v", snap.PrunedSegmentsCount, exists(old))
+	}
+}
+
+func TestStorageSafetyStatusOnlyReports(t *testing.T) {
+	dir := t.TempDir()
+	f := writeAged(t, dir, "a.mp4", time.Hour, 10)
+	st := StorageSafetyStatus(StorageWatchdogConfig{Enabled: true, RecordingsPath: dir}, 1000, 50, 500, 400)
+	if !st.OverSafetyThreshold || st.PrunedSegmentsCount != 0 || !exists(f) {
+		t.Fatalf("status %+v, file exists %v", st, exists(f))
+	}
+}
+
+func TestPruneKeepsOnlyABoundedSetOfCandidatesAndRemovesTheOldestOfThem(t *testing.T) {
+	dir := t.TempDir()
+	var files []string
+	for i := 0; i < 6; i++ { // a0 is the oldest, a5 the newest
+		files = append(files, writeAged(t, dir, "a"+string(rune('0'+i))+".mp4", time.Duration(6-i)*time.Hour, 100))
+	}
+	prev := maxPruneCandidates
+	maxPruneCandidates = 3
+	t.Cleanup(func() { maxPruneCandidates = prev })
+
+	count, _, err := pruneOldestRecordings(context.Background(), dir, 10_000) // asks for more than all of it
+	if err != nil {
+		t.Fatal(err)
+	}
+	if count != 3 {
+		t.Fatalf("removed %d files, want the 3 oldest only", count)
+	}
+	for i, f := range files {
+		if want := i >= 3; exists(f) != want {
+			t.Errorf("%s exists=%v, want %v", filepath.Base(f), exists(f), want)
+		}
+	}
+}
+
+func TestPruneRemovesNothingWhenTheWalkIsCancelled(t *testing.T) {
+	dir := t.TempDir()
+	f := writeAged(t, dir, "a.mp4", time.Hour, 100)
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	if _, _, err := pruneOldestRecordings(ctx, dir, 10); err == nil {
+		t.Fatal("a cancelled walk must report an error")
+	}
+	if !exists(f) {
+		t.Fatal("an unfinished walk may have missed older files and must delete nothing")
+	}
+}
+
+func TestStoragePrunerRunsInTheBackgroundAndFreesTheOldestSegments(t *testing.T) {
+	dir := t.TempDir()
+	oldest := writeAged(t, dir, "oldest.mp4", 72*time.Hour, 100)
+	newer := writeAged(t, dir, "newer.mp4", time.Hour, 100)
+	prev := diskUsageFn
+	diskUsageFn = func(string) (uint64, uint64) { return 1000, 120 } // needs 30 more bytes: one segment
+	t.Cleanup(func() { diskUsageFn = prev })
+
+	ctx, cancel := context.WithCancel(context.Background())
+	done := make(chan struct{})
+	go func() {
+		RunStoragePruner(ctx, Paths{CCTV: dir}, slog.New(slog.NewTextHandler(os.Stderr, nil)))
+		close(done)
+	}()
+	deadline := time.Now().Add(5 * time.Second)
+	for exists(oldest) && time.Now().Before(deadline) {
+		time.Sleep(20 * time.Millisecond)
+	}
+	cancel()
+	<-done
+	if exists(oldest) || !exists(newer) {
+		t.Fatalf("oldest exists=%v newer exists=%v, want only the oldest removed", exists(oldest), exists(newer))
 	}
 }
