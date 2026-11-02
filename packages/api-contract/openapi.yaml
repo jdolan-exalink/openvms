@@ -3550,6 +3550,31 @@ paths:
         "401": { $ref: "#/components/responses/Unauthorized" }
         "403": { $ref: "#/components/responses/Forbidden" }
         "404": { $ref: "#/components/responses/NotFound" }
+  /api/v1/faces/review-inbox/clusters:
+    get:
+      tags: [faces]
+      operationId: listFaceUnknownClusters
+      summary: Pending face sightings grouped by similarity (faces.view)
+      description: |
+        Proposes groups of unknown faces that look like the same person, with how often and how recently
+        they were seen. Nothing is stored: the groups are computed on read. A group is recurrent when it
+        has at least min_appearances sightings inside the last window_days days.
+      parameters:
+        - { name: tenant_id, in: query, schema: { type: string, format: uuid } }
+        - { name: site_id, in: query, style: form, explode: true, schema: { type: array, items: { type: string, format: uuid } } }
+        - { name: server_id, in: query, style: form, explode: true, schema: { type: array, items: { type: string, format: uuid } } }
+        - { name: min_appearances, in: query, schema: { type: integer, minimum: 1, maximum: 100, default: 3 } }
+        - { name: window_days, in: query, schema: { type: integer, minimum: 1, maximum: 365, default: 7 } }
+      responses:
+        "200":
+          description: Groups, largest first
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/FaceUnknownClusters" }
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { $ref: "#/components/responses/NotFound" }
   /api/v1/faces/review-inbox/groups:
     post:
       tags: [faces]
@@ -8665,6 +8690,27 @@ components:
       required: [items]
       properties:
         items: { type: array, items: { $ref: "#/components/schemas/FaceReviewSighting" } }
+    FaceUnknownCluster:
+      type: object
+      required: [id, sighting_ids, identity_ids, sighting_count, distinct_days, first_seen_at, last_seen_at, server_ids, server_names, best_sighting_id, recurrent]
+      properties:
+        id: { type: string, format: uuid, description: ID of the oldest member sighting; stable while newer faces join. }
+        sighting_ids: { type: array, items: { type: string, format: uuid } }
+        identity_ids: { type: array, items: { type: string, format: uuid } }
+        sighting_count: { type: integer }
+        distinct_days: { type: integer, description: Calendar days (UTC) on which the group was seen. }
+        first_seen_at: { type: string, format: date-time }
+        last_seen_at: { type: string, format: date-time }
+        server_ids: { type: array, items: { type: string, format: uuid } }
+        server_names: { type: array, items: { type: string } }
+        best_sighting_id: { type: string, format: uuid, description: Sighting to show as the cover; the highest detector score. }
+        best_score: { type: number, format: double }
+        recurrent: { type: boolean }
+    FaceUnknownClusters:
+      type: object
+      required: [items]
+      properties:
+        items: { type: array, items: { $ref: "#/components/schemas/FaceUnknownCluster" } }
     FaceSuggestionDecisionCreate:
       type: object
       required: [sighting_id, other_sighting_id, decision, similarity]
