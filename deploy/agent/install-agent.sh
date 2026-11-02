@@ -8,7 +8,7 @@
 # systemd service, creates the agent token on the first run and prints the address and the token to
 # register in OpenVMS. Running it again upgrades in place and keeps the tokens.
 #
-# Options: --version X.Y.Z   --port N (default 7419)   --uninstall [--purge]   --help
+# Options: --version X.Y.Z   --port N (default 7419)   --no-firewall   --uninstall [--purge]   --help
 set -euo pipefail
 
 DEFAULT_VERSION="@AGENT_VERSION@"
@@ -21,6 +21,10 @@ PORT=7419
 PORT_EXPLICIT=0
 ACTION=install
 PURGE=0
+# "auto" opens the agent ports in ufw when it is active; "off" never touches the firewall. With no
+# systemd (the test harness) the default is "off" so a test run cannot change the host.
+FIREWALL=${OPENVMS_AGENT_FIREWALL:-$([[ -n "${OPENVMS_AGENT_SKIP_SYSTEMD:-}" ]] && echo off || echo auto)}
+TLS_PORT=7443
 
 BIN_DIR="$PREFIX/usr/local/bin"
 BIN="$BIN_DIR/openvms-agent"
@@ -41,6 +45,8 @@ Installs or upgrades the OpenVMS edge agent from a GitHub release.
 Options:
   --version X.Y.Z   install that agent release (default: the release the script came from)
   --port N          port the agent listens on on the first install (default 7419)
+  --no-firewall     do not open the agent ports in ufw (by default, if ufw is active, they are opened
+                    for 10.0.0.0/8, 192.168.0.0/16 and, when a Tailscale address is present, 100.64.0.0/10)
   --uninstall       remove the program and the service, keep the configuration
   --purge           with --uninstall, also remove /etc/openvms and /var/lib/openvms-agent
   --help            this text
@@ -52,6 +58,7 @@ while [[ $# -gt 0 ]]; do
   case "$1" in
     --version) [[ $# -ge 2 ]] || die "--version needs a value"; VERSION=$2; shift 2 ;;
     --port) [[ $# -ge 2 ]] || die "--port needs a value"; PORT=$2; PORT_EXPLICIT=1; shift 2 ;;
+    --no-firewall) FIREWALL=off; shift ;;
     --uninstall) ACTION=uninstall; shift ;;
     --purge) PURGE=1; shift ;;
     --help | -h) usage 0 ;;
@@ -226,6 +233,35 @@ fi
 if ((upgrading)); then mv -f "$BIN.rollback" "$BIN.prev"; fi
 
 if ((upgrading)); then say "Upgraded to $VERSION (the previous binary is kept as $BIN.prev)."; else say "Installed $VERSION."; fi
+
+# --- firewall ---------------------------------------------------------------------------------
+# Only when ufw is already active: a host without a firewall needs nothing, and enabling one is not
+# this script's call. Private networks and a Tailscale/CGNAT range (when this host has such an address)
+# may reach the agent; the agent still requires its token.
+has_tailnet() {
+  command -v ip >/dev/null 2>&1 &&
+    ip -4 -o addr show 2>/dev/null | grep -Eq 'inet 100\.(6[4-9]|[7-9][0-9]|1[01][0-9]|12[0-7])\.'
+}
+
+open_firewall() {
+  local nets=(10.0.0.0/8 192.168.0.0/16) net p
+  has_tailnet && nets+=(100.64.0.0/10)
+  for net in "${nets[@]}"; do
+    for p in "$PORT" "$TLS_PORT"; do
+      ufw allow from "$net" to any port "$p" proto tcp comment 'openvms-agent' >/dev/null ||
+        { say "Could not add the ufw rule for $net -> $p/tcp; add it by hand (see docs/agent-connectivity.md)."; return 0; }
+    done
+  done
+  say "Opened ports $PORT and $TLS_PORT/tcp in ufw for: ${nets[*]}."
+}
+
+if [[ "$FIREWALL" == auto ]]; then
+  if command -v ufw >/dev/null 2>&1 && ufw status 2>/dev/null | grep -q '^Status: active'; then
+    open_firewall
+  else
+    say "ufw is not active: no firewall rule added. If another firewall blocks ports $PORT and $TLS_PORT/tcp, see docs/agent-connectivity.md."
+  fi
+fi
 
 # --- what to enter in OpenVMS -----------------------------------------------------------------
 if conn=$("$BIN" connection --port "$PORT" --file "$CONF_DIR/agent.tokens.json" 2>&1); then

@@ -42,6 +42,31 @@ En el servidor, que el agente responda **en milisegundos** (si tarda, algo lo bl
 Que `/v1/metrics` sin token responda 401 al instante no prueba nada: la petición con token es la que
 ejecuta el muestreo.
 
+## Abrir los puertos del agente (Debian y Ubuntu)
+
+`install-agent.sh` lo hace solo cuando `ufw` está activo: abre 7419 y 7443/tcp para `10.0.0.0/8` y
+`192.168.0.0/16`, y para `100.64.0.0/10` (Tailscale) si el servidor tiene una dirección de ese rango.
+Es idempotente. `--no-firewall` lo omite. Si `ufw` no está activo no toca nada.
+
+A mano, con ufw (el puerto 7419 es el del agente; cambialo si usás otro):
+
+    for net in 10.0.0.0/8 192.168.0.0/16 100.64.0.0/10; do
+      for p in 7419 7443; do sudo ufw allow from $net to any port $p proto tcp comment openvms-agent; done
+    done
+
+Sin ufw, con nftables (Debian por defecto), si la cadena `input` tiene política `drop`:
+
+    sudo nft add rule inet filter input ip saddr { 10.0.0.0/8, 192.168.0.0/16, 100.64.0.0/10 } tcp dport { 7419, 7443 } accept
+
+Con iptables:
+
+    for net in 10.0.0.0/8 192.168.0.0/16 100.64.0.0/10; do
+      sudo iptables -I INPUT -s $net -p tcp -m multiport --dports 7419,7443 -j ACCEPT
+    done
+
+Estas reglas solo cubren el sentido OpenVMS → agente. El sentido agente → OpenVMS (8443, 9443) lo decide
+el firewall del lado de OpenVMS o el router entre redes.
+
 ## Casos conocidos
 
 - **`/v1/metrics` colgado y «agent update not confirmed … rollback»** (agentes anteriores a 0.4.11):
