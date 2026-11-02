@@ -189,6 +189,18 @@ func disk(path string) (total, free uint64) {
 	return filesystemBytes(st.Blocks, st.Bsize), filesystemBytes(st.Bavail, st.Bsize)
 }
 
+// DiskUsage reports the size and free space of the filesystem holding path. Unlike Read it never falls
+// back to another path: ok is false when path cannot be measured, so a missing mount is not mistaken for
+// the container's own disk.
+func DiskUsage(path string) (total, free uint64, ok bool) {
+	var st syscall.Statfs_t
+	if path == "" || syscall.Statfs(path, &st) != nil {
+		return 0, 0, false
+	}
+	total, free = filesystemBytes(st.Blocks, st.Bsize), filesystemBytes(st.Bavail, st.Bsize)
+	return total, free, total > 0
+}
+
 func filesystemBytes(blocks uint64, blockSize int64) uint64 {
 	if blockSize <= 0 {
 		return 0

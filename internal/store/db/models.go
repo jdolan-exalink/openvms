@@ -920,6 +920,17 @@ type RealtimePublicationOutbox struct {
 	AggregateSequence *int64
 }
 
+type RetentionSetting struct {
+	Singleton                bool
+	FaceUnknownDays          int32
+	NotificationDeliveryDays *int32
+	NotificationReadDays     *int32
+	PressureCleanup          bool
+	PressurePercent          int32
+	UpdatedAt                time.Time
+	UpdatedBy                *uuid.UUID
+}
+
 type Rule struct {
 	ID          uuid.UUID
 	TenantID    uuid.UUID

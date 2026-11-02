@@ -20,6 +20,12 @@ export const systemCapacityQuery = queryOptions({
   retry: false,
 });
 
+export const retentionQuery = queryOptions({
+  queryKey: ["system", "retention"],
+  queryFn: async () => unwrap(await api.GET("/api/v1/system/retention")),
+  retry: false,
+});
+
 export const classifyPolicyQuery = queryOptions({
   queryKey: ["classify", "policy"],
   queryFn: async () => unwrap(await api.GET("/api/v1/classify/policy")),

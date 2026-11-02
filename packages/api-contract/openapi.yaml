@@ -90,6 +90,58 @@ paths:
               schema:
                 $ref: "#/components/schemas/SystemCapacity"
         "401": { $ref: "#/components/responses/Unauthorized" }
+  /api/v1/system/retention:
+    get:
+      tags: [system]
+      operationId: getRetention
+      summary: Platform data retention, the data volume and what is stored
+      description: Needs the platform-level tenant.manage permission, because the setting applies to every tenant.
+      responses:
+        "200":
+          description: The retention policy
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/RetentionView" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+    put:
+      tags: [system]
+      operationId: updateRetention
+      summary: Change the platform data retention
+      description: |
+        Shortening a retention makes the next cleanup erase older data. Unnamed faces older than the new
+        limit are deleted within the hour. Needs the platform-level tenant.manage permission.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/RetentionInput" }
+      responses:
+        "200":
+          description: Saved
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/RetentionSettings" }
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+  /api/v1/system/retention/preview:
+    get:
+      tags: [system]
+      operationId: previewRetention
+      summary: What a face retention would erase now
+      description: Counts the unnamed faces older than the given days and the crop bytes they hold. Changes nothing.
+      parameters:
+        - { name: face_unknown_days, in: query, required: true, schema: { type: integer, minimum: 0, maximum: 3650 } }
+      responses:
+        "200":
+          description: The count
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/RetentionStored" }
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
   /api/v1/classify/policy:
     get:
       tags: [system]
@@ -8198,6 +8250,47 @@ components:
           type: integer
           format: int64
           description: Latest applied database migration.
+    RetentionInput:
+      type: object
+      description: |
+        Days to keep each class; 0 keeps it forever. A null notification value uses the server default
+        (NOTIFY_DELIVERY_RETENTION, NOTIFY_READ_RETENTION).
+      required: [face_unknown_days, pressure_cleanup, pressure_percent]
+      properties:
+        face_unknown_days: { type: integer, minimum: 0, maximum: 3650 }
+        notification_delivery_days: { type: integer, minimum: 0, maximum: 3650, nullable: true }
+        notification_read_days: { type: integer, minimum: 0, maximum: 3650, nullable: true }
+        pressure_cleanup: { type: boolean, description: Halve the cleanable retentions while the volume is over its limit }
+        pressure_percent: { type: integer, minimum: 50, maximum: 99, description: Volume usage that triggers the early cleanup }
+    RetentionSettings:
+      allOf:
+        - $ref: "#/components/schemas/RetentionInput"
+        - type: object
+          required: [updated_at]
+          properties:
+            updated_at: { type: string, format: date-time }
+            updated_by: { type: string, format: uuid, nullable: true }
+    RetentionStored:
+      type: object
+      required: [records, bytes]
+      properties:
+        records: { type: integer, format: int64 }
+        bytes: { type: integer, format: int64 }
+    RetentionVolume:
+      type: object
+      required: [measured, total_bytes, free_bytes, percent]
+      properties:
+        measured: { type: boolean, description: False when the data volume could not be read; no pressure cleanup runs then }
+        total_bytes: { type: integer, format: int64 }
+        free_bytes: { type: integer, format: int64 }
+        percent: { type: number, format: float }
+    RetentionView:
+      type: object
+      required: [settings, volume, faces_pending]
+      properties:
+        settings: { $ref: "#/components/schemas/RetentionSettings" }
+        volume: { $ref: "#/components/schemas/RetentionVolume" }
+        faces_pending: { $ref: "#/components/schemas/RetentionStored" }
     SystemCapacity:
       type: object
       required: [cpu, memory, disk, gpu, openvino, classifier]

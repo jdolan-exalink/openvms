@@ -26,6 +26,7 @@ const messages = {
   groups: "Grupos",
   permissions: "Permisos",
   audit: "Auditoría",
+  retention: "Retención",
   watermark: "Marca de agua",
   myAccount: "Mi cuenta",
   clientStation: "Estación cliente",

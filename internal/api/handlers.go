@@ -24,6 +24,7 @@ import (
 	"github.com/jdolan-exalink/openvms/internal/platform/buildinfo"
 	"github.com/jdolan-exalink/openvms/internal/platform/config"
 	"github.com/jdolan-exalink/openvms/internal/provision"
+	"github.com/jdolan-exalink/openvms/internal/retention"
 	"github.com/jdolan-exalink/openvms/internal/rules"
 	"github.com/jdolan-exalink/openvms/internal/search"
 	"github.com/jdolan-exalink/openvms/internal/store"
@@ -54,6 +55,7 @@ type Handlers struct {
 	AgentEnroll     *agentenroll.Service
 	Events          *events.Service
 	Faces           *faces.Service
+	Retention       *retention.Service
 	Alarms          *alarms.Service
 	Identity        *identity.Service
 	Media           *media.Service

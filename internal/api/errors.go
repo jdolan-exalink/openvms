@@ -19,6 +19,7 @@ import (
 	"github.com/jdolan-exalink/openvms/internal/notify"
 	"github.com/jdolan-exalink/openvms/internal/provision"
 	"github.com/jdolan-exalink/openvms/internal/provisionnvr"
+	"github.com/jdolan-exalink/openvms/internal/retention"
 	"github.com/jdolan-exalink/openvms/internal/rules"
 	"github.com/jdolan-exalink/openvms/internal/search"
 	"github.com/jdolan-exalink/openvms/internal/store"
@@ -122,6 +123,8 @@ func statusFor(err error) (int, string, string) {
 		return http.StatusConflict, "qr_unavailable", err.Error()
 	case errors.As(err, &we):
 		return http.StatusBadGateway, "waha_unreachable", "could not reach the WhatsApp service (WAHA)"
+	case errors.Is(err, retention.ErrInvalid):
+		return http.StatusBadRequest, "invalid", err.Error()
 	case errors.Is(err, search.ErrQueryTooShort):
 		return http.StatusBadRequest, "invalid", err.Error()
 	case errors.Is(err, alarms.ErrInvalidTransition):

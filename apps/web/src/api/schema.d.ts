@@ -78,6 +78,51 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/system/retention": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Platform data retention, the data volume and what is stored
+         * @description Needs the platform-level tenant.manage permission, because the setting applies to every tenant.
+         */
+        get: operations["getRetention"];
+        /**
+         * Change the platform data retention
+         * @description Shortening a retention makes the next cleanup erase older data. Unnamed faces older than the new
+         *     limit are deleted within the hour. Needs the platform-level tenant.manage permission.
+         */
+        put: operations["updateRetention"];
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/system/retention/preview": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * What a face retention would erase now
+         * @description Counts the unnamed faces older than the given days and the crop bytes they hold. Changes nothing.
+         */
+        get: operations["previewRetention"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/classify/policy": {
         parameters: {
             query?: never;
@@ -6616,6 +6661,46 @@ export interface components {
              */
             schema_version: number;
         };
+        /**
+         * @description Days to keep each class; 0 keeps it forever. A null notification value uses the server default
+         *     (NOTIFY_DELIVERY_RETENTION, NOTIFY_READ_RETENTION).
+         */
+        RetentionInput: {
+            face_unknown_days: number;
+            notification_delivery_days?: number | null;
+            notification_read_days?: number | null;
+            /** @description Halve the cleanable retentions while the volume is over its limit */
+            pressure_cleanup: boolean;
+            /** @description Volume usage that triggers the early cleanup */
+            pressure_percent: number;
+        };
+        RetentionSettings: components["schemas"]["RetentionInput"] & {
+            /** Format: date-time */
+            updated_at: string;
+            /** Format: uuid */
+            updated_by?: string | null;
+        };
+        RetentionStored: {
+            /** Format: int64 */
+            records: number;
+            /** Format: int64 */
+            bytes: number;
+        };
+        RetentionVolume: {
+            /** @description False when the data volume could not be read; no pressure cleanup runs then */
+            measured: boolean;
+            /** Format: int64 */
+            total_bytes: number;
+            /** Format: int64 */
+            free_bytes: number;
+            /** Format: float */
+            percent: number;
+        };
+        RetentionView: {
+            settings: components["schemas"]["RetentionSettings"];
+            volume: components["schemas"]["RetentionVolume"];
+            faces_pending: components["schemas"]["RetentionStored"];
+        };
         SystemCapacity: {
             cpu: {
                 model: string;
@@ -8705,6 +8790,80 @@ export interface operations {
                 };
             };
             401: components["responses"]["Unauthorized"];
+        };
+    };
+    getRetention: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The retention policy */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["RetentionView"];
+                };
+            };
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+        };
+    };
+    updateRetention: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["RetentionInput"];
+            };
+        };
+        responses: {
+            /** @description Saved */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["RetentionSettings"];
+                };
+            };
+            400: components["responses"]["BadRequest"];
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+        };
+    };
+    previewRetention: {
+        parameters: {
+            query: {
+                face_unknown_days: number;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The count */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["RetentionStored"];
+                };
+            };
+            400: components["responses"]["BadRequest"];
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
         };
     };
     getClassifyPolicy: {

@@ -1,5 +1,5 @@
 import {
-  Bell, BellRing, Building, Camera, CarFront, ClipboardList, Download, Eye, GitBranch, History, KeyRound, LayoutDashboard, Layers, Map as MapIcon,
+  Archive, Bell, BellRing, Building, Camera, CarFront, ClipboardList, Download, Eye, GitBranch, History, KeyRound, LayoutDashboard, Layers, Map as MapIcon,
   Palette, ScanFace, Send, Server, ShieldCheck, SlidersHorizontal, UserCog, Users, UsersRound, Video, Zap, BriefcaseBusiness, MonitorCog,
   type LucideIcon,
 } from "lucide-react";
@@ -70,6 +70,7 @@ export const settingsNavGroups: NavGroup[] = [
       { label: "nav.groups", icon: UsersRound, to: "/groups", permission: "groups.view" },
       { label: "nav.permissions", icon: KeyRound, to: "/permissions", permission: "permissions.manage" },
       { label: "nav.audit", icon: ClipboardList, to: "/audit", permission: "audit.view" },
+      { label: "nav.retention", icon: Archive, to: "/retention", permission: "tenant.manage" },
       { label: "nav.watermark", icon: Palette, to: "/branding", permission: "tenant.manage" },
       { label: "nav.myAccount", icon: UserCog, to: "/account" },
       { label: "nav.clientStation", icon: MonitorCog, to: "/client-station" },
