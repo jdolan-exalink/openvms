@@ -232,3 +232,27 @@ func TestPruneKeepsPendingAndYoungRows(t *testing.T) {
 		t.Fatalf("left %d rows (err %v), want 2 (old pending + recent sent)", left, err)
 	}
 }
+
+func TestPruneTakesItsRetentionFromTheSourceEveryPass(t *testing.T) {
+	f := newFixture(t)
+	ctx := context.Background()
+	ch := f.addWebhook("http://127.0.0.1:1/unused", true)
+	old := time.Now().Add(-60 * 24 * time.Hour)
+	err := f.env.Store.TxRaw(ctx, store.AllTenants, func(tx pgx.Tx) error {
+		_, err := tx.Exec(ctx, `INSERT INTO notification_deliveries (tenant_id, channel_id, channel_name, channel_type, payload, status, created_at)
+			VALUES ($1, $2, 'c', 'webhook', '{}', 'sent', $3)`, f.env.Demo.TenantID, ch, old)
+		return err
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	days := 90 * 24 * time.Hour
+	f.worker.RetentionSource = func(context.Context) (time.Duration, time.Duration) { return days, days }
+	if d, _ := f.worker.Prune(ctx); d != 0 {
+		t.Fatalf("a 90-day retention pruned %d deliveries that are 60 days old", d)
+	}
+	days = 7 * 24 * time.Hour // the setting changed: the next pass uses it without rebuilding the worker
+	if d, _ := f.worker.Prune(ctx); d != 1 {
+		t.Fatalf("a 7-day retention pruned %d deliveries, want 1", d)
+	}
+}

@@ -51,6 +51,7 @@ import (
 	"github.com/jdolan-exalink/openvms/internal/platform/telemetry"
 	"github.com/jdolan-exalink/openvms/internal/provision"
 	"github.com/jdolan-exalink/openvms/internal/realtime/outbox"
+	"github.com/jdolan-exalink/openvms/internal/retention"
 	"github.com/jdolan-exalink/openvms/internal/rules"
 	"github.com/jdolan-exalink/openvms/internal/secrets"
 	"github.com/jdolan-exalink/openvms/internal/store"
@@ -176,8 +177,20 @@ func run() error {
 		Deps:                  notify.Deps{WahaBaseURL: cfg.Waha.BaseURL, WahaAPIKey: cfg.Waha.APIKey},
 		DeliveryRetention:     cfg.NotifyDeliveryRetention,
 		NotificationRetention: cfg.NotifyReadRetention,
+		// Settings > Retention overrides the environment defaults; a failure to read it keeps them.
+		RetentionSource: func(ctx context.Context) (time.Duration, time.Duration) {
+			set, err := retention.Load(ctx, st)
+			if err != nil {
+				return cfg.NotifyDeliveryRetention, cfg.NotifyReadRetention
+			}
+			return retention.NotificationRetention(set.NotificationDeliveryDays, cfg.NotifyDeliveryRetention),
+				retention.NotificationRetention(set.NotificationReadDays, cfg.NotifyReadRetention)
+		},
 	}
 	go deliveries.Run(ctx)
+
+	// Erases unnamed faces past the platform retention (Settings > Retention), sooner when the data volume is full.
+	go (&retention.Purger{Store: st, Log: log, VolumePercent: retention.VolumePercent(os.Getenv("RETENTION_VOLUME_PATH"))}).Run(ctx)
 
 	offline := &rules.OfflineDetector{Store: st, Rules: rulesSvc, Log: log, Interval: cfg.HealthInterval}
 	go offline.Run(ctx)

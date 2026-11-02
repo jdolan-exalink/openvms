@@ -125,8 +125,11 @@ type Worker struct {
 	// and PruneBatch bounds the rows deleted per statement (default 1000).
 	DeliveryRetention     time.Duration
 	NotificationRetention time.Duration
-	PruneInterval         time.Duration
-	PruneBatch            int
+	// RetentionSource, when set, is asked at every pass and replaces the two fixed retentions above, so a
+	// change in Settings applies without a restart. Values follow the same rules (0 = default, negative = off).
+	RetentionSource func(ctx context.Context) (delivery, notifications time.Duration)
+	PruneInterval   time.Duration
+	PruneBatch      int
 }
 
 const (
@@ -325,12 +328,16 @@ func (w *Worker) runPruner(ctx context.Context) {
 func (w *Worker) Prune(ctx context.Context) (deliveries, notifications int64) {
 	batch := int32(orDefault(w.PruneBatch, defaultPruneBatch)) //nolint:gosec // small bounded value
 	now := time.Now()
-	if d, ok := retention(w.DeliveryRetention, defaultDeliveryRetention); ok {
+	deliveryRetention, notificationRetention := w.DeliveryRetention, w.NotificationRetention
+	if w.RetentionSource != nil {
+		deliveryRetention, notificationRetention = w.RetentionSource(ctx)
+	}
+	if d, ok := retention(deliveryRetention, defaultDeliveryRetention); ok {
 		deliveries = w.pruneLoop(ctx, "notification deliveries", func(q *db.Queries) (int64, error) {
 			return q.PruneNotificationDeliveries(ctx, db.PruneNotificationDeliveriesParams{Cutoff: now.Add(-d), MaxRows: batch})
 		}, batch)
 	}
-	if d, ok := retention(w.NotificationRetention, defaultNotificationRetention); ok {
+	if d, ok := retention(notificationRetention, defaultNotificationRetention); ok {
 		notifications = w.pruneLoop(ctx, "read notifications", func(q *db.Queries) (int64, error) {
 			return q.PruneReadNotifications(ctx, db.PruneReadNotificationsParams{Cutoff: now.Add(-d), MaxRows: batch})
 		}, batch)

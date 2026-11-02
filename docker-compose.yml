@@ -243,6 +243,8 @@ services:
       FACE_EMBEDDING_MODEL_ID: ${FACE_EMBEDDING_MODEL_ID:-omz-arcfaceresnet100-8-spatial1}
       # No colon on purpose: setting FACE_DETECTOR_MODEL_PATH to an empty value disables the detector gate.
       FACE_DETECTOR_MODEL_PATH: ${FACE_DETECTOR_MODEL_PATH-/opt/openvms/face-models/face_detection_yunet_2023mar.onnx}
+      # Any path on the OpenVMS data volume: the retention job measures how full that volume is.
+      RETENTION_VOLUME_PATH: /mnt/openvms/exports
     volumes:
       - ${OPENVMS_DATA_DIR:-/mnt/cctv/openvms}/exports:/mnt/openvms/exports
       - ${OPENVMS_DATA_DIR:-/mnt/cctv/openvms}/models/faces:/opt/openvms/face-models:ro
