@@ -410,7 +410,7 @@ func (s *Service) runServerAgentInstall(parent context.Context, actor authz.Acto
 	if register == nil {
 		register = s.registerInstalledAgent
 	}
-	if err := register(ctx, actor, job.serverID, request.Host, agentInstallHTTPSPort, token, caPEM); err != nil {
+	if err := register(ctx, actor, job.serverID, request.Host, agentInstallHTTPSPort, token, caPEM, request.ReplaceExisting); err != nil {
 		job.update("failed", "failed", "Agent files may be installed but registration failed; inspect the target before retrying")
 		return
 	}
@@ -696,7 +696,7 @@ func newAgentInstallTLSCredentials(host string) (certificate, privateKey []byte,
 	return certificate, privateKey, nil
 }
 
-func (s *Service) registerInstalledAgent(ctx context.Context, actor authz.Actor, serverID uuid.UUID, host string, securePort uint16, token string, caPEM []byte) error {
+func (s *Service) registerInstalledAgent(ctx context.Context, actor authz.Actor, serverID uuid.UUID, host string, securePort uint16, token string, caPEM []byte, replace bool) error {
 	if err := s.requireAgentInstall(ctx, actor, serverID); err != nil {
 		return err
 	}
@@ -726,20 +726,34 @@ func (s *Service) registerInstalledAgent(ctx context.Context, actor authz.Actor,
 		if err := checker.Require(authz.ServersConfigSecrets, resource); err != nil {
 			return err
 		}
-		rows, err := q.RegisterServerAgentIfAbsent(ctx, db.RegisterServerAgentIfAbsentParams{ServerID: serverID, TenantID: server.TenantID, Host: host, Port: 7419, Variant: "ssh", TokenSealed: sealed, Version: agent.Version})
-		if err != nil {
-			return err
-		}
-		if rows == 0 {
-			return ErrAgentAlreadyProvisioned
+		if replace {
+			// A confirmed replace owns the registration: new credentials, and no by-address
+			// metadata from a previous ConnectAgent may linger on an SSH-installed agent.
+			if err := q.ReplaceServerAgentInstall(ctx, db.ReplaceServerAgentInstallParams{ServerID: serverID, TenantID: server.TenantID, Host: host, Port: 7419, Variant: "ssh", TokenSealed: sealed, Version: agent.Version}); err != nil {
+				return err
+			}
+		} else {
+			rows, err := q.RegisterServerAgentIfAbsent(ctx, db.RegisterServerAgentIfAbsentParams{ServerID: serverID, TenantID: server.TenantID, Host: host, Port: 7419, Variant: "ssh", TokenSealed: sealed, Version: agent.Version})
+			if err != nil {
+				return err
+			}
+			if rows == 0 {
+				return ErrAgentAlreadyProvisioned
+			}
 		}
 		ca := string(caPEM)
-		rows, err = q.RegisterServerAgentTLSIfAbsent(ctx, db.RegisterServerAgentTLSIfAbsentParams{ServerID: serverID, TenantID: server.TenantID, SecurePort: int32(securePort), TrustMode: AgentTLSTrustCustom, CaPem: &ca})
-		if err != nil {
-			return err
-		}
-		if rows == 0 {
-			return errors.New("agent TLS metadata already exists")
+		if replace {
+			if err := q.UpsertServerAgentTLS(ctx, db.UpsertServerAgentTLSParams{ServerID: serverID, TenantID: server.TenantID, SecurePort: int32(securePort), TrustMode: AgentTLSTrustCustom, CaPem: &ca}); err != nil {
+				return err
+			}
+		} else {
+			rows, err := q.RegisterServerAgentTLSIfAbsent(ctx, db.RegisterServerAgentTLSIfAbsentParams{ServerID: serverID, TenantID: server.TenantID, SecurePort: int32(securePort), TrustMode: AgentTLSTrustCustom, CaPem: &ca})
+			if err != nil {
+				return err
+			}
+			if rows == 0 {
+				return errors.New("agent TLS metadata already exists")
+			}
 		}
 		fingerprint := sha256.Sum256(caPEM)
 		details, err := json.Marshal(map[string]any{"host": host, "http_port": 7419, "https_port": securePort, "agent_ca_sha256": hex.EncodeToString(fingerprint[:])})

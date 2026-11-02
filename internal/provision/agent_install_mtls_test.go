@@ -154,7 +154,7 @@ func TestServerAgentInstallRequestsAnEnrollTokenWhenMTLSIsConfigured(t *testing.
 			seen = request.MTLS
 			return nil
 		},
-		agentInstallRegister:        func(context.Context, authz.Actor, uuid.UUID, string, uint16, string, []byte) error { return nil },
+		agentInstallRegister:        func(context.Context, authz.Actor, uuid.UUID, string, uint16, string, []byte, bool) error { return nil },
 		agentInstallEnrollmentCheck: func(context.Context, authz.Actor, uuid.UUID, time.Time) error { return nil },
 		agentInstallHealthCheck:     func(context.Context, string, uint16, string, []byte) error { return nil },
 		agentInstallJobs:            map[uuid.UUID]*agentInstallJob{}, agentInstallByServer: map[uuid.UUID]uuid.UUID{},
@@ -181,7 +181,7 @@ func TestServerAgentInstallWithoutMTLSDoesNotTouchEnrollment(t *testing.T) {
 			seen = request.MTLS
 			return nil
 		},
-		agentInstallRegister:    func(context.Context, authz.Actor, uuid.UUID, string, uint16, string, []byte) error { return nil },
+		agentInstallRegister:    func(context.Context, authz.Actor, uuid.UUID, string, uint16, string, []byte, bool) error { return nil },
 		agentInstallHealthCheck: func(context.Context, string, uint16, string, []byte) error { return nil },
 		agentInstallJobs:        map[uuid.UUID]*agentInstallJob{}, agentInstallByServer: map[uuid.UUID]uuid.UUID{},
 	}

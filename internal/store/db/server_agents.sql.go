@@ -120,6 +120,46 @@ func (q *Queries) RegisterServerAgentIfAbsent(ctx context.Context, arg RegisterS
 	return result.RowsAffected(), nil
 }
 
+const replaceServerAgentInstall = `-- name: ReplaceServerAgentInstall :exec
+INSERT INTO server_agents (server_id, tenant_id, host, port, variant, token_sealed, version)
+VALUES ($1, $2, $3, $4, $5, $6, $7)
+ON CONFLICT (server_id) DO UPDATE SET
+    tenant_id = EXCLUDED.tenant_id,
+    host = EXCLUDED.host,
+    port = EXCLUDED.port,
+    variant = EXCLUDED.variant,
+    token_sealed = EXCLUDED.token_sealed,
+    version = EXCLUDED.version,
+    base_url = '',
+    request_headers_sealed = NULL,
+    updated_at = now()
+`
+
+type ReplaceServerAgentInstallParams struct {
+	ServerID    uuid.UUID
+	TenantID    uuid.UUID
+	Host        string
+	Port        int32
+	Variant     string
+	TokenSealed []byte
+	Version     string
+}
+
+// A confirmed SSH (re)install owns the registration: it replaces the credentials and clears any
+// by-address connection metadata a previous ConnectAgent stored (base_url, extra headers).
+func (q *Queries) ReplaceServerAgentInstall(ctx context.Context, arg ReplaceServerAgentInstallParams) error {
+	_, err := q.db.Exec(ctx, replaceServerAgentInstall,
+		arg.ServerID,
+		arg.TenantID,
+		arg.Host,
+		arg.Port,
+		arg.Variant,
+		arg.TokenSealed,
+		arg.Version,
+	)
+	return err
+}
+
 const updateServerAgentRequestHeaders = `-- name: UpdateServerAgentRequestHeaders :execrows
 UPDATE server_agents SET request_headers_sealed = $1, updated_at = now()
 WHERE server_id = $2
