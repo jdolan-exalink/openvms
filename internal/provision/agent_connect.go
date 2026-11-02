@@ -113,7 +113,7 @@ func verifyAgentConnection(ctx context.Context, client AgentProbeDoer, token str
 	status, body, err := agentGet(ctx, client, token, "/v1/metrics")
 	switch {
 	case err != nil:
-		return "", AgentScopes{}, ErrAgentConnectUnreachable
+		return "", AgentScopes{}, &AgentUnreachableError{Detail: diagnoseAgentError(ctx, err)}
 	case status == http.StatusUnauthorized:
 		return "", AgentScopes{}, ErrAgentConnectUnauthorized
 	case status == http.StatusForbidden:

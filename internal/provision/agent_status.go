@@ -91,7 +91,7 @@ func (s *Service) AgentStatus(ctx context.Context, actor authz.Actor, serverID u
 		snap, err = fetchMetrics(ctx, row.Host, row.Port, string(token))
 	}
 	if err != nil {
-		out.Error = err.Error()
+		out.Error = diagnoseAgentError(ctx, err)
 		out.Outdated = true
 		status := classifyAgentBinaryStatus(true, out.BinaryAvailable, nil, true)
 		out.BinaryStatus, out.BinaryOutdated, out.BinaryUpgradeAvailable = status.Status, status.Outdated, status.UpgradeAvailable
