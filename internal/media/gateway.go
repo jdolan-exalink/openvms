@@ -601,7 +601,7 @@ func (g *Gateway) serveWatermarkedBlob(w http.ResponseWriter, r *http.Request, a
 	w.Header().Set("Content-Disposition", `attachment; filename="plate-`+lr.ID.String()+`.jpg"`)
 	w.Header().Set("Cache-Control", "private, no-store")
 	w.WriteHeader(http.StatusOK)
-	_, _ = w.Write(out)
+	_, _ = w.Write(out) // #nosec G705 -- an image/jpeg body, never interpreted as HTML.
 	g.audit(r.Context(), a, cam.TenantID, ActionSnapshotViewed, "lpr_read", lr.ID, nil)
 }
 

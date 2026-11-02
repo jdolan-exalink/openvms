@@ -73,15 +73,17 @@ func ensureExportDir(dir string) string {
 	if dir == "" {
 		dir = "/mnt/openvms/exports"
 	}
+	// #nosec G301 -- the export tree is read by other processes; group access is intentional (see the chmods below).
 	if err := os.MkdirAll(dir, 0o755); err == nil {
 		return dir
 	}
 	fallback := "/var/lib/openvms/exports"
+	// #nosec G301 -- same shared export tree as above.
 	if err := os.MkdirAll(fallback, 0o755); err == nil {
 		return fallback
 	}
 	local := "./data/exports"
-	_ = os.MkdirAll(local, 0o755)
+	_ = os.MkdirAll(local, 0o755) // #nosec G301 -- same shared export tree as above.
 	return local
 }
 
@@ -450,15 +452,15 @@ func (m *ExportJobManager) transferItem(ctx context.Context, j activeJobRow, it 
 	}
 
 	jobDir := filepath.Join(m.StorageDir, j.id.String())
-	if err := os.MkdirAll(jobDir, 0o755); err != nil {
+	if err := os.MkdirAll(jobDir, 0o755); err != nil { // #nosec G301 -- group-writable on purpose, widened right below.
 		return err
 	}
-	_ = os.Chmod(jobDir, 0o775)
+	_ = os.Chmod(jobDir, 0o775) // #nosec G302 -- group-writable on purpose: other processes finish the job files.
 
 	partPath := filepath.Join(jobDir, fmt.Sprintf("%s.mp4.part", it.id.String()))
 	finalPath := filepath.Join(jobDir, fmt.Sprintf("%s.mp4", it.id.String()))
 
-	// #nosec G304 -- export path is composed from private storage root and UUID identifiers.
+	// #nosec G304 G302 -- export path is composed from private storage root and UUID identifiers; the file is group-readable on purpose.
 	f, err := os.OpenFile(partPath, os.O_CREATE|os.O_WRONLY|os.O_TRUNC, 0o644)
 	if err != nil {
 		return err
@@ -529,7 +531,7 @@ WHERE id = $1`, j.id, speedBps, etaSec)
 	if err := os.Rename(partPath, finalPath); err != nil {
 		return err
 	}
-	_ = os.Chmod(finalPath, 0o664)
+	_ = os.Chmod(finalPath, 0o664) // #nosec G302 -- group-writable on purpose, like the job directory.
 
 	hashStr := hex.EncodeToString(hasher.Sum(nil))
 
@@ -663,8 +665,8 @@ ORDER BY e.start_time ASC`, camIDs, j.start, j.end)
 	}
 
 	if b, err := json.MarshalIndent(manifestObj, "", "  "); err == nil {
-		_ = os.WriteFile(manifestPath, b, 0o644)
-		_ = os.Chmod(manifestPath, 0o664)
+		_ = os.WriteFile(manifestPath, b, 0o644) // #nosec G306 -- group-readable on purpose, like the export it describes.
+		_ = os.Chmod(manifestPath, 0o664)        // #nosec G302 -- group-writable on purpose, like the export.
 	}
 
 	bJSON, _ := json.Marshal(manifestObj)

@@ -2,6 +2,7 @@ package provisionlpr
 
 import (
 	"bytes"
+	"context"
 	"errors"
 	"io"
 	"log/slog"
@@ -35,7 +36,7 @@ func NewTCPServer(addr string, receiver *Receiver, log *slog.Logger) (*TCPServer
 
 // Start begins listening and serving connections.
 func (s *TCPServer) Start() error {
-	ln, err := net.Listen("tcp", s.addr)
+	ln, err := (&net.ListenConfig{}).Listen(context.Background(), "tcp", s.addr)
 	if err != nil {
 		return err
 	}

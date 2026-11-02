@@ -582,5 +582,3 @@ func TestParserTVTCountPlaceholderPlate(t *testing.T) {
 		t.Errorf("EnterCount = %v, want 5", event.EnterCount)
 	}
 }
-
-

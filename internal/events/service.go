@@ -730,8 +730,8 @@ type PlateRead struct {
 	Zones      []string
 	SeenAt     time.Time
 	// EventID is the indexed review item that contains this read, when known.
-	EventID *uuid.UUID
-	Vehicle *VehicleAttr
+	EventID     *uuid.UUID
+	Vehicle     *VehicleAttr
 	CropKey     string
 	HasCrop     bool
 	SnapshotKey string

@@ -98,7 +98,7 @@ func TestProfileStreamsFallsBackToMedia1WhenMedia2Faults(t *testing.T) {
 
 // A device offering only Media2 keeps its original behaviour: a fault surfaces instead of a silent fallback.
 func TestProfileStreamsMedia2OnlyStillReportsTheFault(t *testing.T) {
-	transport := mediaRoundTripperFunc(func(r *http.Request) (*http.Response, error) {
+	transport := mediaRoundTripperFunc(func(_ *http.Request) (*http.Response, error) {
 		return &http.Response{
 			StatusCode: http.StatusOK,
 			Body:       io.NopCloser(strings.NewReader(soapFaultEnvelope)),

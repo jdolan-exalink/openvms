@@ -1012,22 +1012,6 @@ func toFloat(v any) (float64, bool) {
 	return 0, false
 }
 
-func toInt(v any) (int, bool) {
-	switch n := v.(type) {
-	case int:
-		return n, true
-	case int64:
-		return int(n), true
-	case float64:
-		return int(n), true
-	case string:
-		if i, err := strconv.Atoi(strings.TrimSpace(n)); err == nil {
-			return i, true
-		}
-	}
-	return 0, false
-}
-
 func looksLikeJSON(b []byte) bool {
 	t := bytes.TrimSpace(b)
 	return len(t) > 1 && ((t[0] == '{' && t[len(t)-1] == '}') || (t[0] == '[' && t[len(t)-1] == ']'))
