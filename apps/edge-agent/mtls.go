@@ -46,7 +46,7 @@ func loadMTLS(ctx context.Context, getenv func(string) string, log *slog.Logger,
 	get := func(k string) string { return strings.TrimSpace(getenv(k)) }
 	addr := get("OPENVMS_AGENT_GRPC_ADDR")
 	if addr == "" {
-		for _, k := range []string{"OPENVMS_ENROLL_TOKEN", "OPENVMS_ENROLL_TOKEN_FILE", "OPENVMS_API_URL", "OPENVMS_API_CA_FILE", "OPENVMS_AGENT_STATE_DIR"} {
+		for _, k := range []string{"OPENVMS_ENROLL_TOKEN", "OPENVMS_ENROLL_TOKEN_FILE", "OPENVMS_API_URL", "OPENVMS_API_CA_FILE"} {
 			if get(k) != "" {
 				return nil, fmt.Errorf("%s requires OPENVMS_AGENT_GRPC_ADDR", k)
 			}
