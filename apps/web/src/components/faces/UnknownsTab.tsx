@@ -4,7 +4,7 @@ import { type Schemas } from "@/api/client";
 import { facePersonsQuery, faceReviewSightingImageUrl, faceUnknownClustersQuery } from "@/api/queries";
 import { ConfirmDialog } from "@/components/ConfirmDialog";
 import { emptyScope, type Scope, ScopeFilters } from "@/components/faces/ScopeFilters";
-import { Button, Empty, ErrorNote, Field, Pill, Select, TextInput } from "@/components/ui";
+import { Button, Checkbox, Empty, ErrorNote, Field, Pill, Select, TextInput } from "@/components/ui";
 import { useT } from "@/i18n";
 import { cn } from "@/lib/cn";
 import { assignCluster, dismissCluster, PartialAssignError } from "@/lib/faceClusters";
@@ -14,7 +14,14 @@ const NEW_PERSON = "__new__";
 type Cluster = Schemas["FaceUnknownCluster"];
 type Sort = "recurrence" | "recent";
 
-function ClusterCard({ cluster, persons, canManage }: { cluster: Cluster; persons: Schemas["FacePerson"][]; canManage: boolean }) {
+function ClusterCard({ cluster, persons, canManage, selected, onToggle }: {
+  cluster: Cluster;
+  persons: Schemas["FacePerson"][];
+  canManage: boolean;
+  /** Set only while selecting: the card then shows a checkbox and its own actions step aside. */
+  selected?: boolean;
+  onToggle?: () => void;
+}) {
   const t = useT();
   const qc = useQueryClient();
   const [target, setTarget] = useState("");
@@ -52,7 +59,8 @@ function ClusterCard({ cluster, persons, canManage }: { cluster: Cluster; person
   }
 
   return (
-    <li className={cn("flex flex-col gap-3 rounded-m3-xl bg-surface-1 p-3", cluster.recurrent && "border-l-4 border-warn")}>
+    <li className={cn("flex flex-col gap-3 rounded-m3-xl bg-surface-1 p-3", cluster.recurrent && "border-l-4 border-warn", selected && "ring-2 ring-primary")}>
+      {onToggle && <Checkbox checked={selected ?? false} onChange={onToggle} label={t("faces.unknownSelectGroup")} />}
       <img
         src={faceReviewSightingImageUrl(cluster.best_sighting_id)}
         alt={t("faces.unknownCoverAlt", { server: cluster.server_names[0] ?? "" })}
@@ -66,7 +74,7 @@ function ClusterCard({ cluster, persons, canManage }: { cluster: Cluster; person
       </div>
       <p className="text-xs text-muted">{t("faces.unknownSeen", { when: fmtDateTime(cluster.last_seen_at) })}</p>
       <p className="text-xs text-muted">{t("faces.unknownServers", { names: cluster.server_names.join(", ") })}</p>
-      {canManage && (
+      {canManage && !onToggle && (
         <div className="flex flex-col gap-2">
           <Field label={t("faces.assignTo")}>
             <Select value={target} onChange={(e) => setTarget(e.target.value)}>
@@ -126,12 +134,51 @@ export function UnknownsTab({ canManage }: { canManage: boolean }) {
     }),
   );
   const persons = useQuery(facePersonsQuery());
+  const qc = useQueryClient();
+  const [selecting, setSelecting] = useState(false);
+  const [selected, setSelected] = useState<Set<string>>(new Set());
+  const [confirmDelete, setConfirmDelete] = useState(false);
+  const [deleteHint, setDeleteHint] = useState<string | null>(null);
   const items = useMemo(() => {
     const list = [...(clusters.data?.items ?? [])];
     if (sort === "recent") list.sort((a, b) => b.last_seen_at.localeCompare(a.last_seen_at));
     else list.sort((a, b) => Number(b.recurrent) - Number(a.recurrent) || b.sighting_count - a.sighting_count);
     return list;
   }, [clusters.data, sort]);
+
+  const chosen = items.filter((c) => selected.has(c.id));
+  const chosenSightings = chosen.reduce((n, c) => n + c.sighting_count, 0);
+  const deleteSelected = useMutation({
+    mutationFn: async () => {
+      // One group at a time so a failure leaves the rest selected for a retry.
+      const done: string[] = [];
+      try {
+        for (const c of chosen) {
+          await dismissCluster(c.sighting_ids);
+          done.push(c.id);
+        }
+      } catch (err) {
+        throw Object.assign(err instanceof Error ? err : new Error(String(err)), { done: done.length });
+      }
+    },
+    onSettled: async (_data, err) => {
+      setConfirmDelete(false);
+      await qc.invalidateQueries({ queryKey: ["faces"] });
+      if (err) {
+        setDeleteHint(t("faces.unknownDeletePartial", { done: (err as { done?: number }).done ?? 0, total: chosen.length }));
+        return;
+      }
+      setDeleteHint(null);
+      setSelected(new Set());
+      setSelecting(false);
+    },
+  });
+  const toggle = (id: string) =>
+    setSelected((prev) => {
+      const next = new Set(prev);
+      if (!next.delete(id)) next.add(id);
+      return next;
+    });
 
   return (
     <div className="flex flex-col gap-4">
@@ -153,13 +200,58 @@ export function UnknownsTab({ canManage }: { canManage: boolean }) {
           <TextInput type="number" min={1} max={365} value={windowDays} onChange={(e) => setWindowDays(Math.min(365, Math.max(1, Number(e.target.value) || 1)))} />
         </Field>
       </div>
+      {canManage && items.length > 0 && (
+        <div className="flex flex-wrap items-center gap-2">
+          <Button
+            variant={selecting ? "tonal" : "outlined"}
+            aria-pressed={selecting}
+            onClick={() => {
+              setSelecting(!selecting);
+              setSelected(new Set());
+              setDeleteHint(null);
+            }}
+          >
+            {selecting ? t("faces.unknownSelectDone") : t("faces.unknownSelect")}
+          </Button>
+          {selecting && (
+            <>
+              <Button variant="text" onClick={() => setSelected(selected.size === items.length ? new Set() : new Set(items.map((c) => c.id)))}>
+                {selected.size === items.length ? t("faces.unknownSelectNone") : t("faces.unknownSelectAll")}
+              </Button>
+              <span role="status" className="text-sm text-on-surface-variant">{t("faces.unknownSelectedCount", { count: selected.size })}</span>
+              <Button variant="danger" disabled={selected.size === 0} onClick={() => setConfirmDelete(true)}>
+                {t("faces.unknownDeleteSelected")}
+              </Button>
+            </>
+          )}
+        </div>
+      )}
+      {deleteHint && <p role="status" className="text-sm text-on-surface-variant">{deleteHint}</p>}
       <ErrorNote error={clusters.error} />
       {clusters.isSuccess && items.length === 0 && <Empty>{t("faces.unknownEmpty")}</Empty>}
       <ul className="grid grid-cols-[repeat(auto-fill,minmax(230px,1fr))] gap-3">
         {items.map((cluster) => (
-          <ClusterCard key={cluster.id} cluster={cluster} persons={persons.data ?? []} canManage={canManage} />
+          <ClusterCard
+            key={cluster.id}
+            cluster={cluster}
+            persons={persons.data ?? []}
+            canManage={canManage}
+            selected={selecting ? selected.has(cluster.id) : undefined}
+            onToggle={selecting ? () => toggle(cluster.id) : undefined}
+          />
         ))}
       </ul>
+      {confirmDelete && (
+        <ConfirmDialog
+          title={t("faces.unknownDeleteSelectedTitle", { count: chosen.length })}
+          message={t("faces.unknownDeleteSelectedBody", { groups: chosen.length, count: chosenSightings })}
+          confirmLabel={t("faces.unknownDeleteSelected")}
+          pending={deleteSelected.isPending}
+          error={deleteSelected.error}
+          onConfirm={() => deleteSelected.mutate()}
+          onCancel={() => setConfirmDelete(false)}
+        />
+      )}
     </div>
   );
 }

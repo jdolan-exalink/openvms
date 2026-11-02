@@ -94,6 +94,38 @@ describe("Unknown faces", () => {
     await waitFor(() => expect(calls.filter((c) => c.method === "DELETE")).toHaveLength(3));
   });
 
+  it("deletes several selected groups only after a confirmation that counts them", async () => {
+    const other = ["4b03f6ef-e00e-4a17-8d33-7f2d583a4cd1", "4b03f6ef-e00e-4a17-8d33-7f2d583a4cd2"];
+    const calls = install([
+      cluster(),
+      cluster({ id: "g2", sighting_ids: other, identity_ids: other, sighting_count: 2, best_sighting_id: other[0]!, recurrent: false }),
+      cluster({ id: "g3", sighting_ids: ["keep"], identity_ids: ["keep"], sighting_count: 1, best_sighting_id: "keep", recurrent: false }),
+    ]);
+    await openUnknowns();
+    fireEvent.click(await screen.findByRole("button", { name: "Seleccionar" }));
+    const boxes = screen.getAllByRole("checkbox", { name: "Seleccionar grupo" });
+    fireEvent.click(boxes[0]!);
+    fireEvent.click(boxes[1]!);
+    expect(screen.getByText("2 seleccionados")).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "Borrar seleccionados" }));
+    expect(screen.getByText("Se borran las fotos de 5 apariciones en 2 grupos. No se puede deshacer.")).toBeInTheDocument();
+    expect(calls.some((c) => c.method === "DELETE")).toBe(false);
+    fireEvent.click(within(screen.getByRole("dialog")).getByRole("button", { name: "Borrar seleccionados" }));
+    await waitFor(() => expect(calls.filter((c) => c.method === "DELETE")).toHaveLength(5));
+    expect(calls.some((c) => c.method === "DELETE" && c.path.endsWith("/keep"))).toBe(false);
+  });
+
+  it("keeps everything when the confirmation is cancelled", async () => {
+    const calls = install([cluster()]);
+    await openUnknowns();
+    fireEvent.click(await screen.findByRole("button", { name: "Seleccionar" }));
+    fireEvent.click(screen.getByRole("button", { name: "Seleccionar todo" }));
+    fireEvent.click(screen.getByRole("button", { name: "Borrar seleccionados" }));
+    fireEvent.click(within(screen.getByRole("dialog")).getByRole("button", { name: "Cancelar" }));
+    expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
+    expect(calls.some((c) => c.method === "DELETE")).toBe(false);
+  });
+
   it("sends the recurrence rule the operator typed", async () => {
     const calls = install([cluster()]);
     await openUnknowns();
