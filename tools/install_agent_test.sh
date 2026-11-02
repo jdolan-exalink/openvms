@@ -203,7 +203,9 @@ grep -q 'WARNING: could not add the ufw rule 10.0.0.0/8' <<<"$out_f" || fail "no
 grep -q 'from 192.168.0.0/16 to any port 7443' "$tmp/ufw.log" || fail "a failed rule stopped the later ones"
 grep -q 'from 100.64.0.0/10 to any port 7443' "$tmp/ufw.log" || fail "a failed rule skipped the Tailscale range"
 # A mistyped mode is refused instead of silently skipping the firewall.
-if OPENVMS_AGENT_FIREWALL=on run "$tmp/f7" --version "$version" >/dev/null 2>&1; then fail "OPENVMS_AGENT_FIREWALL=on was accepted"; fi
+if out_m=$(OPENVMS_AGENT_FIREWALL=on run "$tmp/f7" --version "$version" 2>&1); then fail "OPENVMS_AGENT_FIREWALL=on was accepted"; fi
+grep -q 'must be auto or off' <<<"$out_m" || fail "the refusal does not name the valid modes: $out_m"
+[[ ! -e "$tmp/f7/usr/local/bin/openvms-agent" ]] || fail "a refused mode still installed the agent"
 # Without the override the harness never touches the firewall.
 : >"$tmp/ufw.log"
 run "$tmp/f5" --version "$version" >/dev/null 2>&1 || fail "plain install failed"

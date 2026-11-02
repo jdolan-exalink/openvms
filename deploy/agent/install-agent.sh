@@ -66,6 +66,7 @@ while [[ $# -gt 0 ]]; do
   esac
 done
 
+[[ "$FIREWALL" == auto || "$FIREWALL" == off ]] || die "OPENVMS_AGENT_FIREWALL must be auto or off, not '$FIREWALL'"
 [[ "$PORT" =~ ^[0-9]+$ ]] && ((PORT >= 1 && PORT <= 65535)) || die "--port must be between 1 and 65535"
 
 if [[ -z "${OPENVMS_AGENT_NO_ROOT_CHECK:-}" && $EUID -ne 0 ]]; then
@@ -269,8 +270,7 @@ case "$FIREWALL" in
       say "ufw is not active: no firewall rule added. If another firewall blocks ports $PORT and $TLS_PORT/tcp, see docs/agent-connectivity.md."
     fi
     ;;
-  off) ;;
-  *) die "OPENVMS_AGENT_FIREWALL must be auto or off, not '$FIREWALL'" ;;
+  *) ;;
 esac
 
 # --- what to enter in OpenVMS -----------------------------------------------------------------
