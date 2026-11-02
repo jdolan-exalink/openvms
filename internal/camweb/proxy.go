@@ -7,9 +7,11 @@ import (
 	"encoding/json"
 	"errors"
 	"io"
+	"log/slog"
 	"mime"
 	"net/http"
 	"net/url"
+	"regexp"
 	"strings"
 	"time"
 
@@ -351,7 +353,13 @@ func (s *Service) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		}
 		w.WriteHeader(resp.StatusCode)
 		if r.Method != http.MethodHead {
-			s.stream(w, resp.Body, nil)
+			var head []byte
+			if r.Method != http.MethodGet && resp.StatusCode >= http.StatusBadRequest {
+				// Say why a camera refused a change: its own error code, never the request or credentials.
+				head, _ = io.ReadAll(io.LimitReader(resp.Body, 1024))
+				slog.Info("camera rejected a request", "method", r.Method, "camera_path", cleaned, "status", resp.StatusCode, "error_code", cameraErrorCode(head))
+			}
+			s.stream(w, resp.Body, head)
 		}
 		return
 	}
@@ -476,4 +484,14 @@ func serveState(w http.ResponseWriter, r *http.Request, sess *session) {
 		w.Header().Set("Allow", "GET, POST, OPTIONS")
 		plain(w, http.StatusMethodNotAllowed, "method not allowed")
 	}
+}
+
+var cameraErrorCodeRe = regexp.MustCompile(`errorCode\s*=\s*"([A-Za-z0-9_.-]{1,40})"`)
+
+// cameraErrorCode returns the errorCode attribute of a camera's XML error answer, or "".
+func cameraErrorCode(body []byte) string {
+	if m := cameraErrorCodeRe.FindSubmatch(body); m != nil {
+		return string(m[1])
+	}
+	return ""
 }

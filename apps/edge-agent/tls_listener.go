@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/jdolan-exalink/openvms/internal/agent/camproxy"
+	"github.com/jdolan-exalink/openvms/internal/agent/onvifdiscover"
 	"github.com/jdolan-exalink/openvms/internal/agent/tokens"
 )
 
@@ -42,7 +43,7 @@ func loadAgentTLSConfig(listen, certFile, keyFile string) (*agentTLSConfig, bool
 	return &agentTLSConfig{Addr: listen, Certificates: []tls.Certificate{cert}}, true, nil
 }
 
-func buildTLSMux(auth *authenticator, healthHandler, discoveryHandler, probeHandler, lprHandler http.Handler, cameraWeb *camproxy.Handler) *http.ServeMux {
+func buildTLSMux(auth *authenticator, healthHandler, discoveryHandler, probeHandler, lprHandler http.Handler, cameraWeb *camproxy.Handler, ops *onvifdiscover.OpsHandler) *http.ServeMux {
 	mux := http.NewServeMux()
 	if healthHandler != nil {
 		mux.Handle("GET /v1/health", auth.scoped(tokens.ScopeRead, healthHandler))
@@ -53,6 +54,8 @@ func buildTLSMux(auth *authenticator, healthHandler, discoveryHandler, probeHand
 	if probeHandler != nil {
 		mux.Handle("POST /v1/onvif/probe", auth.scoped(tokens.ScopeControl, probeHandler))
 	}
+	mountOnvifOps(mux, auth, ops)
+	mountProvisionLPRConfigure(mux, auth)
 	if lprHandler != nil {
 		mountProvisionLPR(mux, auth, lprHandler)
 	}
@@ -64,10 +67,10 @@ func buildTLSMux(auth *authenticator, healthHandler, discoveryHandler, probeHand
 	return mux
 }
 
-func newAgentTLSServer(cfg *agentTLSConfig, auth *authenticator, healthHandler, discoveryHandler, probeHandler, lprHandler http.Handler, cameraWeb *camproxy.Handler) *http.Server {
+func newAgentTLSServer(cfg *agentTLSConfig, auth *authenticator, healthHandler, discoveryHandler, probeHandler, lprHandler http.Handler, cameraWeb *camproxy.Handler, ops *onvifdiscover.OpsHandler) *http.Server {
 	return &http.Server{
 		Addr:              cfg.Addr,
-		Handler:           buildTLSMux(auth, healthHandler, discoveryHandler, probeHandler, lprHandler, cameraWeb),
+		Handler:           buildTLSMux(auth, healthHandler, discoveryHandler, probeHandler, lprHandler, cameraWeb, ops),
 		ReadHeaderTimeout: 5 * time.Second,
 		TLSConfig:         &tls.Config{MinVersion: tls.VersionTLS12, Certificates: cfg.Certificates},
 	}

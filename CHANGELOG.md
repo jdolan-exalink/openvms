@@ -60,6 +60,7 @@ The version of OpenVMS lives in `VERSION` and the version of the edge agent in
 
 ### Changed
 
+- Agent 0.4.9: the TLS listener serves the ONVIF camera operations and provision-lpr/configure, so installed agents no longer read as outdated when configuring video
 - Agent 0.4.6: Enrich LPR vehicle attributes and preserve crops/snapshots
 - Agent 0.4.5: schema-only change: sqlc models gain camera_config_state. It also adds the ONVIF operations the camera editor needs behind a site: `POST /v1/onvif/video-device` (`profile_streams`, `video_options`, `set_video_encoder`), `POST /v1/onvif/reboot` and the PTZ actions `set_preset`, `remove_preset`, `goto_home`, `set_home`, `get_nodes` (scope `control`; credentials arrive in the request and are never logged or returned).
 - Agent 0.4.4: Rebuilt with the server delete purge queries; no change in agent behavior.

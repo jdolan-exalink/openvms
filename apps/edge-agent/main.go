@@ -246,7 +246,7 @@ func main() {
 	}()
 
 	if tlsEnabled {
-		tlsServer := newAgentTLSServer(tlsConfig, auth, healthHandler, discoveryHandler, probeHandler, lprReceiver, cameraWeb)
+		tlsServer := newAgentTLSServer(tlsConfig, auth, healthHandler, discoveryHandler, probeHandler, lprReceiver, cameraWeb, opsHandler)
 		log.Info("ONVIF TLS listener enabled", "addr", tlsServer.Addr)
 		if err := serveAgentServers(log, srv, tlsServer); err != nil && !errors.Is(err, http.ErrServerClosed) {
 			log.Error("agent listener stopped", "error", err)
@@ -390,32 +390,11 @@ func buildMuxWithAuth(auth *authenticator, variant string, sampler *agent.Sample
 	if probeHandler != nil {
 		mux.Handle("POST /v1/onvif/probe", auth.scoped(tokens.ScopeControl, probeHandler))
 	}
-	if opsHandler != nil {
-		control := func(h http.HandlerFunc) http.Handler { return auth.scoped(tokens.ScopeControl, h) }
-		mux.Handle("POST /v1/onvif/sync-time", control(opsHandler.HandleSyncTime))
-		mux.Handle("POST /v1/onvif/ptz", control(opsHandler.HandlePTZ))
-		mux.Handle("POST /v1/onvif/video-config", control(opsHandler.HandleVideoConfig))
-		mux.Handle("POST /v1/onvif/video-encoding", control(opsHandler.HandleVideoEncoding))
-		mux.Handle("POST /v1/onvif/video-device", control(opsHandler.HandleVideoDevice))
-		mux.Handle("POST /v1/onvif/reboot", control(opsHandler.HandleReboot))
-		mux.Handle("POST /v1/onvif/imaging", control(opsHandler.HandleImaging))
-		mux.Handle("POST /v1/onvif/snapshot", control(opsHandler.HandleSnapshot))
-		mux.Handle("POST /v1/onvif/pull-events", control(opsHandler.HandlePullEvents))
-	}
+	mountOnvifOps(mux, auth, opsHandler)
 	if lprHandler != nil {
 		mountProvisionLPR(mux, auth, lprHandler)
 	}
-	configurator := provisionlpr.NewConfigurator()
-	mux.Handle("POST /v1/provision-lpr/configure", auth.scoped(tokens.ScopeControl, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		var p provisionlpr.CameraConfigParams
-		if err := json.NewDecoder(r.Body).Decode(&p); err != nil {
-			http.Error(w, "invalid request body", http.StatusBadRequest)
-			return
-		}
-		res := configurator.Configure(r.Context(), p)
-		w.Header().Set("Content-Type", "application/json")
-		_ = json.NewEncoder(w).Encode(res)
-	})))
+	mountProvisionLPRConfigure(mux, auth)
 	return mux
 }
 
