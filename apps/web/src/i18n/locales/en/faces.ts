@@ -186,5 +186,6 @@ const messages = {
   unknownPartial: "{done} of {total} appearances were assigned; retry for the rest.",
   unknownMinAppearances: "Appearances to flag as recurrent",
   unknownWindowDays: "In the last (days)",
+  exportCsv: "Export CSV",
 } as const;
 export default messages;

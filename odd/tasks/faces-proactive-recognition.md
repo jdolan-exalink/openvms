@@ -28,7 +28,7 @@ PRs per slice, merge only on the user's word. Test runner: `go test ./internal/f
 - T2 (S2, S6) Backend: settings (recurrence rule, retention) and the purge of expired unnamed groups. Route: inline. Status: pending. Risk: item 1 (deletes stored data).
 - T3 (S3, S4) Web data layer: the live feed and the history merge `recognitions` (known) with `review-inbox` (unknown sightings) and refetch on an interval; no new endpoint. Route: inline. Status: done (lib/faceFeed.ts, 5 tests).
 - T4 (S2, S4, S5) Web: Faces page with the new tabs En vivo and Desconocidos. Route: inline. Status: done (LiveTab, UnknownsTab, lib/faceClusters.ts; the page opens on En vivo; full web suite 2386 tests green).
-- T5 (S3, S1) Web: Personas detail, Historial, CSV, Reglas y ajustes. Route: inline. Status: pending.
+- T5 (S3, S1) Web: Personas detail, Historial, CSV, Reglas y ajustes. Route: inline. Status: partial. Done: CSV export of the recognition history (lib/faceExport.ts, formula-safe). Already existing and kept: per-person recent recognitions in the detail, per-server detection/recognition/unknown thresholds in Config. Pending: persisted recurrence rule (needs T2).
 - T6 Docs, tests and PRs. Route: inline. Status: pending.
 
 ## Log

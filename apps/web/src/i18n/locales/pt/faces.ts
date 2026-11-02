@@ -186,5 +186,6 @@ const messages = {
   unknownPartial: "{done} de {total} aparições foram atribuídas; tente de novo para o resto.",
   unknownMinAppearances: "Aparições para marcar como recorrente",
   unknownWindowDays: "Nos últimos (dias)",
+  exportCsv: "Exportar CSV",
 } as const;
 export default messages;
