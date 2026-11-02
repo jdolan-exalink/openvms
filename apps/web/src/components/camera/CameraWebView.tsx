@@ -1,4 +1,4 @@
-import { useMutation } from "@tanstack/react-query";
+import { useMutation, useQuery } from "@tanstack/react-query";
 import { Check, Copy, Eye, EyeOff } from "lucide-react";
 import { useEffect, useState } from "react";
 import { api, ApiError, unwrap } from "@/api/client";
@@ -14,11 +14,41 @@ const PRESETS: { value: string; label: string; scheme: Scheme; port: number }[] 
 ];
 
 /**
- * The iframe sandbox. It must never include allow-same-origin: the camera page is an arbitrary
- * device web app and, without that flag, it runs in an opaque origin and cannot act as OpenVMS.
- * The server enforces the same with a CSP sandbox header on every proxied response.
+ * The iframe sandbox. The camera page is an arbitrary device web app, so by default it runs in an opaque
+ * origin (no allow-same-origin) and cannot act as OpenVMS. The server enforces the same with a CSP
+ * sandbox header on every proxied response.
  */
 export const CAMERA_WEB_SANDBOX = "allow-scripts allow-forms allow-popups allow-modals";
+
+/**
+ * Used only when the camera page is served from its own origin (another port of this host, see
+ * cameraWebOrigin): its frames then keep that origin and can reach one another like in a normal tab,
+ * while the browser still keeps them apart from this application.
+ */
+export const CAMERA_WEB_SANDBOX_OWN_ORIGIN = `${CAMERA_WEB_SANDBOX} allow-same-origin`;
+
+/** Port of the dedicated camera web origin that the web server announces, or null when it has none. */
+async function fetchCameraOriginPort(): Promise<number | null> {
+  try {
+    const res = await fetch(new Request(new URL("/.well-known/openvms-camweb-port", location.origin), { cache: "no-store" }));
+    if (!res.ok) return null;
+    const port = Number((await res.text()).trim());
+    return Number.isInteger(port) && port > 0 && port < 65536 ? port : null;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * The camera web origin: this very host (never a hard-coded name) on the announced port. Null, meaning
+ * "stay on this origin with the opaque sandbox", when there is no such port, the app is not on HTTPS, or
+ * the port is the app's own.
+ */
+export function cameraWebOrigin(port: number | null, loc: Pick<Location, "protocol" | "hostname" | "port"> = location): string | null {
+  if (!port || loc.protocol !== "https:" || String(port) === (loc.port || "443")) return null;
+  const host = loc.hostname.includes(":") ? `[${loc.hostname}]` : loc.hostname;
+  return `https://${host}:${port}`;
+}
 
 export function cameraWebErrorMessage(err: unknown): string {
   if (err instanceof ApiError) {
@@ -41,6 +71,8 @@ export function cameraWebErrorMessage(err: unknown): string {
 
 /** CameraWebView shows the camera's own web interface, reached through the edge agent. */
 export function CameraWebView({ cameraId, autoOpen = false }: { cameraId: string; autoOpen?: boolean }) {
+  const originPort = useQuery({ queryKey: ["camweb-origin-port"], queryFn: fetchCameraOriginPort, staleTime: Infinity, retry: false });
+  const origin = cameraWebOrigin(originPort.data ?? null);
   const [preset, setPreset] = useState("http:80");
   const [customScheme, setCustomScheme] = useState<Scheme>("http");
   const [customPort, setCustomPort] = useState("");
@@ -114,11 +146,12 @@ export function CameraWebView({ cameraId, autoOpen = false }: { cameraId: string
     }
   };
 
+  const { mutate: openMutate, isIdle: openIdle } = open;
   useEffect(() => {
-    if (autoOpen && open.isIdle) {
-      open.mutate();
+    if (autoOpen && openIdle) {
+      openMutate();
     }
-  }, [autoOpen, open.isIdle]);
+  }, [autoOpen, openIdle, openMutate]);
 
   return (
     <section aria-label="Web de la cámara" className="grid gap-3">
@@ -161,14 +194,14 @@ export function CameraWebView({ cameraId, autoOpen = false }: { cameraId: string
         </p>
       )}
 
-      {open.data && !open.isPending && (
+      {open.data && !open.isPending && !originPort.isPending && (
         <div className="grid gap-2">
           <div className="flex flex-wrap items-center justify-between gap-3 text-sm">
             <div className="flex items-center gap-3">
               <Button type="button" variant="tonal" onClick={() => setReloadKey((k) => k + 1)}>
                 Recargar
               </Button>
-              <a className="underline" href={open.data.url} target="_blank" rel="noopener noreferrer">
+              <a className="underline" href={(origin ?? "") + open.data.url} target="_blank" rel="noopener noreferrer">
                 Abrir en otra pestaña
               </a>
             </div>
@@ -273,8 +306,8 @@ export function CameraWebView({ cameraId, autoOpen = false }: { cameraId: string
           <iframe
             key={reloadKey}
             title="Web de la cámara"
-            src={open.data.url}
-            sandbox={CAMERA_WEB_SANDBOX}
+            src={(origin ?? "") + open.data.url}
+            sandbox={origin ? CAMERA_WEB_SANDBOX_OWN_ORIGIN : CAMERA_WEB_SANDBOX}
             referrerPolicy="no-referrer"
             className="h-[70vh] w-full rounded-m3-lg border border-outline bg-white"
           />

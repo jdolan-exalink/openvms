@@ -51,6 +51,10 @@ func (f cameraWebForwarder) Forward(ctx context.Context, actor authz.Actor, serv
 	return f.p.CameraWebForward(ctx, actor, serverID, method, header, body)
 }
 
+func (f cameraWebForwarder) Tunnel(ctx context.Context, actor authz.Actor, serverID uuid.UUID, header http.Header) (io.ReadWriteCloser, error) {
+	return f.p.CameraWebTunnel(ctx, actor, serverID, header)
+}
+
 func (h *Handlers) CreateCameraWebSession(ctx context.Context, r gen.CreateCameraWebSessionRequestObject) (gen.CreateCameraWebSessionResponseObject, error) {
 	a, err := actor(ctx)
 	if err != nil {
@@ -86,6 +90,17 @@ func (h *Handlers) CreateCameraWebSession(ctx context.Context, r gen.CreateCamer
 			if user == "" && info.Username != "" {
 				user = info.Username
 				pass = info.Password
+			}
+		}
+	}
+	// An NVR's channels carry no address of their own: open the recorder's web UI instead, so
+	// viewing any "Cámara IP NN" shows the NVR itself (its base_url host). Applies only to
+	// provision_nvr servers — a Frigate server's host is the recorder, not a camera, so it must
+	// not become a camera's web target.
+	if host == "" {
+		if srv, serr := h.Inv.GetServer(ctx, a, cam.ServerID); serr == nil && srv.Kind == inventory.KindProvisionNVR {
+			if u, perr := url.Parse(srv.BaseUrl); perr == nil {
+				host = u.Hostname()
 			}
 		}
 	}
