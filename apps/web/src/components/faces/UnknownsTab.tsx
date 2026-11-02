@@ -3,6 +3,7 @@ import { useMemo, useState } from "react";
 import { type Schemas } from "@/api/client";
 import { facePersonsQuery, faceReviewSightingImageUrl, faceUnknownClustersQuery } from "@/api/queries";
 import { ConfirmDialog } from "@/components/ConfirmDialog";
+import { FaceZoom } from "@/components/faces/FaceZoom";
 import { emptyScope, type Scope, ScopeFilters } from "@/components/faces/ScopeFilters";
 import { Button, Checkbox, Empty, ErrorNote, Field, Pill, Select, TextInput } from "@/components/ui";
 import { useT } from "@/i18n";
@@ -61,11 +62,11 @@ function ClusterCard({ cluster, persons, canManage, selected, onToggle }: {
   return (
     <li className={cn("flex flex-col gap-3 rounded-m3-xl bg-surface-1 p-3", cluster.recurrent && "border-l-4 border-warn", selected && "ring-2 ring-primary")}>
       {onToggle && <Checkbox checked={selected ?? false} onChange={onToggle} label={t("faces.unknownSelectGroup")} />}
-      <img
+      <FaceZoom
         src={faceReviewSightingImageUrl(cluster.best_sighting_id)}
         alt={t("faces.unknownCoverAlt", { server: cluster.server_names[0] ?? "" })}
-        loading="lazy"
-        className="aspect-square w-full rounded-m3-lg bg-surface-2 object-cover"
+        title={t("faces.unknownSightings", { count: cluster.sighting_count })}
+        className="aspect-square w-full rounded-m3-lg"
       />
       <div className="flex flex-wrap items-center gap-2">
         <Pill tone="neutral">{t("faces.unknownSightings", { count: cluster.sighting_count })}</Pill>

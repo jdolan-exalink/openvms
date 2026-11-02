@@ -182,6 +182,7 @@ const messages = {
   unknownDismiss: "Descartar",
   unknownDismissTitle: "Descartar este grupo?",
   unknownDismissBody: "As fotos de {count} aparições são apagadas. Não dá para desfazer.",
+  zoomOpen: "Ampliar foto: {title}",
   unknownSelect: "Selecionar",
   unknownSelectDone: "Concluir",
   unknownSelectAll: "Selecionar tudo",

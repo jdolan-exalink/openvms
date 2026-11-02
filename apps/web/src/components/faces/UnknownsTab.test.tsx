@@ -126,6 +126,16 @@ describe("Unknown faces", () => {
     expect(calls.some((c) => c.method === "DELETE")).toBe(false);
   });
 
+  it("enlarges the group's photo in a dialog and closes it", async () => {
+    install([cluster()]);
+    await openUnknowns();
+    fireEvent.click(await screen.findByRole("button", { name: "Ampliar foto: 3 apariciones" }));
+    const dialog = screen.getByRole("dialog");
+    expect(within(dialog).getByRole("img")).toHaveAttribute("src", `/api/v1/faces/review-inbox/${ids[1]}/image`);
+    fireEvent.click(within(dialog).getByRole("button", { name: "Cerrar" }));
+    expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
+  });
+
   it("sends the recurrence rule the operator typed", async () => {
     const calls = install([cluster()]);
     await openUnknowns();

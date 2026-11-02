@@ -182,6 +182,7 @@ const messages = {
   unknownDismiss: "Dismiss",
   unknownDismissTitle: "Dismiss this group?",
   unknownDismissBody: "The photos of {count} appearances are deleted. This cannot be undone.",
+  zoomOpen: "Enlarge photo: {title}",
   unknownSelect: "Select",
   unknownSelectDone: "Done",
   unknownSelectAll: "Select all",
