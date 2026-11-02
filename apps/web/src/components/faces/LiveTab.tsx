@@ -1,6 +1,7 @@
 import { useInfiniteQuery, useQuery } from "@tanstack/react-query";
 import { useMemo, useState } from "react";
 import { faceRecognitionsQuery, faceReviewInboxQuery } from "@/api/queries";
+import { FaceZoom } from "@/components/faces/FaceZoom";
 import { emptyScope, type Scope, ScopeFilters } from "@/components/faces/ScopeFilters";
 import { Button, Empty, ErrorNote, LinkButton, Pill } from "@/components/ui";
 import { useT } from "@/i18n";
@@ -21,7 +22,7 @@ function FeedRow({ item }: { item: FeedItem }) {
   return (
     <li className={cn("flex gap-3 rounded-m3-xl border-l-4 bg-surface-1 p-3", known ? "border-ok" : "border-warn")}>
       {item.thumb ? (
-        <img src={item.thumb} alt="" loading="lazy" className="size-16 shrink-0 rounded-m3-lg bg-surface-2 object-cover" />
+        <FaceZoom src={item.thumb} alt="" title={known ? item.name : t("faces.liveUnknownGroup")} className="size-16 shrink-0 rounded-m3-lg" />
       ) : (
         <div className="size-16 shrink-0 rounded-m3-lg bg-surface-2" aria-hidden />
       )}

@@ -38,6 +38,14 @@ describe("Live faces", () => {
     expect(calls.some((c) => c.path === "/api/v1/faces/recognitions")).toBe(true);
   });
 
+  it("enlarges a face from the timeline", async () => {
+    install();
+    renderPage(Faces);
+    fireEvent.click(await screen.findByRole("button", { name: "Ampliar foto: Marcos Díaz" }));
+    const dialog = screen.getByRole("dialog", { name: "Marcos Díaz" });
+    expect(dialog.querySelector("img")).toHaveAttribute("src", "/api/v1/events/e1/thumbnail");
+  });
+
   it("filters by state", async () => {
     install();
     renderPage(Faces);
