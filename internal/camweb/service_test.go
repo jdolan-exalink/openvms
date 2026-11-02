@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"log/slog"
 	"net"
 	"net/http"
 	"net/http/httptest"
@@ -1248,5 +1249,38 @@ func TestWebSocketHandshakeUsesBrowserHeaderSpelling(t *testing.T) {
 		}
 	case <-time.After(3 * time.Second):
 		t.Fatal("camera never received a handshake")
+	}
+}
+
+// When a camera refuses a change the operator needs to know why: the log carries the camera's own
+// error code (and the camera-side path), and the browser still gets the camera's answer unchanged.
+func TestRejectedCameraWriteIsLoggedWithItsErrorCode(t *testing.T) {
+	var logs strings.Builder
+	prev := slog.Default()
+	slog.SetDefault(slog.New(slog.NewTextHandler(&logs, nil)))
+	t.Cleanup(func() { slog.SetDefault(prev) })
+
+	e := newEnv(t, Config{})
+	e.cam.HandleFunc("/SetHttpPostConfig", func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Content-Type", "text/xml")
+		w.WriteHeader(http.StatusForbidden)
+		_, _ = io.WriteString(w, `<config status="failed" errorCode ="PermissionDenied"><secret>do-not-log</secret></config>`)
+	})
+	prefix := e.open()
+	rec := e.do(http.MethodPost, prefix, "/SetHttpPostConfig", strings.NewReader("<config/>"))
+	if rec.Code != http.StatusForbidden || !strings.Contains(rec.Body.String(), "PermissionDenied") {
+		t.Fatalf("the camera's answer must reach the browser unchanged: %d %s", rec.Code, rec.Body.String())
+	}
+	got := logs.String()
+	for _, want := range []string{"camera rejected a request", "camera_path=/SetHttpPostConfig", "status=403", "error_code=PermissionDenied"} {
+		if !strings.Contains(got, want) {
+			t.Errorf("log missing %q:\n%s", want, got)
+		}
+	}
+	if strings.Contains(got, "do-not-log") || strings.Contains(got, prefix) {
+		t.Errorf("the log must not carry the camera's body or the session id:\n%s", got)
+	}
+	if rec2 := e.get(prefix, "/nothing-here"); rec2.Code == http.StatusOK || strings.Count(logs.String(), "camera rejected a request") != 1 {
+		t.Errorf("only refused writes are logged")
 	}
 }
