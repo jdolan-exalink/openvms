@@ -75,7 +75,7 @@ func TestCameraWebAnswersOnTheTLSMux(t *testing.T) {
 		t.Fatal(err)
 	}
 	proxy := camproxy.New(camproxy.Config{BlockedPorts: ownListenPorts("0.0.0.0:7419", "")})
-	mux := buildTLSMux(&authenticator{secret: "legacy-secret", tokens: store}, nil, nil, nil, nil, proxy)
+	mux := buildTLSMux(&authenticator{secret: "legacy-secret", tokens: store}, nil, nil, nil, nil, proxy, nil)
 	const blocked = "http://127.0.0.1:80" // refused by the proxy itself, so no upstream is needed
 	if got := callCameraWeb(mux, "", blocked); got != http.StatusUnauthorized {
 		t.Errorf("no token = %d, want 401", got)
