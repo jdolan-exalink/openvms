@@ -136,6 +136,8 @@ services:
       # Plays the cameras of Provision-ISR recorders (docs/integrations/provision-isr.md). Empty
       # leaves recorder video unavailable.
       GO2RTC_URL: ${GO2RTC_URL:-http://go2rtc:1984}
+      # The data volume the retention page reports; the worker measures the same path.
+      RETENTION_VOLUME_PATH: /mnt/openvms/exports
     volumes:
       - /proc:/host/proc:ro
       - /sys/class/drm:/host/drm:ro
