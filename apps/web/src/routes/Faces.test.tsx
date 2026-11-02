@@ -1,7 +1,7 @@
-import { fireEvent, screen, waitFor, within } from "@testing-library/react";
+import { cleanup, fireEvent, screen, waitFor, within } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import type { Schemas } from "@/api/client";
-import { json, renderPage } from "@/test-utils";
+import { json, renderPage as renderPageBase } from "@/test-utils";
 import { Faces } from "./Faces";
 
 afterEach(() => vi.unstubAllGlobals());
@@ -99,6 +99,12 @@ function install(over: Partial<Backend> = {}) {
     }),
   );
   return { calls, b };
+}
+
+/** The page opens on the live tab; most of these tests are about the people registry. */
+function renderPage(page: Parameters<typeof renderPageBase>[0]) {
+  renderPageBase(page);
+  void screen.findAllByRole("tab", { name: "Personas" }).then((tabs) => fireEvent.click(tabs[tabs.length - 1]!));
 }
 
 const rec = (id: string, who: string, cam: string, personId = "p1"): Schemas["FaceRecognition"] => ({
@@ -232,6 +238,7 @@ describe("Faces page", () => {
     install({ persons: [] });
     renderPage(Faces);
     expect(await screen.findByText(/Todavía no hay personas registradas/)).toBeInTheDocument();
+    cleanup();
     install({ persons: [person("p1", "Ana", { sync: sync({ total: 2, synced: 0, disabled: 2 }) })] });
     renderPage(Faces);
     expect(await screen.findByText(/Ningún servidor tiene activado el reconocimiento facial: las personas se guardan aquí/)).toBeInTheDocument();
@@ -448,7 +455,8 @@ describe("Faces page", () => {
       fireEvent.click(await screen.findByRole("tab", { name: "Reconocimientos" }));
       const list = await screen.findByRole("list", { name: "Reconocimientos recientes" });
       expect(within(list).getByText("Ana")).toBeInTheDocument();
-      const first = recCalls(calls)[0]!;
+      // The live tab asks for recognitions too (no date range); the search tab is the one that sends one.
+      const first = recCalls(calls).find((c) => c.search.has("from"))!;
       expect(first.search.get("from")).toBeTruthy();
       expect(first.search.get("to")).toBeTruthy();
       expect(first.search.has("tenant_id")).toBe(false);

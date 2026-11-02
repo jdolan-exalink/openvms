@@ -26,8 +26,8 @@ PRs per slice, merge only on the user's word. Test runner: `go test ./internal/f
 ## Tasks
 - T1 (S2) Backend: automatic unknown groups (cluster proposals from embeddings) and recurrence, no schema change. Route: inline. Status: done (clusters.go, unknown_clusters.go, GET /faces/review-inbox/clusters; unit tests green, API tests green).
 - T2 (S2, S6) Backend: settings (recurrence rule, retention) and the purge of expired unnamed groups. Route: inline. Status: pending. Risk: item 1 (deletes stored data).
-- T3 (S3, S4) Backend: appearance history including unknowns and a live feed. Route: inline. Status: pending.
-- T4 (S2, S4, S5) Web: Faces page with the new tabs En vivo and Desconocidos. Route: inline. Status: pending.
+- T3 (S3, S4) Web data layer: the live feed and the history merge `recognitions` (known) with `review-inbox` (unknown sightings) and refetch on an interval; no new endpoint. Route: inline. Status: done (lib/faceFeed.ts, 5 tests).
+- T4 (S2, S4, S5) Web: Faces page with the new tabs En vivo and Desconocidos. Route: inline. Status: done (LiveTab, UnknownsTab, lib/faceClusters.ts; the page opens on En vivo; full web suite 2386 tests green).
 - T5 (S3, S1) Web: Personas detail, Historial, CSV, Reglas y ajustes. Route: inline. Status: pending.
 - T6 Docs, tests and PRs. Route: inline. Status: pending.
 
@@ -35,3 +35,4 @@ PRs per slice, merge only on the user's word. Test runner: `go test ./internal/f
 - L1 (2026-11-02, user): "quiero que trabajemosn el reconocimiento facial para que sea mas proactiva, detecte mas y tengamos mejor manejo de desconocidos, vamos a investigar como lo hace NX witness para tomar como ejemplo y quiero que armes una demom de la nuueva pagina de faces asi la veo antes, la idea es que el rreconocimiento facial trabaje mas parecido a matriculas donde podamnos ir armando una base de caras pero que tambien tengamos una vista mas en vivo y analiza que tendencias hay parra el reconocimiento facial"
 - L2 (2026-11-02, user, after seeing the demo): "me encanta, vamos con todo"
 - L3 (2026-11-02, mapping): today unknowns are `face_sightings` rows (`review_status='pending'`) with a retained crop; grouping is manual (`face_identity_groups`, `GroupReviewSightings`); suggestions compare pending identities at a fixed 0.50 cosine (`internal/faces/suggest.go`); the recognitions history only lists events carrying a person name; there is no live tab; thresholds (`DetectionThreshold`, `RecognitionThreshold`, `UnknownScore`) are per-server Frigate settings in `internal/inventory/face_config.go`.
+- L4 (2026-11-02, decision): T3 changed from a new backend endpoint to a web-side merge of two existing endpoints; unknown sightings carry no camera (server and time only), so the history shows the server for them. Reason: smaller and reversible, and the same pattern the Live "Tótem Rostros" channel already uses.
