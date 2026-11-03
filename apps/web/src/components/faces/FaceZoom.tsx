@@ -5,7 +5,8 @@ import { cn } from "@/lib/cn";
 
 /**
  * FaceZoom renders a face crop as a button that opens the same crop enlarged in a dialog. The crop is
- * the only image stored for a sighting, so enlarging it is a display change, not another request.
+ * the only image stored for a sighting, so enlarging it is a display change, not another request. Crops are
+ * tiny (about 40 px), so the dialog image fills the dialog instead of showing at its natural size.
  */
 export function FaceZoom({ src, alt, title, className }: { src: string; alt: string; title: string; className?: string }) {
   const t = useT();
@@ -22,7 +23,7 @@ export function FaceZoom({ src, alt, title, className }: { src: string; alt: str
       </button>
       {open && (
         <Modal title={title} onClose={() => setOpen(false)} className="max-w-xl">
-          <img src={src} alt={alt} className="mx-auto max-h-[70vh] w-auto max-w-full rounded-m3-lg bg-surface-2 object-contain" />
+          <img src={src} alt={alt} className="h-[min(70vh,32rem)] w-full rounded-m3-lg bg-surface-2 object-contain" />
         </Modal>
       )}
     </>
