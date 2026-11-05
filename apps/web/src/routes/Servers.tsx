@@ -1,3 +1,4 @@
+import { ReceptionLed } from "@/components/provision/ReceptionLed";
 import { useT } from "@/i18n";
 import { agentInstallFailureText, agentUninstallFailureText, safeAgentVersion } from "@/lib/agentJobs/failureText";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
@@ -148,6 +149,7 @@ export function Servers() {
                 </div>
                 <div className="flex flex-col items-end gap-1">
                   <StatusBadge status={s.status} />
+                  <ReceptionLed reception={s.analytics_reception} />
                   {s.problems?.length ? (
                     <ul aria-label={t("servers.problemsLabel")} className="flex max-w-56 flex-col items-end gap-0.5 text-xs break-words text-warn">
                       {s.problems.map((problem) => (

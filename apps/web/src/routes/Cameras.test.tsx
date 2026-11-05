@@ -99,6 +99,29 @@ describe("Cameras", () => {
     expect(await screen.findAllByText("Helvecia")).not.toHaveLength(0);
   });
 
+  it("shows the analytics reception LED only on cameras that report Provision analytics", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(
+        stubApi({
+          "/api/v1/cameras": () =>
+            json({
+              items: [
+                camera("c1", "acceso_norte", { analytics_reception: { state: "receiving", last_event_at: "2026-11-05T10:00:00Z" } }),
+                camera("c2", "muelle"),
+              ],
+            }),
+          "/api/v1/sites": () => json({ items: [{ id: "s1", name: "Helvecia" }] }),
+          "/api/v1/servers": () => json({ items: [{ id: "srv1", name: "frigate-h01" }] }),
+        }),
+      ),
+    );
+    renderPage(Cameras);
+    expect(await screen.findByText("muelle")).toBeInTheDocument();
+    expect(screen.getAllByRole("status").filter((el) => el.hasAttribute("data-state"))).toHaveLength(1);
+    expect(screen.getByText("Analíticas: recibiendo")).toBeInTheDocument();
+  });
+
   it("explains an empty result", async () => {
     vi.stubGlobal("fetch", vi.fn(stubApi({ "/api/v1/cameras": () => json({ items: [] }) })));
     renderPage(Cameras);
