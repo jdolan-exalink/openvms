@@ -441,8 +441,9 @@ RETURNING id, (xmax = 0)`,
 				return fmt.Errorf("store agent event %s: %w", e.ID, err)
 			}
 			// The reception LED reads this; the latest of the times seen wins, so a replayed older event
-			// never moves it back.
-			if _, err := tx.Exec(ctx, `UPDATE cameras SET last_provision_event_at = greatest(coalesce(last_provision_event_at, $2), $2) WHERE id = $1`, cam, seen.UTC()); err != nil {
+			// never moves it back. The camera's own clock can be ahead, and a future time would pin the LED
+			// on "receiving" until that date, so the time is capped at central's now.
+			if _, err := tx.Exec(ctx, `UPDATE cameras SET last_provision_event_at = greatest(coalesce(last_provision_event_at, least($2, now())), least($2, now())) WHERE id = $1`, cam, seen.UTC()); err != nil {
 				return fmt.Errorf("record the reception time of agent event %s: %w", e.ID, err)
 			}
 			if isNew {
