@@ -937,7 +937,7 @@ func TestAgentIngestRecordsWhenTheCameraLastReportedAndNeverMovesItBack(t *testi
 	// A camera with its clock a month ahead must not pin the time in the future.
 	w.agent.add(w.camA.String(), "ZZ999ZZ", nil, time.Now().Add(30*24*time.Hour))
 	w.ing.IngestAll(ctx)
-	if at := lastReception(w.camA); at == nil || at.After(time.Now().Add(time.Minute)) {
-		t.Fatalf("a future-dated reading left the reception time at %v, want it capped at now", at)
+	if at := lastReception(w.camA); at == nil || at.After(time.Now().Add(time.Minute)) || at.Before(time.Now().Add(-time.Hour)) {
+		t.Fatalf("a future-dated reading left the reception time at %v, want it capped at about now (neither ahead of the clock nor ignored)", at)
 	}
 }
