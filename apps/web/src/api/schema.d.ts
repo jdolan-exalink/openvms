@@ -6787,6 +6787,11 @@ export interface components {
             camera_name: string;
             /** @description Review id inside the origin Frigate. */
             remote_id: string;
+            /**
+             * @description Which system made the detection: `provision` when the camera itself reported it through the edge agent, `frigate` when it comes from a Frigate review.
+             * @enum {string}
+             */
+            source?: "frigate" | "provision";
             severity: components["schemas"]["Severity"];
             labels: string[];
             /** @description On LPR-capable cameras, recognized plate text (empty without lpr.view). On other cameras, an ordinary event field (e.g. a recognized face name) visible under normal events.view. */

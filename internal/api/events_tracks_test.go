@@ -35,3 +35,21 @@ func TestToEventTracksNeverNil(t *testing.T) {
 		t.Fatal("Tracks must be an empty array, not null")
 	}
 }
+
+func TestToEventSourceFollowsTheOrigin(t *testing.T) {
+	cases := []struct {
+		name, remoteID, want string
+	}{
+		{"read by a Provision camera through the agent", "agent:7f3a", "provision"},
+		{"review of a Frigate server", "1699999999.123-abc", "frigate"},
+		{"no remote id", "", "frigate"},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			out := toEvent(events.Event{RemoteID: c.remoteID})
+			if out.Source == nil || string(*out.Source) != c.want {
+				t.Fatalf("source = %v, want %q", out.Source, c.want)
+			}
+		})
+	}
+}

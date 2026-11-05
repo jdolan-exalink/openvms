@@ -822,3 +822,20 @@ func NormalizeVehicleType(raw string) string {
 		return s
 	}
 }
+
+// Source names the system that made the detection behind an event.
+type Source string
+
+const (
+	SourceFrigate   Source = "frigate"
+	SourceProvision Source = "provision"
+)
+
+// SourceOf says who detected the event with the given remote id. Events a Provision camera reported
+// through the edge agent carry the agent prefix; everything else is a Frigate review.
+func SourceOf(remoteID string) Source {
+	if strings.HasPrefix(remoteID, agentReadPrefix) {
+		return SourceProvision
+	}
+	return SourceFrigate
+}

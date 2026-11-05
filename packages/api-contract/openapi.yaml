@@ -8397,6 +8397,12 @@ components:
         remote_id:
           type: string
           description: Review id inside the origin Frigate.
+        source:
+          type: string
+          enum: [frigate, provision]
+          description: >-
+            Which system made the detection: `provision` when the camera itself reported it through
+            the edge agent, `frigate` when it comes from a Frigate review.
         severity: { $ref: "#/components/schemas/Severity" }
         labels: { type: array, items: { type: string } }
         sub_labels:

@@ -6,6 +6,7 @@ const messages = {
   alertsOnly: "Alerts only",
   detectionsOnly: "Detections only",
   unreviewed: "Unreviewed",
+  detectedByProvision: "Detected by Provision",
   withSnapshot: "With snapshot",
   withPreview: "With preview",
   selectAll: "Select all",

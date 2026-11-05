@@ -260,6 +260,7 @@ export function Events() {
                   <span className={cn("rounded-full px-2.5 py-0.5 font-mono text-[10px] uppercase", e.severity === "alert" ? "bg-bad/20 text-bad" : "bg-surface-3 text-on-surface-variant")}>
                     {e.severity === "alert" ? t("events.alert") : t("events.detection")}
                   </span>
+                  {e.source === "provision" && <ProvisionChip />}
                   <ReviewBadge reviewed={e.reviewed} />
                 </div>
                 <VehicleFacts labels={e.labels} vehicle={e.attributes?.vehicle} person={e.attributes?.person} serverName={e.server_name} cameraName={e.camera_name} vehicleJob={e.attributes?.vehicle_job} personJob={e.attributes?.person_job} />
@@ -315,6 +316,12 @@ function BulkReview({ selectedIds, onClearSelection }: { selectedIds: string[]; 
       {done && <span role="status" className="text-xs text-ok">{done}</span>}
     </>
   );
+}
+
+/** ProvisionChip says in text that the camera's own analytics made the detection. */
+function ProvisionChip() {
+  const t = useT();
+  return <span className="shrink-0 rounded-full border border-amber-500/30 bg-amber-500/10 px-2 py-0.5 text-[10px] font-semibold text-amber-600 dark:text-amber-300">{t("events.detectedByProvision")}</span>;
 }
 
 /** ReviewBadge states the review status in text so it never depends on color alone. */

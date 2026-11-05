@@ -266,6 +266,21 @@ describe("Events", () => {
     expect(card).toHaveTextContent("Sin revisar");
   });
 
+  it("says in text that Provision made the detection, and says nothing for a Frigate event", async () => {
+    const items = [makeEvent("e1", { source: "provision", remote_id: "agent:e1" }), makeEvent("e2", { source: "frigate", camera_name: "Camera Two" })];
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (input: Request) => {
+        const url = new URL(input.url);
+        if (url.pathname === "/api/v1/events" && input.method === "GET") return json({ items });
+        return stubApi({ "/api/v1/me": () => meResponse("events.search"), ...noCatalogs })(input);
+      }),
+    );
+    renderPage(Events);
+    expect(await screen.findByRole("button", { name: /Camera One/ })).toHaveTextContent("Detectado por Provision");
+    expect(screen.getByRole("button", { name: /Camera Two/ })).not.toHaveTextContent("Detectado por Provision");
+  });
+
   it("opens the detail as a dialog that closes with Escape and restores focus to the card", async () => {
     stubEventsApi(["events.search"], makeEvent("e1"));
     renderPage(Events);
