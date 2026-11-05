@@ -338,7 +338,7 @@ func (q *Queries) DeleteCameraTombstone(ctx context.Context, cameraID uuid.UUID)
 }
 
 const getCamera = `-- name: GetCamera :one
-SELECT c.id, c.tenant_id, c.site_id, c.server_id, c.remote_name, c.display_name, c.enabled, c.zones, c.lpr, c.live_stream, c.hq_stream, c.status, c.fps, c.missing_since, c.created_at, c.updated_at, c.deleted_at, c.deleted_by, c.default_live_quality, c.description, c.location, c.tags, c.folder_id, c.sort_order, c.onvif_endpoint, c.onvif_profile, c.onvif_version, c.onvif_capabilities, c.live_codec, c.hq_codec,
+SELECT c.id, c.tenant_id, c.site_id, c.server_id, c.remote_name, c.display_name, c.enabled, c.zones, c.lpr, c.live_stream, c.hq_stream, c.status, c.fps, c.missing_since, c.created_at, c.updated_at, c.deleted_at, c.deleted_by, c.default_live_quality, c.description, c.location, c.tags, c.folder_id, c.sort_order, c.onvif_endpoint, c.onvif_profile, c.onvif_version, c.onvif_capabilities, c.live_codec, c.hq_codec, c.last_provision_event_at,
     coalesce((SELECT array_agg(m.group_id ORDER BY m.group_id) FROM camera_group_members m
               JOIN camera_groups g ON g.id = m.group_id AND g.deleted_at IS NULL
               WHERE m.camera_id = c.id), '{}')::uuid[] AS group_ids
@@ -346,37 +346,38 @@ FROM cameras c WHERE c.id = $1 AND c.deleted_at IS NULL
 `
 
 type GetCameraRow struct {
-	ID                 uuid.UUID
-	TenantID           uuid.UUID
-	SiteID             uuid.UUID
-	ServerID           uuid.UUID
-	RemoteName         string
-	DisplayName        string
-	Enabled            bool
-	Zones              []string
-	Lpr                bool
-	LiveStream         string
-	HqStream           string
-	Status             string
-	Fps                *float32
-	MissingSince       *time.Time
-	CreatedAt          time.Time
-	UpdatedAt          time.Time
-	DeletedAt          *time.Time
-	DeletedBy          *uuid.UUID
-	DefaultLiveQuality string
-	Description        string
-	Location           string
-	Tags               []string
-	FolderID           *uuid.UUID
-	SortOrder          int32
-	OnvifEndpoint      *string
-	OnvifProfile       *string
-	OnvifVersion       *string
-	OnvifCapabilities  json.RawMessage
-	LiveCodec          string
-	HqCodec            string
-	GroupIds           []uuid.UUID
+	ID                   uuid.UUID
+	TenantID             uuid.UUID
+	SiteID               uuid.UUID
+	ServerID             uuid.UUID
+	RemoteName           string
+	DisplayName          string
+	Enabled              bool
+	Zones                []string
+	Lpr                  bool
+	LiveStream           string
+	HqStream             string
+	Status               string
+	Fps                  *float32
+	MissingSince         *time.Time
+	CreatedAt            time.Time
+	UpdatedAt            time.Time
+	DeletedAt            *time.Time
+	DeletedBy            *uuid.UUID
+	DefaultLiveQuality   string
+	Description          string
+	Location             string
+	Tags                 []string
+	FolderID             *uuid.UUID
+	SortOrder            int32
+	OnvifEndpoint        *string
+	OnvifProfile         *string
+	OnvifVersion         *string
+	OnvifCapabilities    json.RawMessage
+	LiveCodec            string
+	HqCodec              string
+	LastProvisionEventAt *time.Time
+	GroupIds             []uuid.UUID
 }
 
 func (q *Queries) GetCamera(ctx context.Context, id uuid.UUID) (GetCameraRow, error) {
@@ -413,6 +414,7 @@ func (q *Queries) GetCamera(ctx context.Context, id uuid.UUID) (GetCameraRow, er
 		&i.OnvifCapabilities,
 		&i.LiveCodec,
 		&i.HqCodec,
+		&i.LastProvisionEventAt,
 		&i.GroupIds,
 	)
 	return i, err
@@ -497,7 +499,7 @@ func (q *Queries) GetCameraTombstone(ctx context.Context, cameraID uuid.UUID) (C
 }
 
 const getDeletedCamera = `-- name: GetDeletedCamera :one
-SELECT id, tenant_id, site_id, server_id, remote_name, display_name, enabled, zones, lpr, live_stream, hq_stream, status, fps, missing_since, created_at, updated_at, deleted_at, deleted_by, default_live_quality, description, location, tags, folder_id, sort_order, onvif_endpoint, onvif_profile, onvif_version, onvif_capabilities, live_codec, hq_codec FROM cameras WHERE id = $1 AND deleted_at IS NOT NULL
+SELECT id, tenant_id, site_id, server_id, remote_name, display_name, enabled, zones, lpr, live_stream, hq_stream, status, fps, missing_since, created_at, updated_at, deleted_at, deleted_by, default_live_quality, description, location, tags, folder_id, sort_order, onvif_endpoint, onvif_profile, onvif_version, onvif_capabilities, live_codec, hq_codec, last_provision_event_at FROM cameras WHERE id = $1 AND deleted_at IS NOT NULL
 `
 
 func (q *Queries) GetDeletedCamera(ctx context.Context, id uuid.UUID) (Camera, error) {
@@ -534,6 +536,7 @@ func (q *Queries) GetDeletedCamera(ctx context.Context, id uuid.UUID) (Camera, e
 		&i.OnvifCapabilities,
 		&i.LiveCodec,
 		&i.HqCodec,
+		&i.LastProvisionEventAt,
 	)
 	return i, err
 }
@@ -542,7 +545,9 @@ const getServer = `-- name: GetServer :one
 SELECT fs.id, fs.tenant_id, fs.site_id, fs.name, fs.base_url, fs.username, fs.password_sealed, fs.tls_skip_verify, fs.frigate_version, fs.capabilities, fs.status, fs.last_seen_at, fs.last_checked_at, fs.last_error, fs.stats, fs.created_at, fs.updated_at, fs.deleted_at, fs.deleted_by, fs.auth_mode, fs.event_alarm_mode, fs.kind,
     (SELECT count(*) FROM cameras c WHERE c.server_id = fs.id AND c.deleted_at IS NULL)::int AS camera_count,
     ah.last_seen_at AS agent_last_seen_at, ah.version AS agent_version, ah.status AS agent_status,
-    COALESCE(acx.expires, to_timestamp(0))::timestamptz AS agent_cert_expires_at
+    COALESCE(acx.expires, to_timestamp(0))::timestamptz AS agent_cert_expires_at,
+    COALESCE((SELECT max(c.last_provision_event_at) FROM cameras c WHERE c.server_id = fs.id AND c.deleted_at IS NULL), to_timestamp(0))::timestamptz AS last_provision_event_at,
+    coalesce((SELECT sc.last_error FROM server_agent_event_cursors sc WHERE sc.server_id = fs.id), '')::text AS provision_ingest_error
 FROM frigate_servers fs
 LEFT JOIN agent_heartbeats ah ON ah.server_id = fs.id
 LEFT JOIN (
@@ -555,33 +560,35 @@ WHERE fs.id = $1 AND fs.deleted_at IS NULL
 `
 
 type GetServerRow struct {
-	ID                 uuid.UUID
-	TenantID           uuid.UUID
-	SiteID             uuid.UUID
-	Name               string
-	BaseUrl            string
-	Username           string
-	PasswordSealed     []byte
-	TlsSkipVerify      bool
-	FrigateVersion     string
-	Capabilities       json.RawMessage
-	Status             string
-	LastSeenAt         *time.Time
-	LastCheckedAt      *time.Time
-	LastError          string
-	Stats              json.RawMessage
-	CreatedAt          time.Time
-	UpdatedAt          time.Time
-	DeletedAt          *time.Time
-	DeletedBy          *uuid.UUID
-	AuthMode           string
-	EventAlarmMode     string
-	Kind               string
-	CameraCount        int32
-	AgentLastSeenAt    *time.Time
-	AgentVersion       *string
-	AgentStatus        *string
-	AgentCertExpiresAt time.Time
+	ID                   uuid.UUID
+	TenantID             uuid.UUID
+	SiteID               uuid.UUID
+	Name                 string
+	BaseUrl              string
+	Username             string
+	PasswordSealed       []byte
+	TlsSkipVerify        bool
+	FrigateVersion       string
+	Capabilities         json.RawMessage
+	Status               string
+	LastSeenAt           *time.Time
+	LastCheckedAt        *time.Time
+	LastError            string
+	Stats                json.RawMessage
+	CreatedAt            time.Time
+	UpdatedAt            time.Time
+	DeletedAt            *time.Time
+	DeletedBy            *uuid.UUID
+	AuthMode             string
+	EventAlarmMode       string
+	Kind                 string
+	CameraCount          int32
+	AgentLastSeenAt      *time.Time
+	AgentVersion         *string
+	AgentStatus          *string
+	AgentCertExpiresAt   time.Time
+	LastProvisionEventAt time.Time
+	ProvisionIngestError string
 }
 
 func (q *Queries) GetServer(ctx context.Context, id uuid.UUID) (GetServerRow, error) {
@@ -615,6 +622,8 @@ func (q *Queries) GetServer(ctx context.Context, id uuid.UUID) (GetServerRow, er
 		&i.AgentVersion,
 		&i.AgentStatus,
 		&i.AgentCertExpiresAt,
+		&i.LastProvisionEventAt,
+		&i.ProvisionIngestError,
 	)
 	return i, err
 }
@@ -623,7 +632,9 @@ const getServerForUpdate = `-- name: GetServerForUpdate :one
 SELECT fs.id, fs.tenant_id, fs.site_id, fs.name, fs.base_url, fs.username, fs.password_sealed, fs.tls_skip_verify, fs.frigate_version, fs.capabilities, fs.status, fs.last_seen_at, fs.last_checked_at, fs.last_error, fs.stats, fs.created_at, fs.updated_at, fs.deleted_at, fs.deleted_by, fs.auth_mode, fs.event_alarm_mode, fs.kind,
     (SELECT count(*) FROM cameras c WHERE c.server_id = fs.id AND c.deleted_at IS NULL)::int AS camera_count,
     ah.last_seen_at AS agent_last_seen_at, ah.version AS agent_version, ah.status AS agent_status,
-    COALESCE(acx.expires, to_timestamp(0))::timestamptz AS agent_cert_expires_at
+    COALESCE(acx.expires, to_timestamp(0))::timestamptz AS agent_cert_expires_at,
+    COALESCE((SELECT max(c.last_provision_event_at) FROM cameras c WHERE c.server_id = fs.id AND c.deleted_at IS NULL), to_timestamp(0))::timestamptz AS last_provision_event_at,
+    coalesce((SELECT sc.last_error FROM server_agent_event_cursors sc WHERE sc.server_id = fs.id), '')::text AS provision_ingest_error
 FROM frigate_servers fs
 LEFT JOIN agent_heartbeats ah ON ah.server_id = fs.id
 LEFT JOIN (
@@ -637,33 +648,35 @@ FOR UPDATE OF fs
 `
 
 type GetServerForUpdateRow struct {
-	ID                 uuid.UUID
-	TenantID           uuid.UUID
-	SiteID             uuid.UUID
-	Name               string
-	BaseUrl            string
-	Username           string
-	PasswordSealed     []byte
-	TlsSkipVerify      bool
-	FrigateVersion     string
-	Capabilities       json.RawMessage
-	Status             string
-	LastSeenAt         *time.Time
-	LastCheckedAt      *time.Time
-	LastError          string
-	Stats              json.RawMessage
-	CreatedAt          time.Time
-	UpdatedAt          time.Time
-	DeletedAt          *time.Time
-	DeletedBy          *uuid.UUID
-	AuthMode           string
-	EventAlarmMode     string
-	Kind               string
-	CameraCount        int32
-	AgentLastSeenAt    *time.Time
-	AgentVersion       *string
-	AgentStatus        *string
-	AgentCertExpiresAt time.Time
+	ID                   uuid.UUID
+	TenantID             uuid.UUID
+	SiteID               uuid.UUID
+	Name                 string
+	BaseUrl              string
+	Username             string
+	PasswordSealed       []byte
+	TlsSkipVerify        bool
+	FrigateVersion       string
+	Capabilities         json.RawMessage
+	Status               string
+	LastSeenAt           *time.Time
+	LastCheckedAt        *time.Time
+	LastError            string
+	Stats                json.RawMessage
+	CreatedAt            time.Time
+	UpdatedAt            time.Time
+	DeletedAt            *time.Time
+	DeletedBy            *uuid.UUID
+	AuthMode             string
+	EventAlarmMode       string
+	Kind                 string
+	CameraCount          int32
+	AgentLastSeenAt      *time.Time
+	AgentVersion         *string
+	AgentStatus          *string
+	AgentCertExpiresAt   time.Time
+	LastProvisionEventAt time.Time
+	ProvisionIngestError string
 }
 
 func (q *Queries) GetServerForUpdate(ctx context.Context, id uuid.UUID) (GetServerForUpdateRow, error) {
@@ -697,6 +710,8 @@ func (q *Queries) GetServerForUpdate(ctx context.Context, id uuid.UUID) (GetServ
 		&i.AgentVersion,
 		&i.AgentStatus,
 		&i.AgentCertExpiresAt,
+		&i.LastProvisionEventAt,
+		&i.ProvisionIngestError,
 	)
 	return i, err
 }
@@ -1144,7 +1159,7 @@ func (q *Queries) ListCameraGroups(ctx context.Context, tenantID *uuid.UUID) ([]
 }
 
 const listCameras = `-- name: ListCameras :many
-SELECT c.id, c.tenant_id, c.site_id, c.server_id, c.remote_name, c.display_name, c.enabled, c.zones, c.lpr, c.live_stream, c.hq_stream, c.status, c.fps, c.missing_since, c.created_at, c.updated_at, c.deleted_at, c.deleted_by, c.default_live_quality, c.description, c.location, c.tags, c.folder_id, c.sort_order, c.onvif_endpoint, c.onvif_profile, c.onvif_version, c.onvif_capabilities, c.live_codec, c.hq_codec,
+SELECT c.id, c.tenant_id, c.site_id, c.server_id, c.remote_name, c.display_name, c.enabled, c.zones, c.lpr, c.live_stream, c.hq_stream, c.status, c.fps, c.missing_since, c.created_at, c.updated_at, c.deleted_at, c.deleted_by, c.default_live_quality, c.description, c.location, c.tags, c.folder_id, c.sort_order, c.onvif_endpoint, c.onvif_profile, c.onvif_version, c.onvif_capabilities, c.live_codec, c.hq_codec, c.last_provision_event_at,
     coalesce((SELECT array_agg(m.group_id ORDER BY m.group_id) FROM camera_group_members m
               JOIN camera_groups g ON g.id = m.group_id AND g.deleted_at IS NULL
               WHERE m.camera_id = c.id), '{}')::uuid[] AS group_ids
@@ -1170,37 +1185,38 @@ type ListCamerasParams struct {
 }
 
 type ListCamerasRow struct {
-	ID                 uuid.UUID
-	TenantID           uuid.UUID
-	SiteID             uuid.UUID
-	ServerID           uuid.UUID
-	RemoteName         string
-	DisplayName        string
-	Enabled            bool
-	Zones              []string
-	Lpr                bool
-	LiveStream         string
-	HqStream           string
-	Status             string
-	Fps                *float32
-	MissingSince       *time.Time
-	CreatedAt          time.Time
-	UpdatedAt          time.Time
-	DeletedAt          *time.Time
-	DeletedBy          *uuid.UUID
-	DefaultLiveQuality string
-	Description        string
-	Location           string
-	Tags               []string
-	FolderID           *uuid.UUID
-	SortOrder          int32
-	OnvifEndpoint      *string
-	OnvifProfile       *string
-	OnvifVersion       *string
-	OnvifCapabilities  json.RawMessage
-	LiveCodec          string
-	HqCodec            string
-	GroupIds           []uuid.UUID
+	ID                   uuid.UUID
+	TenantID             uuid.UUID
+	SiteID               uuid.UUID
+	ServerID             uuid.UUID
+	RemoteName           string
+	DisplayName          string
+	Enabled              bool
+	Zones                []string
+	Lpr                  bool
+	LiveStream           string
+	HqStream             string
+	Status               string
+	Fps                  *float32
+	MissingSince         *time.Time
+	CreatedAt            time.Time
+	UpdatedAt            time.Time
+	DeletedAt            *time.Time
+	DeletedBy            *uuid.UUID
+	DefaultLiveQuality   string
+	Description          string
+	Location             string
+	Tags                 []string
+	FolderID             *uuid.UUID
+	SortOrder            int32
+	OnvifEndpoint        *string
+	OnvifProfile         *string
+	OnvifVersion         *string
+	OnvifCapabilities    json.RawMessage
+	LiveCodec            string
+	HqCodec              string
+	LastProvisionEventAt *time.Time
+	GroupIds             []uuid.UUID
 }
 
 func (q *Queries) ListCameras(ctx context.Context, arg ListCamerasParams) ([]ListCamerasRow, error) {
@@ -1249,6 +1265,7 @@ func (q *Queries) ListCameras(ctx context.Context, arg ListCamerasParams) ([]Lis
 			&i.OnvifCapabilities,
 			&i.LiveCodec,
 			&i.HqCodec,
+			&i.LastProvisionEventAt,
 			&i.GroupIds,
 		); err != nil {
 			return nil, err
@@ -1380,7 +1397,7 @@ func (q *Queries) ListServerBlobKeys(ctx context.Context, serverID uuid.UUID) ([
 }
 
 const listServerCameras = `-- name: ListServerCameras :many
-SELECT id, tenant_id, site_id, server_id, remote_name, display_name, enabled, zones, lpr, live_stream, hq_stream, status, fps, missing_since, created_at, updated_at, deleted_at, deleted_by, default_live_quality, description, location, tags, folder_id, sort_order, onvif_endpoint, onvif_profile, onvif_version, onvif_capabilities, live_codec, hq_codec FROM cameras WHERE server_id = $1 AND deleted_at IS NULL
+SELECT id, tenant_id, site_id, server_id, remote_name, display_name, enabled, zones, lpr, live_stream, hq_stream, status, fps, missing_since, created_at, updated_at, deleted_at, deleted_by, default_live_quality, description, location, tags, folder_id, sort_order, onvif_endpoint, onvif_profile, onvif_version, onvif_capabilities, live_codec, hq_codec, last_provision_event_at FROM cameras WHERE server_id = $1 AND deleted_at IS NULL
 `
 
 func (q *Queries) ListServerCameras(ctx context.Context, serverID uuid.UUID) ([]Camera, error) {
@@ -1423,6 +1440,7 @@ func (q *Queries) ListServerCameras(ctx context.Context, serverID uuid.UUID) ([]
 			&i.OnvifCapabilities,
 			&i.LiveCodec,
 			&i.HqCodec,
+			&i.LastProvisionEventAt,
 		); err != nil {
 			return nil, err
 		}
@@ -1438,7 +1456,9 @@ const listServers = `-- name: ListServers :many
 SELECT fs.id, fs.tenant_id, fs.site_id, fs.name, fs.base_url, fs.username, fs.password_sealed, fs.tls_skip_verify, fs.frigate_version, fs.capabilities, fs.status, fs.last_seen_at, fs.last_checked_at, fs.last_error, fs.stats, fs.created_at, fs.updated_at, fs.deleted_at, fs.deleted_by, fs.auth_mode, fs.event_alarm_mode, fs.kind,
     (SELECT count(*) FROM cameras c WHERE c.server_id = fs.id AND c.deleted_at IS NULL)::int AS camera_count,
     ah.last_seen_at AS agent_last_seen_at, ah.version AS agent_version, ah.status AS agent_status,
-    COALESCE(acx.expires, to_timestamp(0))::timestamptz AS agent_cert_expires_at
+    COALESCE(acx.expires, to_timestamp(0))::timestamptz AS agent_cert_expires_at,
+    COALESCE((SELECT max(c.last_provision_event_at) FROM cameras c WHERE c.server_id = fs.id AND c.deleted_at IS NULL), to_timestamp(0))::timestamptz AS last_provision_event_at,
+    coalesce((SELECT sc.last_error FROM server_agent_event_cursors sc WHERE sc.server_id = fs.id), '')::text AS provision_ingest_error
 FROM frigate_servers fs
 LEFT JOIN agent_heartbeats ah ON ah.server_id = fs.id
 LEFT JOIN (
@@ -1459,33 +1479,35 @@ type ListServersParams struct {
 }
 
 type ListServersRow struct {
-	ID                 uuid.UUID
-	TenantID           uuid.UUID
-	SiteID             uuid.UUID
-	Name               string
-	BaseUrl            string
-	Username           string
-	PasswordSealed     []byte
-	TlsSkipVerify      bool
-	FrigateVersion     string
-	Capabilities       json.RawMessage
-	Status             string
-	LastSeenAt         *time.Time
-	LastCheckedAt      *time.Time
-	LastError          string
-	Stats              json.RawMessage
-	CreatedAt          time.Time
-	UpdatedAt          time.Time
-	DeletedAt          *time.Time
-	DeletedBy          *uuid.UUID
-	AuthMode           string
-	EventAlarmMode     string
-	Kind               string
-	CameraCount        int32
-	AgentLastSeenAt    *time.Time
-	AgentVersion       *string
-	AgentStatus        *string
-	AgentCertExpiresAt time.Time
+	ID                   uuid.UUID
+	TenantID             uuid.UUID
+	SiteID               uuid.UUID
+	Name                 string
+	BaseUrl              string
+	Username             string
+	PasswordSealed       []byte
+	TlsSkipVerify        bool
+	FrigateVersion       string
+	Capabilities         json.RawMessage
+	Status               string
+	LastSeenAt           *time.Time
+	LastCheckedAt        *time.Time
+	LastError            string
+	Stats                json.RawMessage
+	CreatedAt            time.Time
+	UpdatedAt            time.Time
+	DeletedAt            *time.Time
+	DeletedBy            *uuid.UUID
+	AuthMode             string
+	EventAlarmMode       string
+	Kind                 string
+	CameraCount          int32
+	AgentLastSeenAt      *time.Time
+	AgentVersion         *string
+	AgentStatus          *string
+	AgentCertExpiresAt   time.Time
+	LastProvisionEventAt time.Time
+	ProvisionIngestError string
 }
 
 func (q *Queries) ListServers(ctx context.Context, arg ListServersParams) ([]ListServersRow, error) {
@@ -1525,6 +1547,8 @@ func (q *Queries) ListServers(ctx context.Context, arg ListServersParams) ([]Lis
 			&i.AgentVersion,
 			&i.AgentStatus,
 			&i.AgentCertExpiresAt,
+			&i.LastProvisionEventAt,
+			&i.ProvisionIngestError,
 		); err != nil {
 			return nil, err
 		}

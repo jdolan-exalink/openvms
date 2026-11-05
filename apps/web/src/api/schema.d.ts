@@ -4964,6 +4964,7 @@ export interface components {
          */
         ServerKind: "frigate" | "provision_nvr";
         Server: {
+            analytics_reception?: components["schemas"]["AnalyticsReception"];
             /** Format: uuid */
             id: string;
             kind: components["schemas"]["ServerKind"];
@@ -5715,7 +5716,18 @@ export interface components {
             /** @description True when the camera's Frigate block was kept, so restoring can put it back. */
             has_frigate_config: boolean;
         };
+        /** @description Whether the analytics a Provision camera or recorder reports are reaching central. `receiving`: one arrived in the last 24 hours. `idle`: none did. `down`: the last pull from the agent failed. */
+        AnalyticsReception: {
+            /** @enum {string} */
+            state: "receiving" | "idle" | "down";
+            /**
+             * Format: date-time
+             * @description When central last received an analytic. Null when none arrived since this was recorded.
+             */
+            last_event_at?: string | null;
+        };
         Camera: {
+            analytics_reception?: components["schemas"]["AnalyticsReception"];
             /** Format: uuid */
             id: string;
             /** Format: uuid */
@@ -6787,6 +6799,11 @@ export interface components {
             camera_name: string;
             /** @description Review id inside the origin Frigate. */
             remote_id: string;
+            /**
+             * @description Which system made the detection: `provision` when the camera itself reported it through the edge agent, `frigate` when it comes from a Frigate review.
+             * @enum {string}
+             */
+            source?: "frigate" | "provision";
             severity: components["schemas"]["Severity"];
             labels: string[];
             /** @description On LPR-capable cameras, recognized plate text (empty without lpr.view). On other cameras, an ordinary event field (e.g. a recognized face name) visible under normal events.view. */

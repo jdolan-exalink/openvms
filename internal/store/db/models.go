@@ -140,36 +140,37 @@ type BodyClassifyServer struct {
 }
 
 type Camera struct {
-	ID                 uuid.UUID
-	TenantID           uuid.UUID
-	SiteID             uuid.UUID
-	ServerID           uuid.UUID
-	RemoteName         string
-	DisplayName        string
-	Enabled            bool
-	Zones              []string
-	Lpr                bool
-	LiveStream         string
-	HqStream           string
-	Status             string
-	Fps                *float32
-	MissingSince       *time.Time
-	CreatedAt          time.Time
-	UpdatedAt          time.Time
-	DeletedAt          *time.Time
-	DeletedBy          *uuid.UUID
-	DefaultLiveQuality string
-	Description        string
-	Location           string
-	Tags               []string
-	FolderID           *uuid.UUID
-	SortOrder          int32
-	OnvifEndpoint      *string
-	OnvifProfile       *string
-	OnvifVersion       *string
-	OnvifCapabilities  json.RawMessage
-	LiveCodec          string
-	HqCodec            string
+	ID                   uuid.UUID
+	TenantID             uuid.UUID
+	SiteID               uuid.UUID
+	ServerID             uuid.UUID
+	RemoteName           string
+	DisplayName          string
+	Enabled              bool
+	Zones                []string
+	Lpr                  bool
+	LiveStream           string
+	HqStream             string
+	Status               string
+	Fps                  *float32
+	MissingSince         *time.Time
+	CreatedAt            time.Time
+	UpdatedAt            time.Time
+	DeletedAt            *time.Time
+	DeletedBy            *uuid.UUID
+	DefaultLiveQuality   string
+	Description          string
+	Location             string
+	Tags                 []string
+	FolderID             *uuid.UUID
+	SortOrder            int32
+	OnvifEndpoint        *string
+	OnvifProfile         *string
+	OnvifVersion         *string
+	OnvifCapabilities    json.RawMessage
+	LiveCodec            string
+	HqCodec              string
+	LastProvisionEventAt *time.Time
 }
 
 type CameraAnalyticsSetting struct {

@@ -1121,6 +1121,23 @@ describe("Servers", () => {
       expect(within(dialog).getByRole("tab", { name: "Canales a importar" })).toBeInTheDocument();
     });
 
+    it("shows whether a Provision recorder's analytics are arriving, and says so when its last pull failed", async () => {
+      vi.stubGlobal("fetch", vi.fn(stubApi({
+        "/api/v1/servers": () => json({ items: [
+          server("n", "nvr-feedlot", "s1", { kind: "provision_nvr", base_url: "http://192.168.1.50:80", analytics_reception: { state: "receiving", last_event_at: "2026-11-05T10:00:00Z" } }),
+          server("m", "nvr-puerto", "s1", { kind: "provision_nvr", base_url: "http://192.168.1.51:80", analytics_reception: { state: "down", last_event_at: null } }),
+          server("f", "frigate-h01", "s1"),
+        ] }),
+        "/api/v1/sites": () => json({ items: [{ id: "s1", name: "Helvecia" }] }),
+        "/api/v1/me": () => json(manager),
+      })));
+      renderPage(Servers);
+      const up = (await screen.findByText("nvr-feedlot")).closest("li")!;
+      expect(within(up).getByText("Analíticas: recibiendo")).toBeInTheDocument();
+      expect(within(screen.getByText("nvr-puerto").closest("li")!).getByText("Analíticas: sin conexión")).toBeInTheDocument();
+      expect(within(screen.getByText("frigate-h01").closest("li")!).queryByText(/Analíticas:/)).not.toBeInTheDocument();
+    });
+
     it("shows the minimum-version error when the probe rejects an unsupported Frigate", async () => {
       const message = "Frigate 0.16.1 is not supported, OpenVMS requires Frigate 0.17 or later";
       const fetchMock = vi.fn(stubApi({

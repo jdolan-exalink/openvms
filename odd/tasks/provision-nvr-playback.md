@@ -2,7 +2,7 @@
 
 Objective: the playback screen shows the recordings of a registered recorder's cameras. Builds on `odd/tasks/provision-nvr-live-video.md` (PR #277, the go2rtc container).
 Branch: `feat/nvr-playback`. Delivery strategy: `ask-on-risk`. Runner: `go test ./internal/...`, `go test -tags integration`, `pnpm --dir apps/web test`.
-Status: T1-T5 built and verified on the real unit; not pushed, not merged, not deployed.
+Status: T1-T5 built and verified on the real unit, merged to `main` (PR #278; export of recorder footage in #282, timeline motion in #279) and deployed with the `main` deploy of 2026-11-04.
 
 ## Specs
 

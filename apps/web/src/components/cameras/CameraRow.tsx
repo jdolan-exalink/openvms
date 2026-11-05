@@ -2,6 +2,8 @@ import { Settings } from "lucide-react";
 import type { Schemas } from "@/api/client";
 import { BodyClassifySwitch } from "@/components/BodyClassifySwitch";
 import { Icon } from "@/components/Icon";
+import { cn } from "@/lib/cn";
+import { ReceptionLed } from "@/components/provision/ReceptionLed";
 import { Button, LinkButton, StatusBadge } from "@/components/ui";
 import { isVirtualCamera } from "@/lib/cameraTree";
 
@@ -83,7 +85,10 @@ export function CameraRow({
         {c.display_name !== c.remote_name && <div className="truncate font-mono text-xs text-muted">{c.remote_name}</div>}
         {c.missing_since && <div role="status" className="text-xs text-warn">{recorder ? "Ya no aparece en el NVR" : "Ya no aparece en Frigate"}</div>}
       </div>
-      <div className={COL.status}>{c.enabled ? <StatusBadge status={c.status} /> : <span className="text-xs text-muted">Deshabilitada</span>}</div>
+      <div className={cn(COL.status, "flex flex-col items-start gap-1")}>
+        {c.enabled ? <StatusBadge status={c.status} /> : <span className="text-xs text-muted">Deshabilitada</span>}
+        <ReceptionLed reception={c.analytics_reception} />
+      </div>
       <div className={`${COL.fps} font-mono text-xs tabular-nums`}>{c.fps != null ? c.fps.toFixed(1) : "—"}</div>
       <div className={`${COL.zones} text-xs text-muted`} title={c.zones.join(", ")}>{c.zones.join(", ") || "—"}</div>
       {/* Only the switch is visible; its label stays for assistive tech. */}

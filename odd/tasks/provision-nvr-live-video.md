@@ -2,7 +2,7 @@
 
 Objective: the live viewer plays the cameras of a registered Provision-ISR recorder. Builds on `odd/tasks/provision-isr-nvr.md` (Phase 1) and PR #276.
 Branch: `feat/nvr-live-video` (stacked on `feat/nvr-live-honesty`). Delivery strategy: `ask-on-risk`. Runner: `go test ./internal/...`, `go test -tags integration`, `pnpm --dir apps/web test`.
-Status: T1-T5 built and verified on the real unit; PR open, not merged, not deployed.
+Status: T1-T5 built and verified on the real unit, merged to `main` (PR #277, after #276) and deployed with the `main` deploy of 2026-11-04.
 
 ## Specs
 
