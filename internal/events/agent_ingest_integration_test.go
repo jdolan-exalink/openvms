@@ -17,6 +17,7 @@ import (
 	"github.com/jdolan-exalink/openvms/internal/events"
 	"github.com/jdolan-exalink/openvms/internal/provision"
 	"github.com/jdolan-exalink/openvms/internal/store"
+	"github.com/jdolan-exalink/openvms/internal/store/db"
 	"github.com/jdolan-exalink/openvms/internal/testutil/pgtest"
 )
 
@@ -887,3 +888,49 @@ func TestAgentIngestorFaceAndPeopleCountingAnalytics(t *testing.T) {
 }
 
 
+
+func TestAgentIngestRecordsWhenTheCameraLastReportedAndNeverMovesItBack(t *testing.T) {
+	w := newIngestWorld(t)
+	ctx := context.Background()
+	lastReception := func(camera uuid.UUID) *time.Time {
+		t.Helper()
+		var at *time.Time
+		if err := w.st.TxRaw(ctx, store.AllTenants, func(tx pgx.Tx) error {
+			return tx.QueryRow(ctx, `SELECT last_provision_event_at FROM cameras WHERE id = $1`, camera).Scan(&at)
+		}); err != nil {
+			t.Fatal(err)
+		}
+		return at
+	}
+	if lastReception(w.camA) != nil {
+		t.Fatal("a camera that never reported must have no reception time")
+	}
+
+	w.agent.add(w.camA.String(), "AB123CD", nil, t0.Add(time.Minute))
+	w.ing.IngestAll(ctx)
+	if at := lastReception(w.camA); at == nil || !at.Equal(t0.Add(time.Minute)) {
+		t.Fatalf("after one reading at t0+1m the reception time = %v", at)
+	}
+	if at := lastReception(w.camOtherServer); at != nil {
+		t.Fatalf("a camera that reported nothing must stay empty, got %v", at)
+	}
+
+	// An older reading arriving later (a replayed queue) must not move the time back.
+	w.agent.add(w.camA.String(), "EF456GH", nil, t0)
+	w.ing.IngestAll(ctx)
+	if at := lastReception(w.camA); at == nil || !at.Equal(t0.Add(time.Minute)) {
+		t.Fatalf("an older reading moved the reception time to %v", at)
+	}
+
+	// The server rows carry the newest time of their cameras, and the epoch when there is none.
+	var srv db.GetServerRow
+	if err := w.st.TxRaw(ctx, store.AllTenants, func(tx pgx.Tx) (err error) {
+		srv, err = db.New(tx).GetServer(ctx, w.server)
+		return err
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if !srv.LastProvisionEventAt.Equal(t0.Add(time.Minute)) || srv.ProvisionIngestError != "" {
+		t.Fatalf("server row: last=%v error=%q", srv.LastProvisionEventAt, srv.ProvisionIngestError)
+	}
+}

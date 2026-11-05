@@ -6400,6 +6400,8 @@ components:
       type: object
       required: [id, kind, tenant_id, site_id, name, base_url, auth_mode, username, tls_skip_verify, frigate_version, capabilities, status, last_error, camera_count, created_at, updated_at]
       properties:
+        analytics_reception:
+          $ref: "#/components/schemas/AnalyticsReception"
         id: { type: string, format: uuid }
         kind: { $ref: "#/components/schemas/ServerKind" }
         tenant_id: { type: string, format: uuid }
@@ -7223,10 +7225,25 @@ components:
         has_frigate_config:
           type: boolean
           description: True when the camera's Frigate block was kept, so restoring can put it back.
+    AnalyticsReception:
+      type: object
+      description: >-
+        Whether the analytics a Provision camera or recorder reports are reaching central. `receiving`: one
+        arrived in the last 24 hours. `idle`: none did. `down`: the last pull from the agent failed.
+      required: [state]
+      properties:
+        state: { type: string, enum: [receiving, idle, down] }
+        last_event_at:
+          type: string
+          format: date-time
+          nullable: true
+          description: When central last received an analytic. Null when none arrived since this was recorded.
     Camera:
       type: object
       required: [id, tenant_id, site_id, server_id, remote_name, display_name, enabled, zones, lpr, status, group_ids, folder_id, sort_order, default_live_quality, description, location, tags, created_at, updated_at]
       properties:
+        analytics_reception:
+          $ref: "#/components/schemas/AnalyticsReception"
         id: { type: string, format: uuid }
         tenant_id: { type: string, format: uuid }
         site_id: { type: string, format: uuid }

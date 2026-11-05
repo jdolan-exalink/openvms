@@ -49,7 +49,9 @@ SELECT count(*)::int FROM sites WHERE tenant_id = @tenant_id AND deleted_at IS N
 SELECT fs.*,
     (SELECT count(*) FROM cameras c WHERE c.server_id = fs.id AND c.deleted_at IS NULL)::int AS camera_count,
     ah.last_seen_at AS agent_last_seen_at, ah.version AS agent_version, ah.status AS agent_status,
-    COALESCE(acx.expires, to_timestamp(0))::timestamptz AS agent_cert_expires_at
+    COALESCE(acx.expires, to_timestamp(0))::timestamptz AS agent_cert_expires_at,
+    COALESCE((SELECT max(c.last_provision_event_at) FROM cameras c WHERE c.server_id = fs.id AND c.deleted_at IS NULL), to_timestamp(0))::timestamptz AS last_provision_event_at,
+    coalesce((SELECT sc.last_error FROM server_agent_event_cursors sc WHERE sc.server_id = fs.id), '')::text AS provision_ingest_error
 FROM frigate_servers fs
 LEFT JOIN agent_heartbeats ah ON ah.server_id = fs.id
 LEFT JOIN (
@@ -77,7 +79,9 @@ SELECT * FROM frigate_servers WHERE deleted_at IS NULL AND kind = 'provision_nvr
 SELECT fs.*,
     (SELECT count(*) FROM cameras c WHERE c.server_id = fs.id AND c.deleted_at IS NULL)::int AS camera_count,
     ah.last_seen_at AS agent_last_seen_at, ah.version AS agent_version, ah.status AS agent_status,
-    COALESCE(acx.expires, to_timestamp(0))::timestamptz AS agent_cert_expires_at
+    COALESCE(acx.expires, to_timestamp(0))::timestamptz AS agent_cert_expires_at,
+    COALESCE((SELECT max(c.last_provision_event_at) FROM cameras c WHERE c.server_id = fs.id AND c.deleted_at IS NULL), to_timestamp(0))::timestamptz AS last_provision_event_at,
+    coalesce((SELECT sc.last_error FROM server_agent_event_cursors sc WHERE sc.server_id = fs.id), '')::text AS provision_ingest_error
 FROM frigate_servers fs
 LEFT JOIN agent_heartbeats ah ON ah.server_id = fs.id
 LEFT JOIN (
@@ -92,7 +96,9 @@ WHERE fs.id = @id AND fs.deleted_at IS NULL;
 SELECT fs.*,
     (SELECT count(*) FROM cameras c WHERE c.server_id = fs.id AND c.deleted_at IS NULL)::int AS camera_count,
     ah.last_seen_at AS agent_last_seen_at, ah.version AS agent_version, ah.status AS agent_status,
-    COALESCE(acx.expires, to_timestamp(0))::timestamptz AS agent_cert_expires_at
+    COALESCE(acx.expires, to_timestamp(0))::timestamptz AS agent_cert_expires_at,
+    COALESCE((SELECT max(c.last_provision_event_at) FROM cameras c WHERE c.server_id = fs.id AND c.deleted_at IS NULL), to_timestamp(0))::timestamptz AS last_provision_event_at,
+    coalesce((SELECT sc.last_error FROM server_agent_event_cursors sc WHERE sc.server_id = fs.id), '')::text AS provision_ingest_error
 FROM frigate_servers fs
 LEFT JOIN agent_heartbeats ah ON ah.server_id = fs.id
 LEFT JOIN (

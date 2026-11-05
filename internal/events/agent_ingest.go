@@ -440,6 +440,11 @@ RETURNING id, (xmax = 0)`,
 			if err != nil {
 				return fmt.Errorf("store agent event %s: %w", e.ID, err)
 			}
+			// The reception LED reads this; the latest of the times seen wins, so a replayed older event
+			// never moves it back.
+			if _, err := tx.Exec(ctx, `UPDATE cameras SET last_provision_event_at = greatest(coalesce(last_provision_event_at, $2), $2) WHERE id = $1`, cam, seen.UTC()); err != nil {
+				return fmt.Errorf("record the reception time of agent event %s: %w", e.ID, err)
+			}
 			if isNew {
 				eventIngested = true
 				ev := NewEvent{

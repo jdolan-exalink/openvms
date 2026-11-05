@@ -24,7 +24,7 @@ func toEvent(e events.Event) gen.Event {
 	source := gen.EventSource(events.SourceOf(e.RemoteID))
 	out := gen.Event{
 		Source: &source,
-		Id: e.ID, TenantId: e.TenantID, SiteId: e.SiteID, SiteName: e.SiteName,
+		Id:     e.ID, TenantId: e.TenantID, SiteId: e.SiteID, SiteName: e.SiteName,
 		ServerId: e.ServerID, ServerName: e.ServerName, CameraId: e.CameraID, CameraName: e.CameraName,
 		RemoteId: e.RemoteID, Severity: gen.Severity(e.Severity), Labels: e.Labels, SubLabels: e.SubLabels,
 		Zones: e.Zones, Plates: e.Plates, StartTime: e.StartTime, EndTime: e.EndTime,

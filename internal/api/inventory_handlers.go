@@ -11,8 +11,10 @@ import (
 
 	"github.com/jdolan-exalink/openvms/internal/api/gen"
 	"github.com/jdolan-exalink/openvms/internal/authz"
+	"github.com/jdolan-exalink/openvms/internal/camconfig"
 	"github.com/jdolan-exalink/openvms/internal/frigate"
 	"github.com/jdolan-exalink/openvms/internal/inventory"
+	"github.com/jdolan-exalink/openvms/internal/provision"
 	"github.com/jdolan-exalink/openvms/internal/store/db"
 )
 
@@ -233,6 +235,7 @@ func toServer(s inventory.ServerView) gen.Server {
 		Status: gen.HealthStatus(s.Status), LastSeenAt: s.LastSeenAt, LastCheckedAt: s.LastCheckedAt,
 		LastError: s.LastError, CameraCount: int(s.CameraCount), CreatedAt: s.CreatedAt, UpdatedAt: s.UpdatedAt,
 	}
+	out.AnalyticsReception = serverReception(s)
 	out.AgentLastSeenAt, out.AgentVersion = s.AgentLastSeenAt, s.AgentVersion
 	// The query reports "no certificate in use" as the Unix epoch (sqlc cannot type a nullable
 	// aggregate), which is not a possible expiry.
@@ -424,7 +427,36 @@ func toCamera(c db.GetCameraRow) gen.Camera {
 	if c.HqCodec != "" {
 		out.HqCodec = &c.HqCodec
 	}
+	out.AnalyticsReception = cameraReception(c)
 	return out
+}
+
+// cameraReception says whether the analytics of a Provision camera reach central. A camera that is not a
+// Provision camera and never reported one carries no state, so the screen shows no LED for it.
+func cameraReception(c db.GetCameraRow) *gen.AnalyticsReception {
+	if c.LastProvisionEventAt == nil && !camconfig.ProvisionEvidence(camconfig.Inventory{Tags: c.Tags, ONVIFCapabilities: c.OnvifCapabilities}) {
+		return nil
+	}
+	return &gen.AnalyticsReception{
+		State:       gen.AnalyticsReceptionState(provision.Reception(c.LastProvisionEventAt, "", time.Now())),
+		LastEventAt: c.LastProvisionEventAt,
+	}
+}
+
+// serverReception is the same for a Provision recorder. Its channels are cameras, so the last analytic is the
+// newest one of any channel; the server rows carry the Unix epoch when there is none.
+func serverReception(s inventory.ServerView) *gen.AnalyticsReception {
+	if s.Kind != inventory.KindProvisionNVR {
+		return nil
+	}
+	var last *time.Time
+	if s.LastProvisionEventAt.Unix() > 0 {
+		last = &s.LastProvisionEventAt
+	}
+	return &gen.AnalyticsReception{
+		State:       gen.AnalyticsReceptionState(provision.Reception(last, s.ProvisionIngestError, time.Now())),
+		LastEventAt: last,
+	}
 }
 
 func (h *Handlers) ListCameras(ctx context.Context, r gen.ListCamerasRequestObject) (gen.ListCamerasResponseObject, error) {
