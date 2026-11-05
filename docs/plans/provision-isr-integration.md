@@ -1,6 +1,6 @@
 # Provision-ISR NVR integration: plan
 
-Status: plan plus Phase 1 in progress (feature doc `odd/tasks/provision-isr-nvr.md`). Written against the
+Status: Phase 1, live video, playback and export are merged and deployed (feature docs `odd/tasks/provision-isr-nvr.md`, `provision-nvr-live-video.md`, `provision-nvr-playback.md`); the event receiver and analytics ingestion are merged (see the table in section 5). Updated 2026-11-05. Written against the
 real code of `main` at `22ed557` and against one real recorder, probed read-only on 2026-10-27.
 
 Rule of this document: nothing about the manufacturer's protocols is assumed. Every statement is tagged
@@ -200,14 +200,15 @@ import of channels as cameras, health, web add-device flow, docs and compatibili
 and why:** live and recorded video (RTSP URL format unknown; ONVIF not answering; no RTSP-to-browser pipeline
 for non-Frigate sources), PTZ (not called yet), events, native playback.
 
-| Phase | Content | Blocked on |
+| Phase | Content | State (2026-11-05) |
 |---|---|---|
-| 2 | HTTP POST / alarm-server event receiver in the Site Agent, raw payload debugger, parser framework, event normalizer, snapshots, `/v1/provision-nvr/*` agent route | REQUIRES PAYLOAD SAMPLE; alarm-server module of the unit |
-| 3 | Analytics events (motion, line crossing, zones, LPR, face, counting) from real payloads | Phase 2 samples |
-| 4 | Native API / SDK (port 6036, API Server) | REQUIRES SDK DOCUMENTATION |
-| 5 | Playback and hybrid recording | NVMS playback commands called for real, or SDK; stream pipeline |
-| 6 | Object metadata, trajectories | real payloads |
-| Video | Stream URLs and live view for NVR channels | RTSP URL format (docs or the recorder's display), or ONVIF enabled on the unit, plus a non-Frigate stream pipeline |
+| 1 | Server kind, read-only client, detection, channel import, health, add-device flow | Merged and deployed (PR #274, edit in #275) |
+| 2 | HTTP POST / alarm-server receiver in the Site Agent, raw capture of unrecognised payloads, normalizer, snapshots | Merged (`odd/tasks/provision-isr-plugin.md`, `provision-isr-ingest.md`). E0.4, the real run against the I6 camera, is still open: it needs the camera |
+| 3 | Analytics events (LPR with coordinates and vehicle attributes, face sightings, people counting, smart analytics, NVR channel mapping) | Merged (PR #290, #291, commits `cd2f791`, `12868ff`). A real-payload check per analytic is open |
+| 4 | Native API / SDK (port 6036, API Server) | Open: REQUIRES SDK DOCUMENTATION |
+| 5 | Playback and hybrid recording | Playback and export merged (PR #278, #282). Hybrid recording not started |
+| 6 | Object metadata, trajectories | Open: real payloads |
+| Video | Live view for NVR channels through the go2rtc container | Merged and deployed (PR #277) |
 
 ## 6. Risks and unknowns
 

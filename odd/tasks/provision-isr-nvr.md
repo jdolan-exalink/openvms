@@ -2,7 +2,7 @@
 
 Objective: add Provision-ISR NVRs to OpenVMS as an alternative to Frigate servers. Plan: `docs/plans/provision-isr-integration.md`.
 Branch: `feat/provision-nvr-phase1`. Delivery strategy: `ask-on-risk`. Runner: `go test ./internal/...`, `go test -tags integration`, `pnpm --dir apps/web test`.
-Status: T1-T6 done on the branch; waiting for the owner to try it. Not pushed, not merged.
+Status: T1-T6 done, merged to `main` (PR #274; recorder edit in #275) and deployed with the `main` deploy of 2026-11-04.
 
 ## Specs
 
