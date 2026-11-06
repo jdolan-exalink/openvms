@@ -13,7 +13,7 @@ export function ArPlate({ plate, large = false }: { plate: string; large?: boole
       ? `${raw.slice(0, 2)} ${raw.slice(2, 5)} ${raw.slice(5)}`
       : plate.toUpperCase();
   return (
-    <span className={cn("inline-flex overflow-hidden rounded-[4px] border shadow-sm", large ? "h-9 text-lg" : "h-6 text-[11px]", classic ? "border-neutral-900 bg-black text-white" : "border-[#0b2f6b] bg-white text-black")} aria-label={`Patente ${raw || plate}`}>
+    <span className={cn("inline-flex shrink-0 overflow-hidden rounded-[4px] border shadow-sm", large ? "h-9 text-lg" : "h-6 text-[11px]", classic ? "border-neutral-900 bg-black text-white" : "border-[#0b2f6b] bg-white text-black")} aria-label={`Patente ${raw || plate}`}>
       <span className="sr-only">{raw || plate}</span>
       {!classic && (
         <span className={cn("flex flex-col items-center justify-center bg-[#003399] font-bold leading-none text-white", large ? "w-7 text-[9px]" : "w-4 text-[7px]")} aria-hidden>
@@ -21,7 +21,7 @@ export function ArPlate({ plate, large = false }: { plate: string; large?: boole
           AR
         </span>
       )}
-      <span className={cn("flex items-center px-1.5 font-black tracking-[0.14em]", classic && "px-2")}>{shown}</span>
+      <span className={cn("flex items-center whitespace-nowrap px-1.5 font-black tracking-[0.14em]", classic && "px-2")}>{shown}</span>
     </span>
   );
 }
