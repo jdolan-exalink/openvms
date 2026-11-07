@@ -25,10 +25,10 @@ PRs per slice, merge only on the user's word. Test runner: `go test ./internal/f
 
 ## Tasks
 - T1 (S2) Backend: automatic unknown groups (cluster proposals from embeddings) and recurrence, no schema change. Route: inline. Status: done (clusters.go, unknown_clusters.go, GET /faces/review-inbox/clusters; unit tests green, API tests green).
-- T2 (S2, S6, S7) Retention: see `odd/tasks/retention-settings.md`. Status: in progress on branch `feat/retention-settings` (stacked on this one).
+- T2 (S2, S6, S7) Retention: see `odd/tasks/retention-settings.md`. Status: done (PR #302, merged; U1-U3 done: migration 00090, `/api/v1/system/retention`, Settings > Retention page). Per-server Frigate retention is not covered, see the retention doc.
 - T3 (S3, S4) Web data layer: the live feed and the history merge `recognitions` (known) with `review-inbox` (unknown sightings) and refetch on an interval; no new endpoint. Route: inline. Status: done (lib/faceFeed.ts, 5 tests).
 - T4 (S2, S4, S5) Web: Faces page with the new tabs En vivo and Desconocidos. Route: inline. Status: done (LiveTab, UnknownsTab, lib/faceClusters.ts; the page opens on En vivo; full web suite 2386 tests green).
-- T5 (S3, S1) Web: Personas detail, Historial, CSV, Reglas y ajustes. Route: inline. Status: partial. Done: CSV export of the recognition history (lib/faceExport.ts, formula-safe). Already existing and kept: per-person recent recognitions in the detail, per-server detection/recognition/unknown thresholds in Config. Pending: persisted recurrence rule (needs T2).
+- T5 (S3, S1) Web: Personas detail, Historial, CSV, Reglas y ajustes. Route: inline. Status: partial. Done: CSV export of the recognition history (lib/faceExport.ts, formula-safe). Already existing and kept: per-person recent recognitions in the detail, per-server detection/recognition/unknown thresholds in Config. Pending: persisted recurrence rule ("propose a person after N appearances in M days", S1). T2 no longer blocks it; unknown clusters are already ranked by recurrence (T1) but the rule itself is not stored or evaluated.
 - T6 Docs, tests and PRs. Route: inline. Status: pending.
 
 ## Log
@@ -38,3 +38,4 @@ PRs per slice, merge only on the user's word. Test runner: `go test ./internal/f
 - L4 (2026-11-02, decision): T3 changed from a new backend endpoint to a web-side merge of two existing endpoints; unknown sightings carry no camera (server and time only), so the history shows the server for them. Reason: smaller and reversible, and the same pattern the Live "Tótem Rostros" channel already uses.
 - L5 (2026-11-02, user): "dale, armá la retención con 30 días, la retención de openvms tenemos que poder configurarla en configuración así que hay que pensar eso y ahí poder variar las retenciones y obviamente tener en cuenta retenciones de los servidores y espacio en el volumen de guardado"
 - L6 (2026-11-02, user): "Para toda la plataforma, dale"
+- L7 (2026-11-07): status reconciled with `main`. The slice PR #301 (live and grouped-unknown tabs, T1/T3/T4) and the retention PR #302 (T2) are merged. Related faces PRs merged after it: #303 (zoom crop), #305 (enable faces on all cameras), #306 (zoom upscale fix). Open: the recurrence rule (T5) and T6 (docs, tests, final PRs); the 30-day default still needs a check against Ley 25.326 (S6).
