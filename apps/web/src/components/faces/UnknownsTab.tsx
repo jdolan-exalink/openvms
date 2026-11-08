@@ -124,14 +124,15 @@ export function UnknownsTab({ canManage }: { canManage: boolean }) {
   const t = useT();
   const [scope, setScope] = useState<Scope>(emptyScope);
   const [sort, setSort] = useState<Sort>("recurrence");
-  const [minAppearances, setMinAppearances] = useState(3);
-  const [windowDays, setWindowDays] = useState(7);
+  // null means "the saved platform rule"; the page only overrides it once the operator types a value.
+  const [minAppearances, setMinAppearances] = useState<number | null>(null);
+  const [windowDays, setWindowDays] = useState<number | null>(null);
   const clusters = useQuery(
     faceUnknownClustersQuery({
       site_id: scope.site ? [scope.site] : undefined,
       server_id: scope.server ? [scope.server] : undefined,
-      min_appearances: minAppearances,
-      window_days: windowDays,
+      min_appearances: minAppearances ?? undefined,
+      window_days: windowDays ?? undefined,
     }),
   );
   const persons = useQuery(facePersonsQuery());
@@ -195,10 +196,10 @@ export function UnknownsTab({ canManage }: { canManage: boolean }) {
           </Button>
         </div>
         <Field label={t("faces.unknownMinAppearances")}>
-          <TextInput type="number" min={1} max={100} value={minAppearances} onChange={(e) => setMinAppearances(Math.min(100, Math.max(1, Number(e.target.value) || 1)))} />
+          <TextInput type="number" min={1} max={100} value={minAppearances ?? clusters.data?.rule.min_appearances ?? ""} onChange={(e) => setMinAppearances(Math.min(100, Math.max(1, Number(e.target.value) || 1)))} />
         </Field>
         <Field label={t("faces.unknownWindowDays")}>
-          <TextInput type="number" min={1} max={365} value={windowDays} onChange={(e) => setWindowDays(Math.min(365, Math.max(1, Number(e.target.value) || 1)))} />
+          <TextInput type="number" min={1} max={365} value={windowDays ?? clusters.data?.rule.window_days ?? ""} onChange={(e) => setWindowDays(Math.min(365, Math.max(1, Number(e.target.value) || 1)))} />
         </Field>
       </div>
       {canManage && items.length > 0 && (

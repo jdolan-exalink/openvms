@@ -11,7 +11,7 @@ const view = (faceDays: number) => ({
   faces_pending: { records: 120, bytes: 5 * 1024 ** 2 },
 });
 
-function stub(opts: { faceDays?: number; previewRecords?: number; onPut?: (body: unknown) => void; forbidden?: boolean } = {}) {
+function stub(opts: { faceDays?: number; previewRecords?: number; onPut?: (body: unknown) => void; onRulePut?: (body: unknown) => void; forbidden?: boolean } = {}) {
   const calls: string[] = [];
   vi.stubGlobal(
     "fetch",
@@ -19,6 +19,12 @@ function stub(opts: { faceDays?: number; previewRecords?: number; onPut?: (body:
       const url = new URL(input.url);
       calls.push(`${input.method} ${url.pathname}${url.search}`);
       if (opts.forbidden) return json({ code: "forbidden", message: "you do not have permission for this action" }, 403);
+      if (url.pathname === "/api/v1/system/faces/recurrence" && input.method === "PUT") {
+        const body = await input.json();
+        opts.onRulePut?.(body);
+        return json({ ...(body as object), updated_at: "2026-11-08T10:00:00Z" });
+      }
+      if (url.pathname === "/api/v1/system/faces/recurrence") return json({ min_appearances: 3, window_days: 7, updated_at: "2026-11-02T10:00:00Z" });
       if (url.pathname === "/api/v1/system/retention/preview") return json({ records: opts.previewRecords ?? 0, bytes: 2048 });
       if (url.pathname === "/api/v1/system/retention" && input.method === "PUT") {
         const body = await input.json();
@@ -33,6 +39,21 @@ function stub(opts: { faceDays?: number; previewRecords?: number; onPut?: (body:
 }
 
 describe("Retention", () => {
+  it("shows the recurrence rule and saves a new one on its own", async () => {
+    let rule: unknown;
+    let put: unknown;
+    stub({ onRulePut: (b) => (rule = b), onPut: (b) => (put = b) });
+    renderPage(Retention);
+    expect(await screen.findByLabelText("Apariciones para marcar como recurrente")).toHaveValue(3);
+    expect(screen.getByLabelText("En los últimos (días)")).toHaveValue(7);
+    fireEvent.change(screen.getByLabelText("Apariciones para marcar como recurrente"), { target: { value: "5" } });
+    fireEvent.change(screen.getByLabelText("En los últimos (días)"), { target: { value: "14" } });
+    fireEvent.click(screen.getByRole("button", { name: "Guardar regla" }));
+    await waitFor(() => expect(rule).toEqual({ min_appearances: 5, window_days: 14 }));
+    expect(await screen.findByText("Regla guardada.")).toBeInTheDocument();
+    expect(put).toBeUndefined(); // the retention periods are not sent along
+  });
+
   it("shows the current periods, the volume and the faces stored", async () => {
     stub();
     renderPage(Retention);

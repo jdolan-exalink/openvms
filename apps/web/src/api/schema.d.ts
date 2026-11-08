@@ -103,6 +103,31 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/system/faces/recurrence": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * The rule that marks a group of unknown faces as recurrent
+         * @description Needs the platform-level tenant.manage permission, because the rule applies to every tenant.
+         */
+        get: operations["getFaceRecurrence"];
+        /**
+         * Change the rule that marks a group of unknown faces as recurrent
+         * @description The faces page uses this rule unless the request names its own min_appearances and window_days.
+         *     Needs the platform-level tenant.manage permission.
+         */
+        put: operations["updateFaceRecurrence"];
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/system/retention/preview": {
         parameters: {
             query?: never;
@@ -2921,7 +2946,8 @@ export interface paths {
          * Pending face sightings grouped by similarity (faces.view)
          * @description Proposes groups of unknown faces that look like the same person, with how often and how recently
          *     they were seen. Nothing is stored: the groups are computed on read. A group is recurrent when it
-         *     has at least min_appearances sightings inside the last window_days days.
+         *     has at least min_appearances sightings inside the last window_days days. A parameter left out
+         *     takes the saved platform rule (see getFaceRecurrence); the rule that was applied is in the answer.
          */
         get: operations["listFaceUnknownClusters"];
         put?: never;
@@ -6686,6 +6712,17 @@ export interface components {
             /** @description Volume usage that triggers the early cleanup */
             pressure_percent: number;
         };
+        /** @description A group of unknown faces is recurrent when it has min_appearances sightings inside the last window_days days. */
+        FaceRecurrenceInput: {
+            min_appearances: number;
+            window_days: number;
+        };
+        FaceRecurrenceSettings: components["schemas"]["FaceRecurrenceInput"] & {
+            /** Format: date-time */
+            updated_at: string;
+            /** Format: uuid */
+            updated_by?: string | null;
+        };
         RetentionSettings: components["schemas"]["RetentionInput"] & {
             /** Format: date-time */
             updated_at: string;
@@ -7247,6 +7284,7 @@ export interface components {
         };
         FaceUnknownClusters: {
             items: components["schemas"]["FaceUnknownCluster"][];
+            rule: components["schemas"]["FaceRecurrenceInput"];
         };
         FaceSuggestionDecisionCreate: {
             /** Format: uuid */
@@ -8851,6 +8889,55 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["RetentionSettings"];
+                };
+            };
+            400: components["responses"]["BadRequest"];
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+        };
+    };
+    getFaceRecurrence: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The rule */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["FaceRecurrenceSettings"];
+                };
+            };
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+        };
+    };
+    updateFaceRecurrence: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["FaceRecurrenceInput"];
+            };
+        };
+        responses: {
+            /** @description Saved */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["FaceRecurrenceSettings"];
                 };
             };
             400: components["responses"]["BadRequest"];

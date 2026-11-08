@@ -26,5 +26,11 @@ const messages = {
   confirmBody: "Con {days} días se van a borrar {count} rostros sin nombre ({size}) en la próxima hora. No se puede deshacer.",
   confirmAction: "Borrar y guardar",
   keep: "Volver",
+  recurrenceTitle: "Recurrencia de rostros sin nombre",
+  recurrenceHint: "Un grupo de rostros sin nombre se marca como recurrente cuando tiene al menos esta cantidad de apariciones dentro del período. La página de rostros usa esta regla salvo que la cambies ahí.",
+  recurrenceMin: "Apariciones para marcar como recurrente",
+  recurrenceWindow: "En los últimos (días)",
+  recurrenceSave: "Guardar regla",
+  recurrenceSaved: "Regla guardada.",
 } as const;
 export default messages;

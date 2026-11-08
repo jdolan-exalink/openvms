@@ -28,7 +28,7 @@ function install(clusters: Schemas["FaceUnknownCluster"][], failAssignAt = -1) {
     calls.push(call);
     if (url.pathname === "/api/v1/me") return json({ id: "u1", username: "u1", display_name: "u1", mfa_enabled: false, must_change_password: false, auth_method: "session", tenant_id: "t1", grants: ["faces.view", "faces.manage"].map((permission) => ({ permission, effect: "allow", scope_type: "platform" })) });
     if (url.pathname === "/api/v1/faces/persons") return json({ items: [{ id: "p1", display_name: "Ana" }] });
-    if (url.pathname === "/api/v1/faces/review-inbox/clusters") return json({ items: clusters });
+    if (url.pathname === "/api/v1/faces/review-inbox/clusters") return json({ items: clusters, rule: { min_appearances: 4, window_days: 10 } });
     if (/^\/api\/v1\/faces\/review-inbox\/[^/]+\/assign$/.test(url.pathname)) {
       const n = assigned++;
       if (n === failAssignAt) return json({ code: "internal", message: "boom" }, 500);
@@ -47,7 +47,7 @@ async function openUnknowns() {
 }
 
 describe("Unknown faces", () => {
-  it("shows each group with its size, days and a recurrent flag, and asks for the rule it was given", async () => {
+  it("shows each group with its size, days and a recurrent flag, and leaves the rule to the saved platform one", async () => {
     const calls = install([cluster(), cluster({ id: "other", sighting_ids: ["x"], identity_ids: ["x"], sighting_count: 1, distinct_days: 1, recurrent: false })]);
     await openUnknowns();
     const items = await screen.findAllByRole("listitem");
@@ -57,8 +57,11 @@ describe("Unknown faces", () => {
     expect(within(items[1]!).queryByText("Recurrente")).not.toBeInTheDocument();
     expect(within(items[0]!).getByRole("img")).toHaveAttribute("src", `/api/v1/faces/review-inbox/${ids[1]}/image`);
     const ask = calls.find((c) => c.path === "/api/v1/faces/review-inbox/clusters")!;
-    expect(ask.search.get("min_appearances")).toBe("3");
-    expect(ask.search.get("window_days")).toBe("7");
+    // No rule is sent: the server applies the saved one and the page shows what it applied.
+    expect(ask.search.has("min_appearances")).toBe(false);
+    expect(ask.search.has("window_days")).toBe(false);
+    expect(screen.getByLabelText("Apariciones para marcar como recurrente")).toHaveValue(4);
+    expect(screen.getByLabelText("En los últimos (días)")).toHaveValue(10);
   });
 
   it("names a whole group: creates the person once and reuses it for the other appearances", async () => {
