@@ -1,7 +1,7 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useState } from "react";
 import { api, unwrap, type Schemas } from "@/api/client";
-import { retentionQuery } from "@/api/queries";
+import { faceRecurrenceQuery, retentionQuery } from "@/api/queries";
 import { ConfirmDialog } from "@/components/ConfirmDialog";
 import { Button, Card, ErrorNote, Field, PageHeader, Select, Switch, TextInput } from "@/components/ui";
 import { useT } from "@/i18n";
@@ -50,6 +50,54 @@ function DaysInput({ label, value, onChange, allowDefault, disabled }: { label: 
         )}
       </div>
     </Field>
+  );
+}
+
+/**
+ * The rule that marks a group of unnamed faces as recurrent. It is saved on its own: it changes what the
+ * faces page flags, never what is deleted, so it skips the retention confirmation.
+ */
+function RecurrenceCard() {
+  const t = useT();
+  const qc = useQueryClient();
+  const rule = useQuery(faceRecurrenceQuery);
+  const [draft, setDraft] = useState<{ min: number; window: number } | null>(null);
+  const [saved, setSaved] = useState(false);
+  const save = useMutation({
+    mutationFn: async (v: { min: number; window: number }) =>
+      unwrap(await api.PUT("/api/v1/system/faces/recurrence", { body: { min_appearances: v.min, window_days: v.window } })),
+    onSuccess: () => {
+      setDraft(null);
+      setSaved(true);
+      void qc.invalidateQueries({ queryKey: ["system", "faces", "recurrence"] });
+      void qc.invalidateQueries({ queryKey: ["faces"] });
+    },
+  });
+  if (!rule.data) return null;
+  const form = draft ?? { min: rule.data.min_appearances, window: rule.data.window_days };
+  const edit = (patch: Partial<typeof form>) => {
+    setDraft({ ...form, ...patch });
+    setSaved(false);
+  };
+  return (
+    <Card title={t("retention.recurrenceTitle")}>
+      <p className="text-sm text-on-surface-variant">{t("retention.recurrenceHint")}</p>
+      <div className="flex flex-wrap items-end gap-3">
+        <Field label={t("retention.recurrenceMin")}>
+          <TextInput type="number" className="w-28" min={1} max={100} value={form.min} onChange={(e) => edit({ min: Math.min(100, Math.max(1, Math.trunc(Number(e.target.value)) || 1)) })} />
+        </Field>
+        <Field label={t("retention.recurrenceWindow")}>
+          <TextInput type="number" className="w-28" min={1} max={365} value={form.window} onChange={(e) => edit({ window: Math.min(365, Math.max(1, Math.trunc(Number(e.target.value)) || 1)) })} />
+        </Field>
+      </div>
+      <ErrorNote error={save.error} />
+      <div className="flex items-center gap-3">
+        <Button variant="tonal" disabled={save.isPending || !draft} onClick={() => save.mutate(form)}>
+          {t("retention.recurrenceSave")}
+        </Button>
+        {saved && <span role="status" className="text-sm text-on-surface-variant">{t("retention.recurrenceSaved")}</span>}
+      </div>
+    </Card>
   );
 }
 
@@ -133,6 +181,7 @@ export function Retention() {
             <DaysInput label={t("retention.facesTitle")} value={form.faces} onChange={(faces) => edit({ faces })} />
             {pending && <p className="text-sm text-on-surface-variant">{t("retention.facesStored", { count: pending.records, size: fmtBytes(pending.bytes) })}</p>}
           </Card>
+          <RecurrenceCard />
           <Card title={t("retention.notificationsTitle")}>
             <DaysInput label={t("retention.deliveredLabel")} value={form.delivered} allowDefault onChange={(delivered) => edit({ delivered })} />
             <DaysInput label={t("retention.readLabel")} value={form.read} allowDefault onChange={(read) => edit({ read })} />

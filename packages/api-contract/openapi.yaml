@@ -125,6 +125,41 @@ paths:
         "400": { $ref: "#/components/responses/BadRequest" }
         "401": { $ref: "#/components/responses/Unauthorized" }
         "403": { $ref: "#/components/responses/Forbidden" }
+  /api/v1/system/faces/recurrence:
+    get:
+      tags: [system]
+      operationId: getFaceRecurrence
+      summary: The rule that marks a group of unknown faces as recurrent
+      description: Needs the platform-level tenant.manage permission, because the rule applies to every tenant.
+      responses:
+        "200":
+          description: The rule
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/FaceRecurrenceSettings" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+    put:
+      tags: [system]
+      operationId: updateFaceRecurrence
+      summary: Change the rule that marks a group of unknown faces as recurrent
+      description: |
+        The faces page uses this rule unless the request names its own min_appearances and window_days.
+        Needs the platform-level tenant.manage permission.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/FaceRecurrenceInput" }
+      responses:
+        "200":
+          description: Saved
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/FaceRecurrenceSettings" }
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
   /api/v1/system/retention/preview:
     get:
       tags: [system]
@@ -3610,13 +3645,14 @@ paths:
       description: |
         Proposes groups of unknown faces that look like the same person, with how often and how recently
         they were seen. Nothing is stored: the groups are computed on read. A group is recurrent when it
-        has at least min_appearances sightings inside the last window_days days.
+        has at least min_appearances sightings inside the last window_days days. A parameter left out
+        takes the saved platform rule (see getFaceRecurrence); the rule that was applied is in the answer.
       parameters:
         - { name: tenant_id, in: query, schema: { type: string, format: uuid } }
         - { name: site_id, in: query, style: form, explode: true, schema: { type: array, items: { type: string, format: uuid } } }
         - { name: server_id, in: query, style: form, explode: true, schema: { type: array, items: { type: string, format: uuid } } }
-        - { name: min_appearances, in: query, schema: { type: integer, minimum: 1, maximum: 100, default: 3 } }
-        - { name: window_days, in: query, schema: { type: integer, minimum: 1, maximum: 365, default: 7 } }
+        - { name: min_appearances, in: query, schema: { type: integer, minimum: 1, maximum: 100 } }
+        - { name: window_days, in: query, schema: { type: integer, minimum: 1, maximum: 365 } }
       responses:
         "200":
           description: Groups, largest first
@@ -8279,6 +8315,21 @@ components:
         notification_read_days: { type: integer, minimum: 0, maximum: 3650, nullable: true }
         pressure_cleanup: { type: boolean, description: Halve the cleanable retentions while the volume is over its limit }
         pressure_percent: { type: integer, minimum: 50, maximum: 99, description: Volume usage that triggers the early cleanup }
+    FaceRecurrenceInput:
+      type: object
+      description: A group of unknown faces is recurrent when it has min_appearances sightings inside the last window_days days.
+      required: [min_appearances, window_days]
+      properties:
+        min_appearances: { type: integer, minimum: 1, maximum: 100 }
+        window_days: { type: integer, minimum: 1, maximum: 365 }
+    FaceRecurrenceSettings:
+      allOf:
+        - $ref: "#/components/schemas/FaceRecurrenceInput"
+        - type: object
+          required: [updated_at]
+          properties:
+            updated_at: { type: string, format: date-time }
+            updated_by: { type: string, format: uuid, nullable: true }
     RetentionSettings:
       allOf:
         - $ref: "#/components/schemas/RetentionInput"
@@ -8824,9 +8875,10 @@ components:
         recurrent: { type: boolean }
     FaceUnknownClusters:
       type: object
-      required: [items]
+      required: [items, rule]
       properties:
         items: { type: array, items: { $ref: "#/components/schemas/FaceUnknownCluster" } }
+        rule: { $ref: "#/components/schemas/FaceRecurrenceInput" }
     FaceSuggestionDecisionCreate:
       type: object
       required: [sighting_id, other_sighting_id, decision, similarity]

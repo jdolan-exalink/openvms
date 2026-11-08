@@ -26,6 +26,12 @@ export const retentionQuery = queryOptions({
   retry: false,
 });
 
+export const faceRecurrenceQuery = queryOptions({
+  queryKey: ["system", "faces", "recurrence"],
+  queryFn: async () => unwrap(await api.GET("/api/v1/system/faces/recurrence")),
+  retry: false,
+});
+
 export const classifyPolicyQuery = queryOptions({
   queryKey: ["classify", "policy"],
   queryFn: async () => unwrap(await api.GET("/api/v1/classify/policy")),

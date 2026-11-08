@@ -26,5 +26,11 @@ const messages = {
   confirmBody: "Com {days} dias, {count} rostos sem nome ({size}) serão apagados dentro de uma hora. Não dá para desfazer.",
   confirmAction: "Apagar e salvar",
   keep: "Voltar",
+  recurrenceTitle: "Recorrência de rostos sem nome",
+  recurrenceHint: "Um grupo de rostos sem nome é marcado como recorrente quando tem pelo menos esta quantidade de aparições dentro do período. A página de rostos usa esta regra, a menos que você a altere lá.",
+  recurrenceMin: "Aparições para marcar como recorrente",
+  recurrenceWindow: "Nos últimos (dias)",
+  recurrenceSave: "Salvar regra",
+  recurrenceSaved: "Regra salva.",
 } as const;
 export default messages;

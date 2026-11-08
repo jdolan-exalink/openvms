@@ -492,6 +492,14 @@ type FacePersonImage struct {
 	CreatedAt   time.Time
 }
 
+type FaceRecurrenceSetting struct {
+	Singleton      bool
+	MinAppearances int32
+	WindowDays     int32
+	UpdatedAt      time.Time
+	UpdatedBy      *uuid.UUID
+}
+
 type FaceRemoteCleanup struct {
 	TenantID    uuid.UUID
 	ServerID    uuid.UUID

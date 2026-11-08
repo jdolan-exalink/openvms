@@ -433,25 +433,37 @@ func (h *Handlers) ListFaceReviewInbox(ctx context.Context, r gen.ListFaceReview
 	return out, nil
 }
 
+// clusterRuleFor applies the values a request names over the saved platform rule.
+func clusterRuleFor(saved faces.ClusterRule, minAppearances, windowDays *int) faces.ClusterRule {
+	if minAppearances != nil {
+		saved.MinAppearances = *minAppearances
+	}
+	if windowDays != nil {
+		saved.WindowDays = *windowDays
+	}
+	return saved
+}
+
 func (h *Handlers) ListFaceUnknownClusters(ctx context.Context, r gen.ListFaceUnknownClustersRequestObject) (gen.ListFaceUnknownClustersResponseObject, error) {
 	a, err := actor(ctx)
 	if err != nil {
 		return nil, err
 	}
-	rule := faces.DefaultClusterRule
-	if r.Params.MinAppearances != nil {
-		rule.MinAppearances = *r.Params.MinAppearances
+	saved, err := h.Faces.SavedClusterRule(ctx)
+	if err != nil {
+		return nil, err
 	}
-	if r.Params.WindowDays != nil {
-		rule.WindowDays = *r.Params.WindowDays
-	}
+	rule := clusterRuleFor(saved, r.Params.MinAppearances, r.Params.WindowDays)
 	clusters, err := h.Faces.ListUnknownClusters(ctx, a, faces.TrainFilter{
 		TenantID: r.Params.TenantId, SiteIDs: uuids(r.Params.SiteId), ServerIDs: uuids(r.Params.ServerId),
 	}, rule)
 	if err != nil {
 		return nil, err
 	}
-	out := gen.ListFaceUnknownClusters200JSONResponse{Items: make([]gen.FaceUnknownCluster, 0, len(clusters))}
+	out := gen.ListFaceUnknownClusters200JSONResponse{
+		Items: make([]gen.FaceUnknownCluster, 0, len(clusters)),
+		Rule:  gen.FaceRecurrenceInput{MinAppearances: rule.MinAppearances, WindowDays: rule.WindowDays},
+	}
 	for _, c := range clusters {
 		out.Items = append(out.Items, gen.FaceUnknownCluster{
 			Id: c.ID, SightingIds: c.SightingIDs, IdentityIds: c.IdentityIDs, SightingCount: c.SightingCount,

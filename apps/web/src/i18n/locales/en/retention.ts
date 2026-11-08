@@ -26,5 +26,11 @@ const messages = {
   confirmBody: "With {days} days, {count} unnamed faces ({size}) will be deleted within the hour. This cannot be undone.",
   confirmAction: "Delete and save",
   keep: "Go back",
+  recurrenceTitle: "Unnamed face recurrence",
+  recurrenceHint: "A group of unnamed faces is flagged as recurrent when it has at least this many sightings inside the period. The faces page uses this rule unless you change it there.",
+  recurrenceMin: "Appearances to flag as recurrent",
+  recurrenceWindow: "In the last (days)",
+  recurrenceSave: "Save rule",
+  recurrenceSaved: "Rule saved.",
 } as const;
 export default messages;
