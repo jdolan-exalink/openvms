@@ -45,7 +45,7 @@ Test runner: `cd apps/web && npx vitest run <paths>`; `npx tsc --noEmit`. Visual
 - T1 (S1-S8) — Camera list. Route `apps/web/src/routes/Cameras.tsx`. INLINE/DELEGATED: delegated writer (parallel unit).
 - T2 (S9-S10) — Camera configuration regrouping. Route `apps/web/src/routes/FrigateCameraConfig.tsx`,
   `apps/web/src/lib/cameraTabs.ts`, `apps/web/src/components/camera/**`. Delegated writer (parallel unit).
-- T3 (S11) — Integrate, run the full web suite and typecheck, open the PR, merge.
+- T3 (S11) — Integrate, run the full web suite and typecheck, open the PR, merge. DONE: PR #295 merged as `7a64b33`.
 
 ## Log
 

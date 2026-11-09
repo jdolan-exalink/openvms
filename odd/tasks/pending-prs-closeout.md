@@ -10,8 +10,8 @@ Complete the closed but unmerged ONVIF and Faces work, resolve the current integ
 - [x] ONVIF edge snapshots (#170): rebase against current main, regenerate clients, verify edge/API behavior and security bounds, then merge after #169 if shared changes require stacking.
 - [x] Faces inbox and grouping (#191/#192, with #193 already merged into #192's head): restore as a stacked chain, rebase against current main, regenerate contracts, verify Go and web behavior, then merge in dependency order.
 - [x] Alarm integration failures: update stale integration expectations to the transactional outbox and current face-label redaction behavior; production code unchanged.
-- [ ] Main verification: Go lint/unit/vulnerability checks, integration suite, web checks, Docker image builds, Compose smoke.
-- [ ] Local deployment and smoke test after all merge commits; retain the deploy script's backup and health-check behavior.
+- [x] Main verification: Go lint/unit/vulnerability checks, integration suite, web checks, Docker image builds, Compose smoke. Covered by the CI checks of #312 (merged as `0209257`): Go (lint, unit tests, vuln), Go integration (containers), Web, Docker images, Compose smoke test, all passing.
+- [x] Local deployment and smoke test after all merge commits; retain the deploy script's backup and health-check behavior. `make deploy` of `0209257` on 2026-11-09: backup and rollback tag kept, migration 91 to 92, `/healthz` 200.
 - [ ] Hailo hardware inference acceptance: verify only if the local host exposes a Hailo device and matching driver; otherwise record the host requirement as the remaining external check.
 
 ## Constraints
