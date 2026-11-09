@@ -187,6 +187,8 @@ const messages = {
   unknownSelect: "Selecionar",
   unknownSelectDone: "Concluir",
   unknownSelectAll: "Selecionar tudo",
+  unknownShowing: "Mostrando {shown} de {total} grupos",
+  unknownShowMore: "Mostrar mais",
   unknownSelectNone: "Limpar seleção",
   unknownSelectGroup: "Selecionar grupo",
   unknownSelectedCount: "{count} selecionados",

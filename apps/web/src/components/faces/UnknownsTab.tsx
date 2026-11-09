@@ -15,6 +15,9 @@ const NEW_PERSON = "__new__";
 type Cluster = Schemas["FaceUnknownCluster"];
 type Sort = "recurrence" | "recent";
 
+/** Groups drawn at once. A busy site has tens of thousands of single-sighting groups; drawing them all freezes the page. */
+const PAGE_SIZE = 48;
+
 function ClusterCard({ cluster, persons, canManage, selected, onToggle }: {
   cluster: Cluster;
   persons: Schemas["FacePerson"][];
@@ -127,6 +130,7 @@ export function UnknownsTab({ canManage }: { canManage: boolean }) {
   // null means "the saved platform rule"; the page only overrides it once the operator types a value.
   const [minAppearances, setMinAppearances] = useState<number | null>(null);
   const [windowDays, setWindowDays] = useState<number | null>(null);
+  const [limit, setLimit] = useState(PAGE_SIZE);
   const clusters = useQuery(
     faceUnknownClustersQuery({
       site_id: scope.site ? [scope.site] : undefined,
@@ -148,6 +152,7 @@ export function UnknownsTab({ canManage }: { canManage: boolean }) {
     return list;
   }, [clusters.data, sort]);
 
+  const visible = items.slice(0, limit);
   const chosen = items.filter((c) => selected.has(c.id));
   const chosenSightings = chosen.reduce((n, c) => n + c.sighting_count, 0);
   const deleteSelected = useMutation({
@@ -185,21 +190,21 @@ export function UnknownsTab({ canManage }: { canManage: boolean }) {
   return (
     <div className="flex flex-col gap-4">
       <p className="text-sm text-on-surface-variant">{t("faces.unknownIntro")}</p>
-      <ScopeFilters value={scope} onChange={setScope} />
+      <ScopeFilters value={scope} onChange={(next) => { setScope(next); setLimit(PAGE_SIZE); }} />
       <div className="flex flex-wrap items-end gap-3">
         <div className="flex gap-1" role="group" aria-label={t("faces.unknownSortRecurrence")}>
-          <Button variant={sort === "recurrence" ? "tonal" : "text"} aria-pressed={sort === "recurrence"} onClick={() => setSort("recurrence")}>
+          <Button variant={sort === "recurrence" ? "tonal" : "text"} aria-pressed={sort === "recurrence"} onClick={() => { setSort("recurrence"); setLimit(PAGE_SIZE); }}>
             {t("faces.unknownSortRecurrence")}
           </Button>
-          <Button variant={sort === "recent" ? "tonal" : "text"} aria-pressed={sort === "recent"} onClick={() => setSort("recent")}>
+          <Button variant={sort === "recent" ? "tonal" : "text"} aria-pressed={sort === "recent"} onClick={() => { setSort("recent"); setLimit(PAGE_SIZE); }}>
             {t("faces.unknownSortRecent")}
           </Button>
         </div>
         <Field label={t("faces.unknownMinAppearances")}>
-          <TextInput type="number" min={1} max={100} value={minAppearances ?? clusters.data?.rule.min_appearances ?? ""} onChange={(e) => setMinAppearances(Math.min(100, Math.max(1, Number(e.target.value) || 1)))} />
+          <TextInput type="number" min={1} max={100} value={minAppearances ?? clusters.data?.rule.min_appearances ?? ""} onChange={(e) => { setMinAppearances(Math.min(100, Math.max(1, Number(e.target.value) || 1))); setLimit(PAGE_SIZE); }} />
         </Field>
         <Field label={t("faces.unknownWindowDays")}>
-          <TextInput type="number" min={1} max={365} value={windowDays ?? clusters.data?.rule.window_days ?? ""} onChange={(e) => setWindowDays(Math.min(365, Math.max(1, Number(e.target.value) || 1)))} />
+          <TextInput type="number" min={1} max={365} value={windowDays ?? clusters.data?.rule.window_days ?? ""} onChange={(e) => { setWindowDays(Math.min(365, Math.max(1, Number(e.target.value) || 1))); setLimit(PAGE_SIZE); }} />
         </Field>
       </div>
       {canManage && items.length > 0 && (
@@ -217,8 +222,8 @@ export function UnknownsTab({ canManage }: { canManage: boolean }) {
           </Button>
           {selecting && (
             <>
-              <Button variant="text" onClick={() => setSelected(selected.size === items.length ? new Set() : new Set(items.map((c) => c.id)))}>
-                {selected.size === items.length ? t("faces.unknownSelectNone") : t("faces.unknownSelectAll")}
+              <Button variant="text" onClick={() => setSelected(visible.every((c) => selected.has(c.id)) ? new Set() : new Set(visible.map((c) => c.id)))}>
+                {visible.every((c) => selected.has(c.id)) ? t("faces.unknownSelectNone") : t("faces.unknownSelectAll")}
               </Button>
               <span role="status" className="text-sm text-on-surface-variant">{t("faces.unknownSelectedCount", { count: selected.size })}</span>
               <Button variant="danger" disabled={selected.size === 0} onClick={() => setConfirmDelete(true)}>
@@ -232,7 +237,7 @@ export function UnknownsTab({ canManage }: { canManage: boolean }) {
       <ErrorNote error={clusters.error} />
       {clusters.isSuccess && items.length === 0 && <Empty>{t("faces.unknownEmpty")}</Empty>}
       <ul className="grid grid-cols-[repeat(auto-fill,minmax(230px,1fr))] gap-3">
-        {items.map((cluster) => (
+        {visible.map((cluster) => (
           <ClusterCard
             key={cluster.id}
             cluster={cluster}
@@ -243,6 +248,12 @@ export function UnknownsTab({ canManage }: { canManage: boolean }) {
           />
         ))}
       </ul>
+      {items.length > visible.length && (
+        <div className="flex flex-wrap items-center gap-3">
+          <span role="status" className="text-sm text-on-surface-variant">{t("faces.unknownShowing", { shown: visible.length, total: items.length })}</span>
+          <Button variant="outlined" onClick={() => setLimit(limit + PAGE_SIZE)}>{t("faces.unknownShowMore")}</Button>
+        </div>
+      )}
       {confirmDelete && (
         <ConfirmDialog
           title={t("faces.unknownDeleteSelectedTitle", { count: chosen.length })}
