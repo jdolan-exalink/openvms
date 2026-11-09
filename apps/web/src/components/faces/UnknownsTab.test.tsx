@@ -139,6 +139,28 @@ describe("Unknown faces", () => {
     expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
   });
 
+  it("draws only the first groups of a long list and shows more on request", async () => {
+    const many = Array.from({ length: 120 }, (_, i) => cluster({ id: `g${i}`, sighting_ids: [`s${i}`], identity_ids: [`s${i}`], sighting_count: 1, best_sighting_id: `s${i}`, recurrent: false }));
+    install(many);
+    await openUnknowns();
+    expect(await screen.findAllByRole("listitem")).toHaveLength(48);
+    expect(screen.getByText("Mostrando 48 de 120 grupos")).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "Mostrar más" }));
+    expect(screen.getAllByRole("listitem")).toHaveLength(96);
+    fireEvent.click(screen.getByRole("button", { name: "Mostrar más" }));
+    expect(screen.getAllByRole("listitem")).toHaveLength(120);
+    expect(screen.queryByRole("button", { name: "Mostrar más" })).not.toBeInTheDocument();
+  });
+
+  it("selects only the groups on screen when asked to select all", async () => {
+    const many = Array.from({ length: 120 }, (_, i) => cluster({ id: `g${i}`, sighting_ids: [`s${i}`], identity_ids: [`s${i}`], sighting_count: 1, best_sighting_id: `s${i}`, recurrent: false }));
+    install(many);
+    await openUnknowns();
+    fireEvent.click(await screen.findByRole("button", { name: "Seleccionar" }));
+    fireEvent.click(screen.getByRole("button", { name: "Seleccionar todo" }));
+    expect(screen.getByText("48 seleccionados")).toBeInTheDocument();
+  });
+
   it("sends the recurrence rule the operator typed", async () => {
     const calls = install([cluster()]);
     await openUnknowns();
