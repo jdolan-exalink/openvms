@@ -71,7 +71,8 @@ representative sweep of all 5 servers (2026-10-31).
   IN PROGRESS (casa01): deployed fixed 0.4.7 and confirmed service recovery plus the stored agent
   token on `/v1/metrics`; OpenVMS API registration remains unverified. Other hosts remain pending.
 - T4 (S3) — Verify + guarantee self-signed HTTPS acceptance end-to-end (session open and proxy);
-  no error surfaced to the user.
+  no error surfaced to the user. DONE (see L4: `TestProxiesSelfSignedHTTPSCamera` in
+  `internal/agent/camproxy/camproxy_test.go`).
 - T5 (S4) — NVR web view: allow opening the NVR device's web (address = server base_url host, e.g.
   192.168.68.200) as a proxy target for provision_nvr servers.
 - T6 (S5) — Offer the existing SSH discovery/recovery dialog from unknown/unreachable agent status;
