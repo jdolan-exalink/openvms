@@ -558,6 +558,7 @@ type FaceSighting struct {
 	EmbeddedAt       *time.Time
 	EmbedFailures    int16
 	FaceDetected     *bool
+	ClusterID        *uuid.UUID
 }
 
 type FaceSuggestionDecision struct {

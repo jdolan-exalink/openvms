@@ -1,4 +1,4 @@
-import { infiniteQueryOptions, queryOptions } from "@tanstack/react-query";
+import { infiniteQueryOptions, keepPreviousData, queryOptions } from "@tanstack/react-query";
 import { api, unwrap, type Schemas } from "./client";
 
 export const readinessQuery = queryOptions({
@@ -619,13 +619,21 @@ export const faceReviewInboxQuery = (filter: FaceTrainFilter = {}) =>
     refetchInterval: 10_000,
   });
 
-export type FaceUnknownClusterFilter = FaceTrainFilter & { min_appearances?: number; window_days?: number };
+export type FaceUnknownClusterFilter = FaceTrainFilter & {
+  min_appearances?: number;
+  window_days?: number;
+  limit?: number;
+  offset?: number;
+  sort?: "recurrence" | "recent";
+};
 
 export const faceUnknownClustersQuery = (filter: FaceUnknownClusterFilter = {}) =>
   queryOptions({
     queryKey: ["faces", "review-inbox", "clusters", filter],
     queryFn: async () => unwrap(await api.GET("/api/v1/faces/review-inbox/clusters", { params: { query: filter } })),
     refetchInterval: 15_000,
+    // "Show more" asks for a longer page: keep the groups on screen while it loads.
+    placeholderData: keepPreviousData,
   });
 
 export type FaceRecognitionFilter = {

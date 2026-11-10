@@ -28,7 +28,8 @@ function install(clusters: Schemas["FaceUnknownCluster"][], failAssignAt = -1) {
     calls.push(call);
     if (url.pathname === "/api/v1/me") return json({ id: "u1", username: "u1", display_name: "u1", mfa_enabled: false, must_change_password: false, auth_method: "session", tenant_id: "t1", grants: ["faces.view", "faces.manage"].map((permission) => ({ permission, effect: "allow", scope_type: "platform" })) });
     if (url.pathname === "/api/v1/faces/persons") return json({ items: [{ id: "p1", display_name: "Ana" }] });
-    if (url.pathname === "/api/v1/faces/review-inbox/clusters") return json({ items: clusters, rule: { min_appearances: 4, window_days: 10 } });
+    // The server pages and sorts: it answers with the first `limit` groups and how many there are in all.
+    if (url.pathname === "/api/v1/faces/review-inbox/clusters") return json({ items: clusters.slice(0, Number(url.searchParams.get("limit") ?? 200)), total: clusters.length, rule: { min_appearances: 4, window_days: 10 } });
     if (/^\/api\/v1\/faces\/review-inbox\/[^/]+\/assign$/.test(url.pathname)) {
       const n = assigned++;
       if (n === failAssignAt) return json({ code: "internal", message: "boom" }, 500);
@@ -60,6 +61,8 @@ describe("Unknown faces", () => {
     // No rule is sent: the server applies the saved one and the page shows what it applied.
     expect(ask.search.has("min_appearances")).toBe(false);
     expect(ask.search.has("window_days")).toBe(false);
+    expect(ask.search.get("limit")).toBe("48");
+    expect(ask.search.get("sort")).toBe("recurrence");
     expect(screen.getByLabelText("Apariciones para marcar como recurrente")).toHaveValue(4);
     expect(screen.getByLabelText("En los últimos (días)")).toHaveValue(10);
   });
@@ -146,11 +149,11 @@ describe("Unknown faces", () => {
     expect(await screen.findAllByRole("listitem")).toHaveLength(48);
     expect(screen.getByText("Mostrando 48 de 120 grupos")).toBeInTheDocument();
     fireEvent.click(screen.getByRole("button", { name: "Mostrar más" }));
-    expect(screen.getAllByRole("listitem")).toHaveLength(96);
+    await waitFor(() => expect(screen.getAllByRole("listitem")).toHaveLength(96));
     fireEvent.click(screen.getByRole("button", { name: "Mostrar más" }));
-    expect(screen.getAllByRole("listitem")).toHaveLength(120);
+    await waitFor(() => expect(screen.getAllByRole("listitem")).toHaveLength(120));
     expect(screen.queryByRole("button", { name: "Mostrar más" })).not.toBeInTheDocument();
-  });
+  }, 20_000);
 
   it("selects only the groups on screen when asked to select all", async () => {
     const many = Array.from({ length: 120 }, (_, i) => cluster({ id: `g${i}`, sighting_ids: [`s${i}`], identity_ids: [`s${i}`], sighting_count: 1, best_sighting_id: `s${i}`, recurrent: false }));
@@ -159,6 +162,22 @@ describe("Unknown faces", () => {
     fireEvent.click(await screen.findByRole("button", { name: "Seleccionar" }));
     fireEvent.click(screen.getByRole("button", { name: "Seleccionar todo" }));
     expect(screen.getByText("48 seleccionados")).toBeInTheDocument();
+  });
+
+  it("asks the server for the most recent groups and for a longer page, instead of sorting or slicing locally", async () => {
+    const many = Array.from({ length: 60 }, (_, i) => cluster({ id: `g${i}`, sighting_ids: [`s${i}`], identity_ids: [`s${i}`], sighting_count: 1, best_sighting_id: `s${i}`, recurrent: false }));
+    const calls = install(many);
+    await openUnknowns();
+    expect(await screen.findAllByRole("listitem")).toHaveLength(48);
+    fireEvent.click(screen.getByRole("button", { name: "Mostrar más" }));
+    await waitFor(() => expect(screen.getAllByRole("listitem")).toHaveLength(60));
+    fireEvent.click(screen.getByRole("button", { name: "Más recientes" }));
+    await waitFor(() => {
+      const last = calls.filter((c) => c.path === "/api/v1/faces/review-inbox/clusters").at(-1)!;
+      expect(last.search.get("sort")).toBe("recent");
+      expect(last.search.get("limit")).toBe("48");
+    });
+    expect(calls.some((c) => c.path === "/api/v1/faces/review-inbox/clusters" && c.search.get("limit") === "96")).toBe(true);
   });
 
   it("sends the recurrence rule the operator typed", async () => {

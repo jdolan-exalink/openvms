@@ -67,3 +67,18 @@ FROM face_suggestion_decisions GROUP BY decision;
 Verdicts only exist for pairs at or above the current threshold, so they can justify raising it
 (`different` verdicts piling up near the threshold) but cannot show same-person pairs that were never
 suggested, so they cannot justify lowering it.
+
+## Unknown face groups
+
+The worker groups the pending unknown faces by similarity (threshold 0.60) and stores the result in
+`face_sightings.cluster_id`; the Unknown tab reads it with server-side paging
+(`GET /api/v1/faces/review-inbox/clusters?limit=&offset=&sort=`). A pass runs once a minute and does
+nothing until an embedded face has no group yet. Look for `unknown faces grouped` in the worker log, which
+reports how long a pass took.
+
+- A face that arrived after the last pass shows as a group of one until the next pass.
+- A manual group or a "different" verdict changes the groups the next time a pass runs, which is when new
+  embedded faces arrive.
+- The recurrence rule and the sort are applied when reading, so changing them needs no new pass.
+- A full pass compares each face with every group, so it grows with the pending faces (about a minute for
+  22,000). It runs in the worker, never in a request.
