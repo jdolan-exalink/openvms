@@ -139,6 +139,7 @@ func run() error {
 		&faces.Service{Store: st, Blobs: objects, Log: log}, log)
 	go runFaceReviewIngestion(ctx, &faces.ReviewIngestor{Store: st, Blobs: objects, Adapters: adapters, Log: log}, log)
 	go runFaceEmbedding(ctx, st, objects, log)
+	go runFaceClusters(ctx, &faces.Service{Store: st, Blobs: objects, Log: log}, log)
 
 	rulesSvc := rules.NewService(st, &jetstreamPublisher{js: js}, log)
 	rulesSvc.ZoneResolver = rules.NewStoreZoneResolver(st)
@@ -377,6 +378,31 @@ func runFaceReviewIngestion(ctx context.Context, ingestor *faces.ReviewIngestor,
 			return
 		case <-ticker.C:
 			run()
+		}
+	}
+}
+
+// runFaceClusters groups the pending unknown faces by similarity and stores the groups, so the faces page
+// reads them instead of computing them on each request. A pass does nothing until a face has been embedded
+// that no earlier pass grouped.
+func runFaceClusters(ctx context.Context, svc *faces.Service, log *slog.Logger) {
+	ticker := time.NewTicker(time.Minute)
+	defer ticker.Stop()
+	for {
+		passCtx, cancel := context.WithTimeout(ctx, 15*time.Minute)
+		started := time.Now()
+		n, err := svc.RefreshUnknownClusters(passCtx)
+		cancel()
+		if err != nil && ctx.Err() == nil {
+			log.WarnContext(ctx, "group unknown faces", "error", err)
+		}
+		if n > 0 {
+			log.InfoContext(ctx, "unknown faces grouped", "tenants", n, "took", time.Since(started).Round(time.Millisecond).String())
+		}
+		select {
+		case <-ctx.Done():
+			return
+		case <-ticker.C:
 		}
 	}
 }

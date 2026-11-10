@@ -3644,18 +3644,26 @@ paths:
       summary: Pending face sightings grouped by similarity (faces.view)
       description: |
         Proposes groups of unknown faces that look like the same person, with how often and how recently
-        they were seen. Nothing is stored: the groups are computed on read. A group is recurrent when it
+        they were seen. The worker groups the faces in the background and stores the result, so a face that
+        arrived after the last pass is a group of one until the next pass. A group is recurrent when it
         has at least min_appearances sightings inside the last window_days days. A parameter left out
         takes the saved platform rule (see getFaceRecurrence); the rule that was applied is in the answer.
+        The answer is one page: total is the number of groups in all, and limit and offset select the page.
       parameters:
         - { name: tenant_id, in: query, schema: { type: string, format: uuid } }
         - { name: site_id, in: query, style: form, explode: true, schema: { type: array, items: { type: string, format: uuid } } }
         - { name: server_id, in: query, style: form, explode: true, schema: { type: array, items: { type: string, format: uuid } } }
         - { name: min_appearances, in: query, schema: { type: integer, minimum: 1, maximum: 100 } }
         - { name: window_days, in: query, schema: { type: integer, minimum: 1, maximum: 365 } }
+        - { name: limit, in: query, description: Groups per page, schema: { type: integer, minimum: 1, maximum: 200, default: 48 } }
+        - { name: offset, in: query, schema: { type: integer, minimum: 0, default: 0 } }
+        - name: sort
+          in: query
+          description: "recurrence: recurrent groups first, then the largest. recent: the most recently seen first."
+          schema: { type: string, enum: [recurrence, recent], default: recurrence }
       responses:
         "200":
-          description: Groups, largest first
+          description: One page of groups, in the requested order
           content:
             application/json:
               schema: { $ref: "#/components/schemas/FaceUnknownClusters" }
@@ -8875,10 +8883,11 @@ components:
         recurrent: { type: boolean }
     FaceUnknownClusters:
       type: object
-      required: [items, rule]
+      required: [items, rule, total]
       properties:
         items: { type: array, items: { $ref: "#/components/schemas/FaceUnknownCluster" } }
         rule: { $ref: "#/components/schemas/FaceRecurrenceInput" }
+        total: { type: integer, description: Number of groups in all, before paging }
     FaceSuggestionDecisionCreate:
       type: object
       required: [sighting_id, other_sighting_id, decision, similarity]

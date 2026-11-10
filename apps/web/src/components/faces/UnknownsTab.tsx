@@ -1,5 +1,5 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { useMemo, useState } from "react";
+import { useState } from "react";
 import { type Schemas } from "@/api/client";
 import { facePersonsQuery, faceReviewSightingImageUrl, faceUnknownClustersQuery } from "@/api/queries";
 import { ConfirmDialog } from "@/components/ConfirmDialog";
@@ -137,6 +137,8 @@ export function UnknownsTab({ canManage }: { canManage: boolean }) {
       server_id: scope.server ? [scope.server] : undefined,
       min_appearances: minAppearances ?? undefined,
       window_days: windowDays ?? undefined,
+      sort,
+      limit,
     }),
   );
   const persons = useQuery(facePersonsQuery());
@@ -145,14 +147,9 @@ export function UnknownsTab({ canManage }: { canManage: boolean }) {
   const [selected, setSelected] = useState<Set<string>>(new Set());
   const [confirmDelete, setConfirmDelete] = useState(false);
   const [deleteHint, setDeleteHint] = useState<string | null>(null);
-  const items = useMemo(() => {
-    const list = [...(clusters.data?.items ?? [])];
-    if (sort === "recent") list.sort((a, b) => b.last_seen_at.localeCompare(a.last_seen_at));
-    else list.sort((a, b) => Number(b.recurrent) - Number(a.recurrent) || b.sighting_count - a.sighting_count);
-    return list;
-  }, [clusters.data, sort]);
-
-  const visible = items.slice(0, limit);
+  // The server sorts and pages: the list is exactly the groups on screen.
+  const items = clusters.data?.items ?? [];
+  const total = clusters.data?.total ?? 0;
   const chosen = items.filter((c) => selected.has(c.id));
   const chosenSightings = chosen.reduce((n, c) => n + c.sighting_count, 0);
   const deleteSelected = useMutation({
@@ -222,8 +219,8 @@ export function UnknownsTab({ canManage }: { canManage: boolean }) {
           </Button>
           {selecting && (
             <>
-              <Button variant="text" onClick={() => setSelected(visible.every((c) => selected.has(c.id)) ? new Set() : new Set(visible.map((c) => c.id)))}>
-                {visible.every((c) => selected.has(c.id)) ? t("faces.unknownSelectNone") : t("faces.unknownSelectAll")}
+              <Button variant="text" onClick={() => setSelected(items.every((c) => selected.has(c.id)) ? new Set() : new Set(items.map((c) => c.id)))}>
+                {items.every((c) => selected.has(c.id)) ? t("faces.unknownSelectNone") : t("faces.unknownSelectAll")}
               </Button>
               <span role="status" className="text-sm text-on-surface-variant">{t("faces.unknownSelectedCount", { count: selected.size })}</span>
               <Button variant="danger" disabled={selected.size === 0} onClick={() => setConfirmDelete(true)}>
@@ -237,7 +234,7 @@ export function UnknownsTab({ canManage }: { canManage: boolean }) {
       <ErrorNote error={clusters.error} />
       {clusters.isSuccess && items.length === 0 && <Empty>{t("faces.unknownEmpty")}</Empty>}
       <ul className="grid grid-cols-[repeat(auto-fill,minmax(230px,1fr))] gap-3">
-        {visible.map((cluster) => (
+        {items.map((cluster) => (
           <ClusterCard
             key={cluster.id}
             cluster={cluster}
@@ -248,9 +245,9 @@ export function UnknownsTab({ canManage }: { canManage: boolean }) {
           />
         ))}
       </ul>
-      {items.length > visible.length && (
+      {total > items.length && (
         <div className="flex flex-wrap items-center gap-3">
-          <span role="status" className="text-sm text-on-surface-variant">{t("faces.unknownShowing", { shown: visible.length, total: items.length })}</span>
+          <span role="status" className="text-sm text-on-surface-variant">{t("faces.unknownShowing", { shown: items.length, total })}</span>
           <Button variant="outlined" onClick={() => setLimit(limit + PAGE_SIZE)}>{t("faces.unknownShowMore")}</Button>
         </div>
       )}

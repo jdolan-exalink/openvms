@@ -2945,9 +2945,11 @@ export interface paths {
         /**
          * Pending face sightings grouped by similarity (faces.view)
          * @description Proposes groups of unknown faces that look like the same person, with how often and how recently
-         *     they were seen. Nothing is stored: the groups are computed on read. A group is recurrent when it
+         *     they were seen. The worker groups the faces in the background and stores the result, so a face that
+         *     arrived after the last pass is a group of one until the next pass. A group is recurrent when it
          *     has at least min_appearances sightings inside the last window_days days. A parameter left out
          *     takes the saved platform rule (see getFaceRecurrence); the rule that was applied is in the answer.
+         *     The answer is one page: total is the number of groups in all, and limit and offset select the page.
          */
         get: operations["listFaceUnknownClusters"];
         put?: never;
@@ -7285,6 +7287,8 @@ export interface components {
         FaceUnknownClusters: {
             items: components["schemas"]["FaceUnknownCluster"][];
             rule: components["schemas"]["FaceRecurrenceInput"];
+            /** @description Number of groups in all */
+            total: number;
         };
         FaceSuggestionDecisionCreate: {
             /** Format: uuid */
@@ -13505,6 +13509,11 @@ export interface operations {
                 server_id?: string[];
                 min_appearances?: number;
                 window_days?: number;
+                /** @description Groups per page */
+                limit?: number;
+                offset?: number;
+                /** @description recurrence: recurrent groups first, then the largest. recent: the most recently seen first. */
+                sort?: "recurrence" | "recent";
             };
             header?: never;
             path?: never;
@@ -13512,7 +13521,7 @@ export interface operations {
         };
         requestBody?: never;
         responses: {
-            /** @description Groups, largest first */
+            /** @description One page of groups, in the requested order */
             200: {
                 headers: {
                     [name: string]: unknown;
